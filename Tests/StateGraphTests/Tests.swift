@@ -13,6 +13,8 @@ struct Tests {
         
     #expect(c.wrappedValue == 30)
     
-    print(graph.graphViz())
+    a.wrappedValue = 40
+    
+    #expect(c.wrappedValue == 60)
   }
 }
