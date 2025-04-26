@@ -1,28 +1,25 @@
+import Combine
 
 public final class StateGraph {
 
   var nodes: [any Node] = []
   var currentNode: (any Node)?
-  
+      
   public init() {}
-
-  public func value<F: StateFragment>(_: F.Type) -> F {
-    fatalError()
-  }
   
-  public func nodes(where condition: (any Node) throws -> Bool) rethrows -> some Collection<Node> {
-    try nodes.filter { 
-      try condition($0)
-    }
-  }
-  
-  public func input<Value>(name: String, _ value: Value) -> StoredNode<Value> {
+  public func input<Value>(
+    name: String,
+    _ value: Value
+  ) -> StoredNode<Value> {
     let n = StoredNode(name: name, in: self, wrappedValue: value)
     nodes.append(n)   
     return n
   }
 
-  public func rule<Value>(name: String, _ rule: @escaping (StateGraph) -> Value) -> ComputedNode<Value> {
+  public func rule<Value>(
+    name: String,
+    _ rule: @escaping (StateGraph) -> Value
+  ) -> ComputedNode<Value> {
     let n = ComputedNode(name: name, in: self, rule: rule)
     nodes.append(n)
     return n
@@ -60,6 +57,24 @@ public protocol Node: AnyObject {
   var potentiallyDirty: Bool { get set }
   
   func recomputeIfNeeded()
+  
+  func stream() -> AsyncStream<Self>
+}
+
+extension Node {
+  public func stream() -> AsyncStream<Self> {
+    fatalError("TODO")
+  }
+}
+
+protocol StateView {
+  func stream() -> AsyncStream<Self>
+}
+
+extension StateView {
+  public func stream() -> AsyncStream<Self> {
+    fatalError("TODO")
+  }
 }
 
 /**
@@ -80,7 +95,7 @@ public protocol Node: AnyObject {
  */
 public final class StoredNode<Value>: Node {
   
-  unowned var graph: StateGraph
+  unowned let graph: StateGraph
   private var value: Value
   
   public var potentiallyDirty: Bool = false {
@@ -130,6 +145,10 @@ public final class StoredNode<Value>: Node {
   public func recomputeIfNeeded() {
     // no operation
   }
+  
+  deinit {    
+    Log.generic.debug("Deinit Stored: \(self.name)")
+  }
         
 }
 
@@ -154,7 +173,7 @@ public final class StoredNode<Value>: Node {
  */
 public final class ComputedNode<Value>: Node {
   
-  unowned var graph: StateGraph
+  unowned let graph: StateGraph
   private var _cachedValue: Value?
   
   public var potentiallyDirty: Bool = false {
@@ -240,17 +259,22 @@ public final class ComputedNode<Value>: Node {
     }
     incomingEdges = []
   }
+  
+  deinit {    
+    Log.generic.debug("Deinit Computed: \(self.name)")
+  }
+  
 }
 
 @DebugDescription
 public final class Edge: CustomDebugStringConvertible {
 
-  unowned var from: Node
-  unowned var to: Node
+  unowned let from: any Node
+  unowned let to: any Node
   
   var isPending: Bool = false
 
-  init(from: Node, to: Node) {
+  init(from: any Node, to: any Node) {
     self.from = from
     self.to = to
   }
@@ -258,4 +282,9 @@ public final class Edge: CustomDebugStringConvertible {
   public var debugDescription: String {
     "\(from.name) -> \(to.name)"
   }
+  
+  deinit {    
+    Log.generic.debug("Deinit Edge")
+  }
+  
 }

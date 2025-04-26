@@ -94,12 +94,11 @@ struct Tests {
     
   }
   
-  @Test
-  func db() {
+  @Test func db() {
     
     let graph = StateGraph()
     
-    class Author {
+    final class Author: StateView {
       let name: StoredNode<String>
       
       init(name: StoredNode<String>) {
@@ -107,9 +106,9 @@ struct Tests {
       }
     }
     
-    class Book {
+    final class Book: StateView {
       let author: Author
-      let title: StoredNode<String>   
+      let title: StoredNode<String> 
       
       init(author: Author, title: StoredNode<String>) {
         self.author = author
@@ -131,11 +130,39 @@ struct Tests {
     let mike = makeAuthor(name: "Mike")
     
     let book1 = makeBook(author: john)
+    #expect(book1.author.name.wrappedValue == "John")
+    
     let book2 = makeBook(author: mike)
+    #expect(book2.author.name.wrappedValue == "Mike")
     
     let books = graph.input(name: "books", [book1, book2])
     
+    let filteredBooksByJohn = graph.rule(name: "booksByJohn") { graph in
+      books
+        .wrappedValue
+        .filter {
+          $0.author.name.wrappedValue == "John"
+        }
+    }
+    
     #expect(books.wrappedValue.count == 2)
+    #expect(filteredBooksByJohn.wrappedValue.count == 1)
+    
+    // add new book
+    do {
+      let book3 = makeBook(author: john)
+      books.wrappedValue.append(book3)
+      #expect(books.wrappedValue.count == 3)
+      #expect(filteredBooksByJohn.wrappedValue.count == 2)
+    }
+
+    // add new book by John
+    do {
+      let book4 = makeBook(author: john)
+      books.wrappedValue.append(book4)
+      #expect(books.wrappedValue.count == 4)
+      #expect(filteredBooksByJohn.wrappedValue.count == 3)
+    }
     
   }
   
