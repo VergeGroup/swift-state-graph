@@ -67,16 +67,6 @@ extension Node {
   }
 }
 
-protocol StateView {
-  func stream() -> AsyncStream<Self>
-}
-
-extension StateView {
-  public func stream() -> AsyncStream<Self> {
-    fatalError("TODO")
-  }
-}
-
 /**
  * A node that functions as an endpoint in a Directed Acyclic Graph (DAG).
  *
@@ -128,7 +118,7 @@ public final class StoredNode<Value>: Node {
       }      
     }
   }
-  
+    
   public var incomingEdges: [Edge] = []
   public var outgoingEdges: [Edge] = []
   
@@ -202,7 +192,7 @@ public final class ComputedNode<Value>: Node {
       
     }
   }
-  
+    
   let rule: ((StateGraph) -> Value)
   public var incomingEdges: [Edge] = []
   public var outgoingEdges: [Edge] = []
