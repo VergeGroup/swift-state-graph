@@ -94,40 +94,40 @@ struct Tests {
     #expect(filteredBooks.wrappedValue.count == 11)
 
   }
-  
+
   @Test func stateViewTest_first_read() {
-    
+
     final class Mock: StateView {
       @Stored var a: Int = 0
     }
-    
+
     let graph = StateGraph()
-    
+
     let mock = Mock(stateGraph: graph)
-    
+
     #expect(mock.nodes.count == 0)
 
-    // read    
+    // read
     _ = mock.a
-    
+
     #expect(mock.nodes.count == 1)
   }
-  
+
   @Test func stateViewTest_first_write() {
-    
+
     final class Mock: StateView {
       @Stored var a: Int = 0
     }
-    
+
     let graph = StateGraph()
-    
+
     let mock = Mock(stateGraph: graph)
-    
+
     #expect(mock.nodes.count == 0)
-    
-    // write    
+
+    // write
     mock.a = 10
-    
+
     #expect(mock.nodes.count == 1)
     #expect(mock.a == 10)
   }
@@ -142,7 +142,7 @@ struct Tests {
       init(
         stateGraph: StateGraph,
         name: String
-      ) {        
+      ) {
         self._name = .init(wrappedValue: name)
         super.init(stateGraph: stateGraph)
       }
@@ -164,7 +164,7 @@ struct Tests {
       let author: Author
       @Stored var title: String
       @Stored var tags: [Tag]
-      
+
       init(
         stateGraph: StateGraph,
         author: Author,
@@ -174,7 +174,7 @@ struct Tests {
         self.author = author
         self._title = .init(wrappedValue: title)
         self._tags = .init(wrappedValue: tags)
-        super.init(stateGraph: stateGraph)       
+        super.init(stateGraph: stateGraph)
       }
     }
 
@@ -223,7 +223,7 @@ struct Tests {
       author: mike,
       tags: [tagA]
     )
-    
+
     #expect(book2.author.name == "Mike")
 
     let books = graph.input(name: "books", [book1, book2])
@@ -265,6 +265,71 @@ struct Tests {
 
   }
 
+}
+
+@Suite
+struct SubscriptionTests {
+
+  @MainActor
+  @Test func test() async {
+
+    let graph = StateGraph()
+
+    let node = graph.input(name: "", "A")
+
+    let ex = Task {
+      await confirmation(expectedCount: 1) { c in
+
+        for await _ in node.onChange() {
+          c.confirm()
+          return
+        }
+      }
+    }
+    
+    Task {
+      node.wrappedValue = "B"
+    }
+    
+    await ex.value
+  }
+
+  @MainActor
+  @Test func testComputedNodeSubscription() async {
+    let graph = StateGraph()
+
+    // 入力ノードを作成
+    let inputNode = graph.input(name: "input", 10)
+    
+    // 計算ノードを作成（入力ノードに依存）
+    let computedNode = graph.rule(name: "computed") { _ in 
+      inputNode.wrappedValue * 2 
+    }
+
+    // 最初の計算結果を確認
+    #expect(computedNode.wrappedValue == 20)
+
+    // computedNodeの変更を監視
+    let ex = Task {
+      await confirmation(expectedCount: 1) { c in
+        for await _ in computedNode.onChange() {
+          c.confirm()
+          return
+        }
+      }
+    }
+    
+    // 入力ノードの値を変更
+    Task {
+      inputNode.wrappedValue = 20
+    }
+    
+    // 通知が届くのを待つ
+    await ex.value
+    
+    // 計算結果が更新されていることを確認
+    #expect(computedNode.wrappedValue == 40)
+  }
 }
 
 @Suite

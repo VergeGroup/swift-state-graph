@@ -56,15 +56,7 @@ public protocol Node: AnyObject {
   
   var potentiallyDirty: Bool { get set }
   
-  func recomputeIfNeeded()
-  
-  func stream() -> AsyncStream<Self>
-}
-
-extension Node {
-  public func stream() -> AsyncStream<Self> {
-    fatalError("TODO")
-  }
+  func recomputeIfNeeded()  
 }
 
 /**
@@ -94,6 +86,9 @@ public final class StoredNode<Value>: Node {
       for e in outgoingEdges {
         e.to.potentiallyDirty = true
       }
+      if let continuation {
+        continuation.yield(())
+      }
     }
   }
   
@@ -112,10 +107,7 @@ public final class StoredNode<Value>: Node {
     set {
       value = newValue
       
-      for e in outgoingEdges {
-        e.isPending = true
-        e.to.potentiallyDirty = true
-      }      
+      propagateDirty()    
     }
   }
     
@@ -132,12 +124,30 @@ public final class StoredNode<Value>: Node {
     self.value = wrappedValue
   }
   
+  private func propagateDirty() {
+    for e in outgoingEdges {
+      e.isPending = true
+      e.to.potentiallyDirty = true
+    }
+    if let continuation {
+      continuation.yield(())
+    }
+  }
+  
   public func recomputeIfNeeded() {
     // no operation
   }
   
   deinit {    
     Log.generic.debug("Deinit Stored: \(self.name)")
+  }
+    
+  private var continuation: AsyncStream<Void>.Continuation?
+  
+  public func onChange() -> AsyncStream<Void> {
+    return AsyncStream { continuation in
+      self.continuation = continuation
+    }
   }
         
 }
@@ -171,6 +181,9 @@ public final class ComputedNode<Value>: Node {
       guard potentiallyDirty, potentiallyDirty != oldValue else { return }
       for e in outgoingEdges {
         e.to.potentiallyDirty = true
+      }
+      if let continuation {
+        continuation.yield(())
       }
     }
   }
@@ -254,6 +267,13 @@ public final class ComputedNode<Value>: Node {
     Log.generic.debug("Deinit Computed: \(self.name)")
   }
   
+  private var continuation: AsyncStream<Void>.Continuation?
+  
+  public func onChange() -> AsyncStream<Void> {
+    return AsyncStream { continuation in
+      self.continuation = continuation
+    }
+  }
 }
 
 @DebugDescription
