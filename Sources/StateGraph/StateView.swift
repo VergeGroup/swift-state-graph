@@ -7,16 +7,27 @@ open class StateView: StateViewType {
   
   weak var stateGraph: StateGraph?
   
-  private(set) var nodes: [NodeWeakBox] = []
+//  private(set) var nodes: ContiguousArray<NodeWeakBox> = []
   
   public init(stateGraph: StateGraph) {
     self.stateGraph = stateGraph
   }
   
   func addNode(_ node: any Node) {
-    nodes.append(.init(node: node))
+//    nodes.append(.init(node: node))
+    node.stateViews.append(self)
   }
   
+  private var _sink: Sink = .init()
+  
+  public func onChange() -> AsyncStream<Void> {
+    return _sink.addStream()
+  }
+  
+  func didMemberChanged() {
+    _sink.send()
+  }
+     
   struct NodeWeakBox {
     weak var node: (any Node)?
     
@@ -24,26 +35,11 @@ open class StateView: StateViewType {
       self.node = node
     }
   }
-  
-  private var _continuation: AsyncStream<Void>.Continuation?
-  private var _stream: AsyncStream<Void>?
-  
-  public var stream: AsyncStream<Void> {
-    if let stream = _stream {
-      return stream
-    }
-    _stream = AsyncStream { continuation in
-      self._continuation = continuation
-    }
-    return _stream!
-  }
-   
 }
 
 extension StateViewType where Self : StateView {
   
   public typealias Computed<Value> = ComputedMember<Value>
   public typealias Stored<Value> = StoredMember<Value>
-  
- 
+   
 }

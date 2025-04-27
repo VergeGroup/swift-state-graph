@@ -1,9 +1,17 @@
-import Combine
+import Observation
 
+/**
+ based on
+ https://talk.objc.io/episodes/S01E429-attribute-graph-part-1
+ */
 public final class StateGraph {
+  
+#if canImport(Observation)
+  let observationRegistrar: ObservationRegistrar = .init()
+#endif
 
-  var nodes: [any Node] = []
-  var currentNode: (any Node)?
+  /// for dependecy capturing
+  fileprivate unowned var currentNode: (any Node)?
       
   public init() {}
   
@@ -12,7 +20,6 @@ public final class StateGraph {
     _ value: Value
   ) -> StoredNode<Value> {
     let n = StoredNode(name: name, in: self, wrappedValue: value)
-    nodes.append(n)   
     return n
   }
 
@@ -21,38 +28,22 @@ public final class StateGraph {
     _ rule: @escaping (StateGraph) -> Value
   ) -> ComputedNode<Value> {
     let n = ComputedNode(name: name, in: self, rule: rule)
-    nodes.append(n)
     return n
   }
       
-  public func graphViz() -> String {
-    let nodesStr = nodes.map {
-      "\($0.name)\($0.potentiallyDirty ? " [style=dashed]" : "")"
-    }.joined(separator: "\n")
-    let edges = nodes
-      .flatMap(\.outgoingEdges)
-      .map {
-        "\($0.from.name) -> \($0.to.name)\($0.isPending ? " [style=dashed]" : "")"
-      }
-      .sorted()
-      .joined(separator: "\n")
-  
-    return """
-        digraph {
-        \(nodesStr)
-        \(edges)
-        }
-        """
-  }
-    
 }
 
 public protocol Node: AnyObject {
   var name: String { get }
+  
   /// edges affecting nodes
   var outgoingEdges: [Edge] { get set }
+  
   /// inverse edges that depending on nodes
   var incomingEdges: [Edge] { get set }
+  
+  ///
+  var stateViews: [StateView] { get set }
   
   var potentiallyDirty: Bool { get set }
   
@@ -75,44 +66,62 @@ public protocol Node: AnyObject {
  * let inputNode = graph.input(name: "input", 10)
  * ```
  */
-public final class StoredNode<Value>: Node {
+public final class StoredNode<Value>: Node, Observable {
   
   unowned let graph: StateGraph
   private var value: Value
   
-  public var potentiallyDirty: Bool = false {
-    didSet {
-      guard potentiallyDirty, potentiallyDirty != oldValue else { return }
-      for e in outgoingEdges {
-        e.to.potentiallyDirty = true
-      }
-      if let _continuation {
-        _continuation.yield(())
-      }
+  public var potentiallyDirty: Bool {
+    get {
+      return false
+    }
+    set {
+      fatalError()
     }
   }
   
   public let name: String
   
   public var wrappedValue: Value {
-    get {
+    _read {
+#if canImport(Observation)
+      graph.observationRegistrar.access(self, keyPath: \.self)
+#endif
       // record dependency
       if let c = graph.currentNode {
         let edge = Edge(from: self, to: c)
         outgoingEdges.append(edge)
         c.incomingEdges.append(edge)
       }
-      return value
+      yield value
     }
-    set {
-      value = newValue
+    _modify {
+
+#if canImport(Observation)      
+      graph.observationRegistrar.willSet(self, keyPath: \.self)
+      
+      defer {
+        graph.observationRegistrar.didSet(self, keyPath: \.self)
+      }
+#endif
+      
+      yield &value
       
       propagateDirty()    
     }
   }
     
-  public var incomingEdges: [Edge] = []
+  public var incomingEdges: [Edge] {
+    get {
+      fatalError()
+    }
+    set {
+      fatalError()
+    }
+  }
+  
   public var outgoingEdges: [Edge] = []
+  public var stateViews: [StateView] = []
   
   init(
     name: String,
@@ -129,9 +138,7 @@ public final class StoredNode<Value>: Node {
       e.isPending = true
       e.to.potentiallyDirty = true
     }
-    if let _continuation {
-      _continuation.yield(())
-    }
+    _sink.send()
   }
   
   public func recomputeIfNeeded() {
@@ -141,20 +148,13 @@ public final class StoredNode<Value>: Node {
   deinit {    
     Log.generic.debug("Deinit Stored: \(self.name)")
   }
-    
-  private var _continuation: AsyncStream<Void>.Continuation?
-  private var _stream: AsyncStream<Void>?
+      
+  private var _sink: Sink = .init()
   
-  public var onChange: AsyncStream<Void> {
-    if let stream = _stream {
-      return stream
-    }
-    _stream = AsyncStream { continuation in
-      self._continuation = continuation
-    }
-    return _stream!
+  public func onChange() -> AsyncStream<Void> {
+    _sink.addStream()
   }
-        
+  
 }
 
 /**
@@ -176,44 +176,48 @@ public final class StoredNode<Value>: Node {
  * let c = graph.rule(name: "C") { _ in a.wrappedValue + b.wrappedValue }
  * ```
  */
-public final class ComputedNode<Value>: Node {
+public final class ComputedNode<Value>: Node, Observable {
   
   unowned let graph: StateGraph
   private var _cachedValue: Value?
   
   public var potentiallyDirty: Bool = false {
     didSet {
+            
       guard potentiallyDirty, potentiallyDirty != oldValue else { return }
+      
+#if canImport(Observation)
+      graph.observationRegistrar.willSet(self, keyPath: \.self)
+#endif
+      
       for e in outgoingEdges {
         e.to.potentiallyDirty = true
       }
-      if let _continuation {
-        _continuation.yield(())
+      
+      for owner in stateViews {
+        owner.didMemberChanged()
       }
+      
+      _sink.send()
     }
   }
   
   public let name: String
   
   public var wrappedValue: Value {
-    get {
+    _read {
+#if canImport(Observation)      
+      graph.observationRegistrar.access(self, keyPath: \.self)
+#endif
       recomputeIfNeeded()
-      return _cachedValue!
-    }
-    set {
-      _cachedValue = newValue
-      
-      for e in outgoingEdges {
-        e.isPending = true
-        e.to.potentiallyDirty = true
-      }
-      
+      yield _cachedValue!
     }
   }
     
   let rule: ((StateGraph) -> Value)
   public var incomingEdges: [Edge] = []
   public var outgoingEdges: [Edge] = []
+  public var stateViews: [StateView] = []
      
   init(
     name: String,
@@ -272,17 +276,10 @@ public final class ComputedNode<Value>: Node {
     Log.generic.debug("Deinit Computed: \(self.name)")
   }
   
-  private var _continuation: AsyncStream<Void>.Continuation?
-  private var _stream: AsyncStream<Void>?
+  private var _sink: Sink = .init()
   
-  public var onChange: AsyncStream<Void> {
-    if let stream = _stream {
-      return stream
-    }
-    _stream = AsyncStream { continuation in
-      self._continuation = continuation
-    }
-    return _stream!
+  public func onChange() -> AsyncStream<Void> {
+    _sink.addStream()
   }
 }
 
