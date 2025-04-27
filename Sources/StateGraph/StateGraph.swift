@@ -86,8 +86,8 @@ public final class StoredNode<Value>: Node {
       for e in outgoingEdges {
         e.to.potentiallyDirty = true
       }
-      if let continuation {
-        continuation.yield(())
+      if let _continuation {
+        _continuation.yield(())
       }
     }
   }
@@ -129,8 +129,8 @@ public final class StoredNode<Value>: Node {
       e.isPending = true
       e.to.potentiallyDirty = true
     }
-    if let continuation {
-      continuation.yield(())
+    if let _continuation {
+      _continuation.yield(())
     }
   }
   
@@ -142,12 +142,17 @@ public final class StoredNode<Value>: Node {
     Log.generic.debug("Deinit Stored: \(self.name)")
   }
     
-  private var continuation: AsyncStream<Void>.Continuation?
+  private var _continuation: AsyncStream<Void>.Continuation?
+  private var _stream: AsyncStream<Void>?
   
-  public func onChange() -> AsyncStream<Void> {
-    return AsyncStream { continuation in
-      self.continuation = continuation
+  public var onChange: AsyncStream<Void> {
+    if let stream = _stream {
+      return stream
     }
+    _stream = AsyncStream { continuation in
+      self._continuation = continuation
+    }
+    return _stream!
   }
         
 }
@@ -182,8 +187,8 @@ public final class ComputedNode<Value>: Node {
       for e in outgoingEdges {
         e.to.potentiallyDirty = true
       }
-      if let continuation {
-        continuation.yield(())
+      if let _continuation {
+        _continuation.yield(())
       }
     }
   }
@@ -267,12 +272,17 @@ public final class ComputedNode<Value>: Node {
     Log.generic.debug("Deinit Computed: \(self.name)")
   }
   
-  private var continuation: AsyncStream<Void>.Continuation?
+  private var _continuation: AsyncStream<Void>.Continuation?
+  private var _stream: AsyncStream<Void>?
   
-  public func onChange() -> AsyncStream<Void> {
-    return AsyncStream { continuation in
-      self.continuation = continuation
+  public var onChange: AsyncStream<Void> {
+    if let stream = _stream {
+      return stream
     }
+    _stream = AsyncStream { continuation in
+      self._continuation = continuation
+    }
+    return _stream!
   }
 }
 

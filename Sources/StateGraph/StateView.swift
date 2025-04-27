@@ -1,6 +1,6 @@
 
 public protocol StateViewType {
-  
+    
 }
 
 open class StateView: StateViewType {
@@ -24,6 +24,20 @@ open class StateView: StateViewType {
       self.node = node
     }
   }
+  
+  private var _continuation: AsyncStream<Void>.Continuation?
+  private var _stream: AsyncStream<Void>?
+  
+  public var stream: AsyncStream<Void> {
+    if let stream = _stream {
+      return stream
+    }
+    _stream = AsyncStream { continuation in
+      self._continuation = continuation
+    }
+    return _stream!
+  }
+   
 }
 
 extension StateViewType where Self : StateView {
@@ -31,7 +45,5 @@ extension StateViewType where Self : StateView {
   public typealias Computed<Value> = ComputedMember<Value>
   public typealias Stored<Value> = StoredMember<Value>
   
-  public func stream() -> AsyncStream<Self> {
-    fatalError("TODO")
-  }
+ 
 }

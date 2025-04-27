@@ -280,7 +280,7 @@ struct SubscriptionTests {
     let ex = Task {
       await confirmation(expectedCount: 1) { c in
 
-        for await _ in node.onChange() {
+        for await _ in node.onChange {
           c.confirm()
           return
         }
@@ -312,7 +312,7 @@ struct SubscriptionTests {
     // computedNodeの変更を監視
     let ex = Task {
       await confirmation(expectedCount: 1) { c in
-        for await _ in computedNode.onChange() {
+        for await _ in computedNode.onChange {
           c.confirm()
           return
         }
@@ -329,6 +329,88 @@ struct SubscriptionTests {
     
     // 計算結果が更新されていることを確認
     #expect(computedNode.wrappedValue == 40)
+  }
+  
+  @MainActor
+  @Test func testMultipleOnChangeSubscribers() async {
+    let graph = StateGraph()
+    
+    // 入力ノードを作成
+    let inputNode = graph.input(name: "input", 10)
+    
+    // 複数のsubscriberを模擬 - 全てのサブスクライバーに通知が届くことを検証
+    let subscriptionCount = 3
+    let confirmationCount = await withTaskGroup(of: Int.self) { group in
+      
+      for i in 0..<subscriptionCount {
+        group.addTask {
+          await confirmation(expectedCount: 1) { c in
+            for await _ in inputNode.onChange() {
+              print("Subscriber \(i) received change notification")
+              c.confirm()
+              return
+            }
+          }
+          return 1
+        }
+      }
+      
+      // 少し遅延させてサブスクリプションが確立されるようにする
+      try? await Task.sleep(nanoseconds: 100_000_000) // 0.1秒
+      
+      // 入力ノードの値を変更
+      inputNode.wrappedValue = 20
+      
+      var count = 0
+      for await _ in group {
+        count += 1
+      }
+      return count
+    }
+    
+    // 全てのサブスクライバーが通知を受け取ったことを確認
+    #expect(confirmationCount == subscriptionCount)
+    #expect(inputNode.wrappedValue == 20)
+    
+    // 計算ノードでも同様のテスト
+    let computedNode = graph.rule(name: "computed") { _ in 
+      inputNode.wrappedValue * 2 
+    }
+    
+    // 最初の値にアクセスして計算を強制
+    _ = computedNode.wrappedValue
+    
+    let computedConfirmationCount = await withTaskGroup(of: Int.self) { group in
+      
+      for i in 0..<subscriptionCount {
+        group.addTask {
+          await confirmation(expectedCount: 1) { c in
+            for await _ in computedNode.onChange() {
+              print("Computed subscriber \(i) received change notification")
+              c.confirm()
+              return
+            }
+          }
+          return 1
+        }
+      }
+      
+      // 少し遅延させる
+      try? await Task.sleep(nanoseconds: 100_000_000) // 0.1秒
+      
+      // 入力ノードの値を変更することで計算ノードも変更される
+      inputNode.wrappedValue = 30
+      
+      var count = 0
+      for await _ in group {
+        count += 1
+      }
+      return count
+    }
+    
+    // 全ての計算ノードのサブスクライバーも通知を受け取ったことを確認
+    #expect(computedConfirmationCount == subscriptionCount)
+    #expect(computedNode.wrappedValue == 60)
   }
 }
 
