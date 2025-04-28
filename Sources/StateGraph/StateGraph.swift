@@ -7,25 +7,68 @@ import Foundation
  */
 public final class StateGraph {
   
+  private struct AnyMetatype: Hashable {
+    
+    let metatype: AnyKeyPath
+    
+    init<Meta>(_ metatype: Meta) {
+      self.metatype = \Meta.self
+    }
+
+  }
+  
+  private struct NodeBox: Hashable {
+    
+    static func == (lhs: NodeBox, rhs: NodeBox) -> Bool {
+      return lhs.pointer == rhs.pointer
+    }
+    
+    func hash(into hasher: inout Hasher) {
+      hasher.combine(pointer)
+    }
+    
+    let node: any Node
+    private let pointer: UnsafeMutableRawPointer
+    
+    init<N: Node>(node: N) {
+      self.node = node
+      self.pointer = Unmanaged.passUnretained(node).toOpaque()
+    }
+    
+  }
+   
   /// for dependecy capturing
   fileprivate unowned var currentNode: (any Node)?
   
   #if DEBUG
   private var _storedNodes: WeakArray<AnyObject> = .init()
   #endif
+  
+  private var nodeMap: [AnyMetatype : Set<NodeBox>] = [:]
       
   public init() {}
+  
+  public func store<N: Node>(_ node: N) {
+    let type = AnyMetatype(N.self)
+    nodeMap[type, default: .init()].insert(.init(node: node))
+  }
+  
+  public func find<Query: NodeQuery>(query: consuming Query) -> Query.Result {
+    query.perform(graph: self)
+  }
   
   public func input<Value>(
     name: String,
     _ value: Value
   ) -> StoredNode<Value> {
+    
     let n = StoredNode(name: name, in: self, wrappedValue: value)
+            
     #if DEBUG
     _storedNodes.add(n)
     #endif
     return n
-  }
+  }  
 
   public func rule<Value>(
     name: String,
@@ -131,7 +174,7 @@ public protocol Node: AnyObject {
  */
 public final class StoredNode<Value>: Node, Observable {
   
-  unowned let graph: StateGraph
+  private weak var graph: StateGraph?
   private var value: Value
   
 #if canImport(Observation)
@@ -156,10 +199,14 @@ public final class StoredNode<Value>: Node, Observable {
       observationRegistrar!.access(self, keyPath: \.self)
 #endif
       // record dependency
-      if let c = graph.currentNode {
-        let edge = Edge(from: self, to: c)
-        outgoingEdges.append(edge)
-        c.incomingEdges.append(edge)
+      if let graph {
+        if let c = graph.currentNode {
+          let edge = Edge(from: self, to: c)
+          outgoingEdges.append(edge)
+          c.incomingEdges.append(edge)
+        }
+      } else {
+        assertionFailure("StateGraph is nil")
       }
       yield value
     }
