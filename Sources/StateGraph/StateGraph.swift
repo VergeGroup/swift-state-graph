@@ -33,13 +33,13 @@ public protocol Node: AnyObject {
   var name: String { get }
   
   /// edges affecting nodes
-  var outgoingEdges: [Edge] { get set }
+  var outgoingEdges: ContiguousArray<Edge> { get set }
   
   /// inverse edges that depending on nodes
-  var incomingEdges: [Edge] { get set }
+  var incomingEdges: ContiguousArray<Edge> { get set }
   
   ///
-  var stateViews: [StateView] { get set }
+  var stateViews: ContiguousArray<StateView> { get set }
   
   var potentiallyDirty: Bool { get set }
   
@@ -113,7 +113,7 @@ public final class StoredNode<Value>: Node, Observable {
     }
   }
     
-  public var incomingEdges: [Edge] {
+  public var incomingEdges: ContiguousArray<Edge> {
     get {
       fatalError()
     }
@@ -122,8 +122,8 @@ public final class StoredNode<Value>: Node, Observable {
     }
   }
   
-  public var outgoingEdges: [Edge] = []
-  public var stateViews: [StateView] = []
+  public var outgoingEdges: ContiguousArray<Edge> = []
+  public var stateViews: ContiguousArray<StateView> = []
   
   init(
     name: String,
@@ -230,9 +230,9 @@ public final class ComputedNode<Value>: Node, Observable {
   }
     
   let rule: ((StateGraph) -> Value)
-  public var incomingEdges: [Edge] = []
-  public var outgoingEdges: [Edge] = []
-  public var stateViews: [StateView] = []
+  public var incomingEdges: ContiguousArray<Edge> = []
+  public var outgoingEdges: ContiguousArray<Edge> = []
+  public var stateViews: ContiguousArray<StateView> = []
      
   init(
     name: String,

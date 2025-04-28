@@ -1,4 +1,3 @@
-
 struct Sink: ~Copyable {
   
   enum Target {
@@ -6,7 +5,7 @@ struct Sink: ~Copyable {
     case stream(AsyncStream<Void>.Continuation)
   }
   
-  private var targets: [Target]?
+  private var targets: ContiguousArray<Target>?
   
   func send() {
     guard let targets else { return }
