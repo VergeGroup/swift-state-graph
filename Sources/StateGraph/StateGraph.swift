@@ -6,10 +6,6 @@ import Observation
  */
 public final class StateGraph {
   
-#if canImport(Observation)
-  let observationRegistrar: ObservationRegistrar = .init()
-#endif
-
   /// for dependecy capturing
   fileprivate unowned var currentNode: (any Node)?
       
@@ -71,6 +67,10 @@ public final class StoredNode<Value>: Node, Observable {
   unowned let graph: StateGraph
   private var value: Value
   
+#if canImport(Observation)
+  private var observationRegistrar: ObservationRegistrar?
+#endif
+  
   public var potentiallyDirty: Bool {
     get {
       return false
@@ -85,7 +85,8 @@ public final class StoredNode<Value>: Node, Observable {
   public var wrappedValue: Value {
     _read {
 #if canImport(Observation)
-      graph.observationRegistrar.access(self, keyPath: \.self)
+      prepareObservationRegistrar()
+      observationRegistrar!.access(self, keyPath: \.self)
 #endif
       // record dependency
       if let c = graph.currentNode {
@@ -97,11 +98,12 @@ public final class StoredNode<Value>: Node, Observable {
     }
     _modify {
 
-#if canImport(Observation)      
-      graph.observationRegistrar.willSet(self, keyPath: \.self)
+#if canImport(Observation)   
+      prepareObservationRegistrar()
+      observationRegistrar!.willSet(self, keyPath: \.self)
       
       defer {
-        graph.observationRegistrar.didSet(self, keyPath: \.self)
+        observationRegistrar!.didSet(self, keyPath: \.self)
       }
 #endif
       
@@ -145,6 +147,13 @@ public final class StoredNode<Value>: Node, Observable {
     // no operation
   }
   
+  @inline(__always)
+  private func prepareObservationRegistrar() {
+    if observationRegistrar == nil {
+      observationRegistrar = .init()
+    }
+  }
+  
   deinit {    
     Log.generic.debug("Deinit Stored: \(self.name)")
   }
@@ -181,13 +190,18 @@ public final class ComputedNode<Value>: Node, Observable {
   unowned let graph: StateGraph
   private var _cachedValue: Value?
   
+#if canImport(Observation)
+  private var observationRegistrar: ObservationRegistrar?
+#endif
+  
   public var potentiallyDirty: Bool = false {
     didSet {
             
       guard potentiallyDirty, potentiallyDirty != oldValue else { return }
       
 #if canImport(Observation)
-      graph.observationRegistrar.willSet(self, keyPath: \.self)
+      prepareObservationRegistrar()
+      observationRegistrar!.willSet(self, keyPath: \.self)
 #endif
       
       for e in outgoingEdges {
@@ -206,8 +220,9 @@ public final class ComputedNode<Value>: Node, Observable {
   
   public var wrappedValue: Value {
     _read {
-#if canImport(Observation)      
-      graph.observationRegistrar.access(self, keyPath: \.self)
+#if canImport(Observation)   
+      prepareObservationRegistrar()
+      observationRegistrar!.access(self, keyPath: \.self)
 #endif
       recomputeIfNeeded()
       yield _cachedValue!
@@ -270,6 +285,13 @@ public final class ComputedNode<Value>: Node, Observable {
       e.from.outgoingEdges.removeAll(where: { $0 === e })
     }
     incomingEdges = []
+  }
+  
+  @inline(__always)
+  private func prepareObservationRegistrar() {
+    if observationRegistrar == nil {
+      observationRegistrar = .init()
+    }
   }
   
   deinit {    
