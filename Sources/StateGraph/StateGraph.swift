@@ -1,4 +1,5 @@
 import Observation
+import Foundation
 
 /**
  based on
@@ -8,6 +9,10 @@ public final class StateGraph {
   
   /// for dependecy capturing
   fileprivate unowned var currentNode: (any Node)?
+  
+  #if DEBUG
+  private var _storedNodes: WeakArray<AnyObject> = .init()
+  #endif
       
   public init() {}
   
@@ -16,6 +21,9 @@ public final class StateGraph {
     _ value: Value
   ) -> StoredNode<Value> {
     let n = StoredNode(name: name, in: self, wrappedValue: value)
+    #if DEBUG
+    _storedNodes.add(n)
+    #endif
     return n
   }
 
@@ -26,8 +34,67 @@ public final class StateGraph {
     let n = ComputedNode(name: name, in: self, rule: rule)
     return n
   }
-      
+
 }
+
+#if DEBUG
+extension StateGraph {
+  
+  public func _graphViz() -> String {
+    
+    _storedNodes
+      .compact()
+    
+    let nodes = _storedNodes.allObjects.map {
+      $0 as! Node
+    }
+    
+    let nodesStr = nodes.map {
+      "\($0.name)\($0.potentiallyDirty ? " [style=dashed]" : "")"
+    }.joined(separator: "\n")
+    let edges = nodes
+      .flatMap(\.outgoingEdges)
+      .map {
+        "\($0.from.name) -> \($0.to.name)\($0.isPending ? " [style=dashed]" : "")"
+      }
+      .sorted()
+      .joined(separator: "\n")
+    
+    return """
+        digraph {
+        \(nodesStr)
+        \(edges)
+        }
+        """
+  }
+
+  final class WeakArray<Element: AnyObject> {
+    
+    struct WeakBox<T: AnyObject> {
+      weak var value: T?
+      
+      init(_ value: T) {
+        self.value = value
+      }
+    }
+    
+    private var boxes: [WeakBox<Element>] = []
+    
+    func add(_ element: Element) {
+      boxes.append(WeakBox(element))
+    }
+    
+    func compact() {
+      boxes.removeAll(where: { $0.value == nil })
+    }
+    
+    var allObjects: [Element] {
+      return boxes.compactMap { $0.value }
+    }
+  }
+    
+}
+#endif
 
 public protocol Node: AnyObject {
   var name: String { get }
