@@ -44,13 +44,18 @@ public final class StateGraph {
   private var _storedNodes: WeakArray<AnyObject> = .init()
   #endif
   
-  private var nodeMap: [AnyMetatype : Set<NodeBox>] = [:]
+  private var nodeMap: [AnyMetatype : StoredNode<Set<NodeBox>>] = [:]
       
   public init() {}
   
   public func store<N: Node>(_ node: N) {
     let type = AnyMetatype(N.self)
-    nodeMap[type, default: .init()].insert(.init(node: node))
+    nodeMap[
+      type,
+      default: .init(name: "", in: self, wrappedValue: .init())
+    ]
+      .wrappedValue
+      .insert(.init(node: node))
   }
   
   public func find<Query: NodeQuery>(query: consuming Query) -> Query.Result {
@@ -249,6 +254,13 @@ public final class StoredNode<Value>: Node, Observable {
     self.value = wrappedValue
   }
   
+  deinit {
+    Log.generic.debug("Deinit Stored: \(self.name)")
+    for e in outgoingEdges {
+      e.to.incomingEdges.removeAll(where: { $0 === e })
+    }
+  }
+  
   private func propagateDirty() {
     for e in outgoingEdges {
       e.isPending = true
@@ -267,11 +279,7 @@ public final class StoredNode<Value>: Node, Observable {
       observationRegistrar = .init()
     }
   }
-  
-  deinit {    
-    Log.generic.debug("Deinit Stored: \(self.name)")
-  }
-      
+        
   private var _sink: Sink = .init()
   
   public func onChange() -> AsyncStream<Void> {
@@ -358,6 +366,11 @@ public final class ComputedNode<Value>: Node, Observable {
     self.rule = rule
   }
   
+  deinit {
+    Log.generic.debug("Deinit Computed: \(self.name)")
+    removeIncomingEdges()
+  }
+  
   public func recomputeIfNeeded() {
     
     // record dependency
@@ -398,7 +411,7 @@ public final class ComputedNode<Value>: Node, Observable {
     for e in incomingEdges {
       e.from.outgoingEdges.removeAll(where: { $0 === e })
     }
-    incomingEdges = []
+    incomingEdges.removeAll()
   }
   
   @inline(__always)
@@ -406,10 +419,6 @@ public final class ComputedNode<Value>: Node, Observable {
     if observationRegistrar == nil {
       observationRegistrar = .init()
     }
-  }
-  
-  deinit {    
-    Log.generic.debug("Deinit Computed: \(self.name)")
   }
   
   private var _sink: Sink = .init()

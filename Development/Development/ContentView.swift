@@ -11,7 +11,8 @@ import StorybookKit
 
 struct ContentView: View {
   var body: some View {
-    Storybook.init()
+    ListView(rootState: RootState(stateGraph: graph))
+//    Storybook.init()
   }
 }
 

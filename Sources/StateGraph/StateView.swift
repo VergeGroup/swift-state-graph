@@ -3,18 +3,23 @@ public protocol StateViewType {
     
 }
 
-open class StateView: StateViewType {
+open class StateView: Hashable, StateViewType {
   
-  weak var stateGraph: StateGraph?
+  public func hash(into hasher: inout Hasher) {
+    hasher.combine(ObjectIdentifier(self))
+  }
+    
+  public static func == (lhs: StateView, rhs: StateView) -> Bool {
+    return lhs === rhs
+  }
   
-//  private(set) var nodes: ContiguousArray<NodeWeakBox> = []
+  public private(set) weak var stateGraph: StateGraph?
   
   public init(stateGraph: StateGraph) {
     self.stateGraph = stateGraph
   }
   
   func addNode(_ node: any Node) {
-//    nodes.append(.init(node: node))
     node.stateViews.append(self)
   }
   
