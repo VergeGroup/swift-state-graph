@@ -112,7 +112,7 @@ struct ListView: View {
   
   struct BookListInAuthor: View {
 
-    let books: ComputedNode<[BookEntity]>
+    @Computed var books: [BookEntity]
     let rootState: RootState
     let author: AuthorEntity
     
@@ -123,15 +123,15 @@ struct ListView: View {
       self.author = author
       self.rootState = rootState
       
-      books = ComputedNode {
+      _books = .init(compute: {
         rootState.db.books
           .filter { $0.author.id == author.id }
           .sorted { $0.title < $1.title }
-      }
+      })
     }
     
     var body: some View {
-      List(books.wrappedValue, id: \.self) { e in
+      List(books, id: \.self) { e in
         NavigationLink(value: e) {           
           BookCell(book: e)
         }

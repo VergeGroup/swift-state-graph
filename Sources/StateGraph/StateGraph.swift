@@ -68,7 +68,6 @@ extension Weak: Sendable where T: Sendable {}
 /// Example usage:
 /// ```swift
 /// let graph = StateGraph()
-/// let inputNode = graph.input(name: "input", 10)
 /// ```
 public final class StoredNode<Value>: NodeType, Observable {
 
@@ -130,7 +129,7 @@ public final class StoredNode<Value>: NodeType, Observable {
           e.to.potentiallyDirty = true
         }
         stateViews.compactForEach {
-          $0.didMemberChanged()
+          $0._onMemberChange()
         }
         _sink.send()
       }
@@ -248,7 +247,7 @@ public final class ComputedNode<Value>: NodeType, Observable {
       }
 
       stateViews.compactForEach {
-        $0.didMemberChanged()
+        $0._onMemberChange()
       }
 
       _sink.send()
