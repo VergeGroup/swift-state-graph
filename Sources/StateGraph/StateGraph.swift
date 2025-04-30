@@ -11,10 +11,10 @@ import os.lock
 
 private enum TaskLocals {
   @TaskLocal
-  static var currentNode: (any Node)?
+  static var currentNode: (any NodeType)?
 }
 
-protocol Node: AnyObject, Sendable {
+protocol NodeType: AnyObject, Sendable {
   var name: String? { get }
 
   /// edges affecting nodes
@@ -31,7 +31,7 @@ protocol Node: AnyObject, Sendable {
   func recomputeIfNeeded()
 }
 
-extension Node {
+extension NodeType {
   func register(_ value: StateView) {
     let box = Weak(value)
     guard stateViews.contains(box) == false else {
@@ -39,7 +39,6 @@ extension Node {
     }
     stateViews.append(box)
   }
-
 }
 
 struct Weak<T: AnyObject>: Equatable {
@@ -71,7 +70,7 @@ extension Weak: Sendable where T: Sendable {}
 /// let graph = StateGraph()
 /// let inputNode = graph.input(name: "input", 10)
 /// ```
-public final class StoredNode<Value>: Node, Observable {
+public final class StoredNode<Value>: NodeType, Observable {
 
   private let lock: OSAllocatedUnfairLock<Void>
 
@@ -202,15 +201,8 @@ public final class StoredNode<Value>: Node, Observable {
 /// - Value is lazily computed: Calculations only occur when the value is accessed
 /// - Dependencies are tracked: The node automatically tracks which nodes it depends on
 /// - Changes propagate: When this node's value changes, downstream nodes are notified
-///
-/// Example usage:
-/// ```swift
-/// let graph = StateGraph()
-/// let a = graph.input(name: "A", 10)
-/// let b = graph.input(name: "B", 20)
-/// let c = graph.rule(name: "C") { _ in a.wrappedValue + b.wrappedValue }
 /// ```
-public final class ComputedNode<Value>: Node, Observable {
+public final class ComputedNode<Value>: NodeType, Observable {
 
   private let lock: OSAllocatedUnfairLock<Void>
 
@@ -370,12 +362,12 @@ public final class ComputedNode<Value>: Node, Observable {
 @DebugDescription
 public final class Edge: CustomDebugStringConvertible {
 
-  unowned let from: any Node
-  unowned let to: any Node
+  unowned let from: any NodeType
+  unowned let to: any NodeType
 
   var isPending: Bool = false
 
-  init(from: any Node, to: any Node) {
+  init(from: any NodeType, to: any NodeType) {
     self.from = from
     self.to = to
   }

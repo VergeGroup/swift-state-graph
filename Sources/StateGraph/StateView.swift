@@ -43,5 +43,5 @@ extension StateViewType where Self: StateView {
 
   public typealias Computed<Value> = ComputedMember<Value>
   public typealias Stored<Value> = StoredMember<Value>
-
+  
 }
