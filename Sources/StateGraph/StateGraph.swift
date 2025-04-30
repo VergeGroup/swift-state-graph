@@ -14,7 +14,7 @@ private enum TaskLocals {
   static var currentNode: (any NodeType)?
 }
 
-protocol NodeType: AnyObject, Sendable {
+protocol NodeType: Hashable, AnyObject, Sendable {
   var name: String? { get }
 
   /// edges affecting nodes
@@ -70,6 +70,16 @@ extension Weak: Sendable where T: Sendable {}
 /// let graph = StateGraph()
 /// ```
 public final class StoredNode<Value>: NodeType, Observable {
+  
+  // MARK: Equatable
+  public static func == (lhs: StoredNode<Value>, rhs: StoredNode<Value>) -> Bool {
+    return lhs === rhs
+  }
+  
+  // MARK: Hashable
+  public func hash(into hasher: inout Hasher) {
+    hasher.combine(ObjectIdentifier(self))
+  }
 
   private let lock: OSAllocatedUnfairLock<Void>
 
@@ -91,6 +101,7 @@ public final class StoredNode<Value>: NodeType, Observable {
   }
 
   public let name: String?
+  let sourceLocation: SourceLocation
 
   public var wrappedValue: Value {
     _read {
@@ -154,9 +165,13 @@ public final class StoredNode<Value>: NodeType, Observable {
     var stateViews: ContiguousArray<Weak<StateView>> = []
 
   public init(
+    _ file: StaticString = #fileID,
+    _ line: UInt = #line,
+    _ column: UInt = #column,
     name: String? = nil,
     wrappedValue: Value
   ) {
+    self.sourceLocation = .init(file: file, line: line, column: column)
     self.name = name
     self.lock = .init()
     self._value = wrappedValue
@@ -202,7 +217,17 @@ public final class StoredNode<Value>: NodeType, Observable {
 /// - Changes propagate: When this node's value changes, downstream nodes are notified
 /// ```
 public final class ComputedNode<Value>: NodeType, Observable {
-
+  
+  // MARK: Equatable
+  public static func == (lhs: ComputedNode<Value>, rhs: ComputedNode<Value>) -> Bool {
+    return lhs === rhs
+  }
+  
+  // MARK: Hashable
+  public func hash(into hasher: inout Hasher) {
+    hasher.combine(ObjectIdentifier(self))
+  }
+  
   private let lock: OSAllocatedUnfairLock<Void>
 
   nonisolated(unsafe)
@@ -255,6 +280,7 @@ public final class ComputedNode<Value>: NodeType, Observable {
   }
 
   public let name: String?
+  private let sourceLocation: SourceLocation
 
   public var wrappedValue: Value {
     _read {
@@ -277,9 +303,13 @@ public final class ComputedNode<Value>: NodeType, Observable {
     var stateViews: ContiguousArray<Weak<StateView>> = []
 
   public init(
+    _ file: StaticString = #fileID,
+    _ line: UInt = #line,
+    _ column: UInt = #column,
     name: String? = nil,
     rule: @escaping @Sendable () -> Value
   ) {
+    self.sourceLocation = .init(file: file, line: line, column: column)
     self.name = name
     self.rule = rule
     self.lock = .init()

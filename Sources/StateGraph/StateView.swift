@@ -71,10 +71,31 @@ extension StateViewType where Self: StateView {
       node.wrappedValue.wrappedValue
     }
 
+    public var projectedValue: SwiftUI_Computed<Value> {
+      return .init(node: node.wrappedValue)
+    }
+
     private let node: ObjectEdge<ComputedNode<Value>>
 
-    public init(compute: @escaping @Sendable () -> Value) {
-      self.node = .init(wrappedValue: .init(rule: compute))
+    public init(
+      _ file: StaticString = #file,
+      _ line: UInt = #line,
+      _ column: UInt = #column,
+      compute: @escaping @Sendable () -> Value
+    ) {
+      self.node = .init(
+        wrappedValue: .init(
+          file,
+          line,
+          column,
+          rule: compute
+        ))
+    }
+
+    public init(
+      node: ComputedNode<Value>
+    ) {
+      self.node = .init(wrappedValue: node)
     }
 
   }
@@ -87,10 +108,28 @@ extension StateViewType where Self: StateView {
       nonmutating set { node.wrappedValue.wrappedValue = newValue }
     }
 
+    public var projectedValue: SwiftUI_Stored<Value> {
+      .init(node: node.wrappedValue)
+    }
+
     private let node: ObjectEdge<StoredNode<Value>>
 
-    public init(wrappedValue initialValue: Value) {
+    public init(
+      _ file: StaticString = #file,
+      _ line: UInt = #line,
+      _ column: UInt = #column,
+      wrappedValue initialValue: Value
+    ) {
       self.node = .init(wrappedValue: .init(wrappedValue: initialValue))
+    }
+
+    public init(
+      _ file: StaticString = #file,
+      _ line: UInt = #line,
+      _ column: UInt = #column,
+      node: StoredNode<Value>
+    ) {
+      self.node = .init(wrappedValue: node)
     }
 
   }
@@ -101,7 +140,7 @@ extension StateViewType where Self: StateView {
 
     @State private var box: Box<O> = .init()
 
-    public var wrappedValue: O {
+    var wrappedValue: O {
       if let value = box.value {
         return value
       } else {
@@ -112,7 +151,7 @@ extension StateViewType where Self: StateView {
 
     private let factory: () -> O
 
-    public init(wrappedValue factory: @escaping @autoclosure () -> O) {
+    init(wrappedValue factory: @escaping @autoclosure () -> O) {
       self.factory = factory
     }
 
