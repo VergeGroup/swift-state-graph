@@ -13,13 +13,12 @@ final class TagEntity: StateView {
   @Stored var name: String = ""
 
   init(
-    stateGraph: StateGraph,
     id: String,
     name: String
   ) {
     self.id = id
     self.name = name
-    super.init(stateGraph: stateGraph)
+    super.init()
   }
 }
 
@@ -29,13 +28,12 @@ final class AuthorEntity: StateView {
   @Stored var name: String = ""
 
   init(
-    stateGraph: StateGraph,
     id: String,
     name: String
   ) {
     self.id = id
     self.name = name
-    super.init(stateGraph: stateGraph)
+    super.init()
   }
 
 }
@@ -48,7 +46,6 @@ final class BookEntity: StateView {
   @Stored var tags: [TagEntity] = []
 
   init(
-    stateGraph: StateGraph,
     id: String,
     title: String,
     author: AuthorEntity,
@@ -58,7 +55,7 @@ final class BookEntity: StateView {
     self.title = title
     self.author = author
     self.tags = tags
-    super.init(stateGraph: stateGraph)
+    super.init()
   }
 }
 
@@ -71,11 +68,11 @@ final class RootState: StateView {
 
   let db: DB
 
-  override init(stateGraph: StateGraph) {
+  override init() {
 
-    self.db = .init(stateGraph: stateGraph)
+    self.db = .init()
 
-    super.init(stateGraph: stateGraph)
+    super.init()
   }
 
 }
@@ -83,7 +80,7 @@ final class RootState: StateView {
 struct ListView: View {
 
   let rootState: RootState
-
+  
   init(rootState: RootState) {
     self.rootState = rootState
   }
@@ -103,7 +100,6 @@ struct ListView: View {
 
           rootState.db.authors.append(
             .init(
-              stateGraph: stateGraph,
               id: UUID().uuidString,
               name: "Unknown"
             )
@@ -127,11 +123,11 @@ struct ListView: View {
       self.author = author
       self.rootState = rootState
       
-      books = rootState.stateGraph!.rule(name: "", { graph in
+      books = ComputedNode {
         rootState.db.books
           .filter { $0.author.id == author.id }
           .sorted { $0.title < $1.title }
-      })
+      }
     }
     
     var body: some View {
@@ -145,7 +141,6 @@ struct ListView: View {
           
           rootState.db.books.append(
             .init(
-              stateGraph: rootState.stateGraph!,
               id: UUID().uuidString,
               title: "New",
               author: author,
@@ -180,9 +175,6 @@ struct ListView: View {
   }
 }
 
-@MainActor
-let stateGraph = StateGraph()
-
 #Preview {
-  ListView(rootState: RootState(stateGraph: stateGraph))
+  ListView(rootState: RootState())   
 }

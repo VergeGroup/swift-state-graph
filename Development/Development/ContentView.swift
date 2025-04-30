@@ -11,7 +11,7 @@ import StorybookKit
 
 struct ContentView: View {
   var body: some View {
-    ListView(rootState: RootState(stateGraph: graph))
+    ListView(rootState: RootState())
 //    Storybook.init()
   }
 }
@@ -19,9 +19,6 @@ struct ContentView: View {
 #if DEBUG
 
 import SwiftUI
-
-@MainActor
-let graph: StateGraph = .init()
 
 private struct Book_SingleStoredNode: View {
   
@@ -43,7 +40,7 @@ private struct Book_SingleStoredNode: View {
 
 #Preview("_Book") {
   Book_SingleStoredNode(
-    node: graph.input(name: "A", 1)
+    node: StoredNode(wrappedValue: 1)
   )
   .frame(width: 300, height: 300)
 }
@@ -59,13 +56,12 @@ private struct Book_StateView: View {
     @Stored var count2: Int = 0
     
     init(
-      stateGraph: StateGraph,
       name: String,
       count: Int
     ) {      
       self.name = name
       self.count = count      
-      super.init(stateGraph: stateGraph)
+      super.init()
     }
     
   }
@@ -97,7 +93,6 @@ private struct Book_StateView: View {
 #Preview {
   Book_StateView(
     entity: .init(
-      stateGraph: graph,
       name: "A",
       count: 1
     )
