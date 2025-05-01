@@ -11,4 +11,8 @@ struct SourceLocation: ~Copyable {
     self.column = column
   }
   
+  var text: String {
+    "\(file):\(line):\(column)"
+  }
+  
 }

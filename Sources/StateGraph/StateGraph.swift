@@ -14,7 +14,7 @@ private enum TaskLocals {
   static var currentNode: (any NodeType)?
 }
 
-protocol NodeType: Hashable, AnyObject, Sendable {
+protocol NodeType: Hashable, AnyObject, Sendable, CustomDebugStringConvertible {
   var name: String? { get }
 
   /// edges affecting nodes
@@ -69,7 +69,7 @@ extension Weak: Sendable where T: Sendable {}
 /// ```swift
 /// let graph = StateGraph()
 /// ```
-public final class StoredNode<Value>: NodeType, Observable {
+public final class StoredNode<Value>: NodeType, Observable, CustomDebugStringConvertible {
 
   // MARK: Equatable
   public static func == (lhs: StoredNode<Value>, rhs: StoredNode<Value>) -> Bool {
@@ -204,6 +204,9 @@ public final class StoredNode<Value>: NodeType, Observable {
     return _sink.addStream()
   }
 
+  public var debugDescription: String {
+    "StoredNode<\(Value.self)>(\(String(describing: _value)))"
+  }
 }
 
 /// A node that computes its value based on other nodes in a Directed Acyclic Graph (DAG).
@@ -216,8 +219,8 @@ public final class StoredNode<Value>: NodeType, Observable {
 /// - Dependencies are tracked: The node automatically tracks which nodes it depends on
 /// - Changes propagate: When this node's value changes, downstream nodes are notified
 /// ```
-public final class ComputedNode<Value>: NodeType, Observable {
-
+public final class ComputedNode<Value>: NodeType, Observable, CustomDebugStringConvertible {
+    
   // MARK: Equatable
   public static func == (lhs: ComputedNode<Value>, rhs: ComputedNode<Value>) -> Bool {
     return lhs === rhs
@@ -436,6 +439,11 @@ public final class ComputedNode<Value>: NodeType, Observable {
     }
     return _sink.addStream()
   }
+  
+  public var debugDescription: String {
+    "ComputedNode<\(Value.self)>(\(String(describing: _cachedValue)))"
+  }
+  
 }
 
 @DebugDescription
@@ -452,7 +460,7 @@ public final class Edge: CustomDebugStringConvertible {
   }
 
   public var debugDescription: String {
-    "\(from.name) -> \(to.name)"
+    "\(from.debugDescription) -> \(to.name.debugDescription)"
   }
 
   deinit {
