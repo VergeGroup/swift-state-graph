@@ -35,7 +35,7 @@ extension NodeType {
   func register(_ value: StateView) {
     let box = Weak(value)
     guard stateViews.contains(box) == false else {
-      return 
+      return
     }
     stateViews.append(box)
   }
@@ -70,12 +70,12 @@ extension Weak: Sendable where T: Sendable {}
 /// let graph = StateGraph()
 /// ```
 public final class StoredNode<Value>: NodeType, Observable {
-  
+
   // MARK: Equatable
   public static func == (lhs: StoredNode<Value>, rhs: StoredNode<Value>) -> Bool {
     return lhs === rhs
   }
-  
+
   // MARK: Hashable
   public func hash(into hasher: inout Hasher) {
     hasher.combine(ObjectIdentifier(self))
@@ -217,21 +217,23 @@ public final class StoredNode<Value>: NodeType, Observable {
 /// - Changes propagate: When this node's value changes, downstream nodes are notified
 /// ```
 public final class ComputedNode<Value>: NodeType, Observable {
-  
+
   // MARK: Equatable
   public static func == (lhs: ComputedNode<Value>, rhs: ComputedNode<Value>) -> Bool {
     return lhs === rhs
   }
-  
+
   // MARK: Hashable
   public func hash(into hasher: inout Hasher) {
     hasher.combine(ObjectIdentifier(self))
   }
-  
+
   private let lock: OSAllocatedUnfairLock<Void>
 
   nonisolated(unsafe)
     private var _cachedValue: Value?
+
+  private let comparator: @Sendable (Value, Value) -> Bool
 
   #if canImport(Observation)
     nonisolated(unsafe)
@@ -302,6 +304,17 @@ public final class ComputedNode<Value>: NodeType, Observable {
   nonisolated(unsafe)
     var stateViews: ContiguousArray<Weak<StateView>> = []
 
+  /// Initializes a computed node.
+  ///
+  /// This initializer uses a comparison function that always returns `false`.
+  /// This means updates will always occur regardless of whether the value has changed.
+  ///
+  /// - Parameters:
+  ///   - file: The file where the node is created (defaults to current file)
+  ///   - line: The line number where the node is created (defaults to current line)
+  ///   - column: The column number where the node is created (defaults to current column)
+  ///   - name: Optional name for the node
+  ///   - rule: The rule that computes the node's value
   public init(
     _ file: StaticString = #fileID,
     _ line: UInt = #line,
@@ -313,6 +326,33 @@ public final class ComputedNode<Value>: NodeType, Observable {
     self.name = name
     self.rule = rule
     self.lock = .init()
+    self.comparator = { _, _ in false }
+  }
+
+  /// Initializes a computed node.
+  ///
+  /// This initializer is used for value types that conform to `Equatable`,
+  /// using the `==` operator to compare values for equality.
+  /// Updates will only occur when the value has changed.
+  ///
+  /// - Parameters:
+  ///   - file: The file where the node is created (defaults to current file)
+  ///   - line: The line number where the node is created (defaults to current line)
+  ///   - column: The column number where the node is created (defaults to current column)
+  ///   - name: Optional name for the node
+  ///   - rule: The rule that computes the node's value
+  public init(
+    _ file: StaticString = #fileID,
+    _ line: UInt = #line,
+    _ column: UInt = #column,
+    name: String? = nil,
+    rule: @escaping @Sendable () -> Value
+  ) where Value: Equatable {
+    self.sourceLocation = .init(file: file, line: line, column: column)
+    self.name = name
+    self.rule = rule
+    self.lock = .init()
+    self.comparator = { $0 == $1 }
   }
 
   deinit {
@@ -344,15 +384,25 @@ public final class ComputedNode<Value>: NodeType, Observable {
 
     if hasPendingIncomingEdge || _cachedValue == nil {
 
-      TaskLocals.$currentNode.withValue(self) {
-        let isInitial = _cachedValue == nil
+      TaskLocals.$currentNode.withValue(self) { () -> Void in
+        let previousValue = _cachedValue
         removeIncomingEdges()
         _cachedValue = rule()
-        // TODO only if _cachedValue has changed
-        if !isInitial {
-          for o in outgoingEdges {
-            o.isPending = true
+
+        // propagate changes to dependent nodes
+        do {
+
+          if let previousValue = previousValue,
+             comparator(
+              previousValue,
+              _cachedValue!
+             ) == false 
+          {
+            for o in outgoingEdges {
+              o.isPending = true
+            }
           }
+
         }
       }
 
