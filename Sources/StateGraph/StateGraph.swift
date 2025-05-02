@@ -298,7 +298,7 @@ public final class ComputedNode<Value>: NodeType, Observable, CustomDebugStringC
     }
   }
 
-  let rule: @Sendable () -> Value
+  private let rule: @Sendable () -> Value
 
   nonisolated(unsafe)
     var incomingEdges: ContiguousArray<Edge> = []
