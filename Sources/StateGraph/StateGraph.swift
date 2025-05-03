@@ -24,7 +24,7 @@ protocol NodeType: Hashable, AnyObject, Sendable, CustomDebugStringConvertible {
   var incomingEdges: ContiguousArray<Edge> { get set }
 
   ///
-  var stateViews: ContiguousArray<Weak<StateView>> { get set }
+  var stateViews: ContiguousArray<WeakStateView> { get set }
 
   var potentiallyDirty: Bool { get set }
 
@@ -32,8 +32,8 @@ protocol NodeType: Hashable, AnyObject, Sendable, CustomDebugStringConvertible {
 }
 
 extension NodeType {
-  func register(_ value: StateView) {
-    let box = Weak(value)
+  func register(_ value: any StateViewType) {
+    let box = WeakStateView(value)
     guard stateViews.contains(box) == false else {
       return
     }
@@ -41,20 +41,18 @@ extension NodeType {
   }
 }
 
-struct Weak<T: AnyObject>: Equatable {
+struct WeakStateView: Equatable {
 
-  public static func == (lhs: Weak<T>, rhs: Weak<T>) -> Bool {
+  public static func == (lhs: WeakStateView, rhs: WeakStateView) -> Bool {
     return lhs.value === rhs.value
   }
 
-  weak var value: T?
+  weak var value: (any StateViewType)?
 
-  init(_ value: T) {
+  init(_ value: any StateViewType) {
     self.value = value
   }
 }
-
-extension Weak: Sendable where T: Sendable {}
 
 /// A node that functions as an endpoint in a Directed Acyclic Graph (DAG).
 ///
@@ -139,10 +137,11 @@ public final class StoredNode<Value>: NodeType, Observable, CustomDebugStringCon
           e.isPending = true
           e.to.potentiallyDirty = true
         }
-        stateViews.compactForEach {
-          $0._onMemberChange()
-        }
-        _sink.send()
+        // TODO:
+//        stateViews.compactForEach {
+//          $0._onMemberChange()
+//        }
+        _sink.send(output: self)
       }
 
       lock.unlock()
@@ -162,7 +161,7 @@ public final class StoredNode<Value>: NodeType, Observable, CustomDebugStringCon
     var outgoingEdges: ContiguousArray<Edge> = []
 
   nonisolated(unsafe)
-    var stateViews: ContiguousArray<Weak<StateView>> = []
+  var stateViews: ContiguousArray<WeakStateView> = []
 
   public init(
     _ file: StaticString = #fileID,
@@ -196,9 +195,9 @@ public final class StoredNode<Value>: NodeType, Observable, CustomDebugStringCon
   }
 
   nonisolated(unsafe)
-    private var _sink: Sink = .init()
+  private var _sink: _Sink<StoredNode<Value>> = .init()
 
-  public func onChange() -> AsyncStream<Void> {
+  public func onChange() -> AsyncStream<StoredNode<Value>> {
     lock.lock()
     defer { lock.unlock() }
     return _sink.addStream()
@@ -276,11 +275,12 @@ public final class ComputedNode<Value>: NodeType, Observable, CustomDebugStringC
         e.to.potentiallyDirty = true
       }
 
-      stateViews.compactForEach {
-        $0._onMemberChange()
-      }
+      // TODO:
+//      stateViews.compactForEach {        
+//        $0._onMemberChange()
+//      }
 
-      _sink.send()
+      _sink.send(output: self)
     }
   }
 
@@ -305,7 +305,7 @@ public final class ComputedNode<Value>: NodeType, Observable, CustomDebugStringC
   nonisolated(unsafe)
     var outgoingEdges: ContiguousArray<Edge> = []
   nonisolated(unsafe)
-    var stateViews: ContiguousArray<Weak<StateView>> = []
+    var stateViews: ContiguousArray<WeakStateView> = []
 
   /// Initializes a computed node.
   ///
@@ -430,9 +430,9 @@ public final class ComputedNode<Value>: NodeType, Observable, CustomDebugStringC
   }
 
   nonisolated(unsafe)
-    private var _sink: Sink = .init()
+  private var _sink: _Sink<ComputedNode<Value>> = .init()
 
-  public func onChange() -> AsyncStream<Void> {
+  public func onChange() -> AsyncStream<ComputedNode<Value>> {
     lock.lock()
     defer {
       lock.unlock()
@@ -469,9 +469,9 @@ public final class Edge: CustomDebugStringConvertible {
 
 }
 
-extension ContiguousArray<Weak<StateView>> {
+extension ContiguousArray<WeakStateView> {
 
-  mutating func compactForEach(_ body: (StateView) -> Void) {
+  mutating func compactForEach(_ body: (any StateViewType) -> Void) {
 
     self.removeAll {
       if let value = $0.value {

@@ -6,7 +6,7 @@ import SwiftSyntaxMacros
 @main
 struct Plugin: CompilerPlugin {
   let providingMacros: [Macro.Type] = [
-    FragmentMacro.self,
+    StateViewMacro.self,
     StoredMacro.self,
     ComputedMacro.self,
     IgnoredMacro.self,

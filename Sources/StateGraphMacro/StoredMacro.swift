@@ -51,37 +51,42 @@ extension StoredMacro: PeerMacro {
       }
     }
     
-    var _variableDecl = variableDecl.trimmed
-    _variableDecl.attributes = [.init(.init(stringLiteral: "@Ignored"))]
-    _variableDecl = _variableDecl.with(\.modifiers, [.init(name: .keyword(.private))])
+    let prefix = "$"
     
-    if variableDecl.isOptional {
+    var _variableDecl = variableDecl
+      .trimmed
+      .makeConstant()
+      .makePrivate()
+
+    _variableDecl.attributes = [.init(.init(stringLiteral: "@_Ignored"))]
+        
+    if variableDecl.isOptional && variableDecl.hasInitializer == false {
       _variableDecl =
       _variableDecl
-        .renamingIdentifier(with: "_backing_")
+        .renamingIdentifier(with: prefix)
         .modifyingTypeAnnotation({ type in
-          return "StateNode<\(type.trimmed)>?"
+          return "StoredNode<\(type.trimmed)>"
         })
       
-//      // add init
+      // add init
 //      _variableDecl = _variableDecl.with(
 //        \.bindings,
 //         .init(
 //          _variableDecl.bindings.map { binding in
-//            binding.with(\.initializer, .init(value: "StateNode.init(nil)" as ExprSyntax))
+//            binding.with(\.initializer, .init(value: ".init(wrappedValue: nil)" as ExprSyntax))
 //          })
 //      )
       
     } else {
       _variableDecl =
       _variableDecl
-        .renamingIdentifier(with: "_backing_")
+        .renamingIdentifier(with: prefix)
         .modifyingTypeAnnotation({ type in
-          return "StateNode<\(type.trimmed)>?"
+          return "StoredNode<\(type.trimmed)>"
         })
-//        .modifyingInit({ initializer in
-//          return .init(value: "StateNode.init(\(initializer.trimmed.value))" as ExprSyntax)
-//        })
+        .modifyingInit({ initializer in
+          return .init(value: ".init(wrappedValue: \(initializer.trimmed.value))" as ExprSyntax)
+        })
     }
     
     do {
@@ -99,6 +104,16 @@ extension StoredMacro: PeerMacro {
     }
     
     newMembers.append(DeclSyntax(_variableDecl))
+    
+    do {
+      
+      // add flag
+      
+//      newMembers.append("""
+//private var _has_registered_\(raw: variableDecl.name): Bool = false
+//""" as DeclSyntax)
+      
+    }    
          
     return newMembers
   }
@@ -126,29 +141,31 @@ extension StoredMacro: AccessorMacro {
     
     if variableDecl.isComputed {
       
-      let originalBlock = variableDecl.getBlock
-            
-      let readAccessor = AccessorDeclSyntax(
-      """
-      {            
-        if let _backing_\(raw: propertyName) {
-          return _backing_\(raw: propertyName).wrappedValue
-        }
-        let node = stateGraph.rule(name: "\(raw: propertyName)") { [self] in
-          \(originalBlock)
-        }
-        self._backing_\(raw: propertyName) = node
-        return node.wrappedValue
-      }
-      """
-      )
-            
-      var accessors: [AccessorDeclSyntax] = []
+      fatalError()
       
-      accessors.append(readAccessor)
-      
-      
-      return accessors
+//      let originalBlock = variableDecl.getBlock
+//            
+//      let readAccessor = AccessorDeclSyntax(
+//      """
+//      {            
+//        if let _backing_\(raw: propertyName) {
+//          return _backing_\(raw: propertyName).wrappedValue
+//        }
+//        let node = stateGraph.rule(name: "\(raw: propertyName)") { [self] in
+//          \(originalBlock)
+//        }
+//        self._backing_\(raw: propertyName) = node
+//        return node.wrappedValue
+//      }
+//      """
+//      )
+//            
+//      var accessors: [AccessorDeclSyntax] = []
+//      
+//      accessors.append(readAccessor)
+//      
+//      
+//      return accessors
       
     } else {
       
@@ -160,19 +177,18 @@ extension StoredMacro: AccessorMacro {
       let initAccessor = AccessorDeclSyntax(
       """
       @storageRestrictions(
-        accesses: stateGraph,
-        initializes: _backing_\(raw: propertyName)
+        initializes: $\(raw: propertyName)
       )
       init(initialValue) {
-        _backing_\(raw: propertyName) = stateGraph.input(name: "\(raw: propertyName)", initialValue)
+        $\(raw: propertyName) = .init(wrappedValue: initialValue)
       }
       """
       )
       
       let readAccessor = AccessorDeclSyntax(
       """
-      get {            
-        _backing_\(raw: propertyName)!.wrappedValue
+      get {
+        return $\(raw: propertyName).wrappedValue
       }
       """
       )
@@ -180,7 +196,7 @@ extension StoredMacro: AccessorMacro {
       let setAccessor = AccessorDeclSyntax(
       """
       set { 
-        _backing_\(raw: propertyName)!.wrappedValue = newValue      
+        $\(raw: propertyName).wrappedValue = newValue
       }
       """
       )
@@ -205,6 +221,20 @@ extension StoredMacro: AccessorMacro {
 }
 
 extension VariableDeclSyntax {
+  
+  consuming func makeConstant() -> Self {
+    self.with(\.bindingSpecifier, .keyword(.let))
+  }
+  
+  consuming func makePrivate() -> Self {
+    self.with(\.modifiers, [
+      .init(name: .keyword(.private)),
+    ])
+  }
+  
+  var hasInitializer: Bool {
+    self.bindings.contains(where: { $0.initializer != nil })
+  }
   
   var isOptional: Bool {
     

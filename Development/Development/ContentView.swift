@@ -49,19 +49,19 @@ private struct Book_SingleStoredNode: View {
 
 private struct Book_StateView: View {
   
-  final class Entity: StateView {
+  @StateView
+  final class Entity {
     
-    @Stored var name: String = ""
-    @Stored var count: Int = 0
-    @Stored var count2: Int = 0
+    var name: String = ""
+    var count: Int = 0
+    var count2: Int = 0
     
     init(
       name: String,
       count: Int
     ) {      
       self.name = name
-      self.count = count      
-      super.init()
+      self.count = count
     }
     
   }

@@ -19,7 +19,8 @@ let package = Package(
     // Products define the executables and libraries a package produces, making them visible to other packages.
     .library(
       name: "StateGraph",
-      targets: ["StateGraph"])
+      targets: ["StateGraph"]
+    )
   ],
   dependencies: [
     .package(url: "https://github.com/swiftlang/swift-syntax.git", "600.0.0"..<"602.0.0"),
@@ -37,6 +38,14 @@ let package = Package(
       name: "StateGraph",
       dependencies: [
         "StateGraphMacro"
+      ]
+    ),
+    .testTarget(
+      name: "StateGraphMacroTests",
+      dependencies: [
+        "StateGraphMacro",
+        .product(name: "SwiftSyntaxMacrosTestSupport", package: "swift-syntax"),
+        .product(name: "MacroTesting", package: "swift-macro-testing"),
       ]
     ),
     .testTarget(

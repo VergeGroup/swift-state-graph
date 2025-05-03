@@ -27,7 +27,7 @@ public struct ComputedMember<Value>: Sendable {
       rule: compute)
   }
 
-  public static subscript<T: StateView>(
+  public static subscript<T: StateViewType>(
     _enclosingInstance instance: T,
     wrapped wrappedKeyPath: ReferenceWritableKeyPath<T, Value>,
     storage storageKeyPath: ReferenceWritableKeyPath<T, Self>
@@ -78,7 +78,7 @@ public struct StoredMember<Value>: Sendable {
     self.node
   }
 
-  public static subscript<T: StateView>(
+  public static subscript<T: StateViewType>(
     _enclosingInstance instance: T,
     wrapped wrappedKeyPath: ReferenceWritableKeyPath<T, Value>,
     storage storageKeyPath: ReferenceWritableKeyPath<T, Self>

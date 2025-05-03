@@ -8,9 +8,10 @@
 import StateGraph
 import SwiftUI
 
-final class TagEntity: StateView {
+@StateView
+final class TagEntity: Sendable {
   let id: String
-  @Stored var name: String = ""
+  var name: String = ""
 
   init(
     id: String,
@@ -18,14 +19,22 @@ final class TagEntity: StateView {
   ) {
     self.id = id
     self.name = name
-    super.init()
   }
 }
 
-final class AuthorEntity: StateView {
+@StateView
+final class AuthorEntity: Hashable, Sendable {
+  
+  public static func == (lhs: AuthorEntity, rhs: AuthorEntity) -> Bool {
+    lhs === rhs
+  }
+  
+  func hash(into hasher: inout Hasher) {
+    id.hash(into: &hasher)
+  }
 
   let id: String
-  @Stored var name: String = ""
+  var name: String = ""
 
   init(
     id: String,
@@ -33,17 +42,25 @@ final class AuthorEntity: StateView {
   ) {
     self.id = id
     self.name = name
-    super.init()
   }
 
 }
 
-final class BookEntity: StateView {
+@StateView
+final class BookEntity: Sendable, Hashable {
+  
+  public static func == (lhs: BookEntity, rhs: BookEntity) -> Bool {
+    lhs === rhs
+  }
+  
+  func hash(into hasher: inout Hasher) {
+    id.hash(into: &hasher)
+  }
 
   let id: String
-  @Stored var title: String = ""
-  @Stored var author: AuthorEntity
-  @Stored var tags: [TagEntity] = []
+  var title: String
+  var author: AuthorEntity
+  var tags: [TagEntity] = []
 
   init(
     id: String,
@@ -55,24 +72,24 @@ final class BookEntity: StateView {
     self.title = title
     self.author = author
     self.tags = tags
-    super.init()
   }
 }
 
-final class RootState: StateView {
+@StateView
+final class RootState: Sendable {
 
-  final class DB: StateView {
-    @Stored var books: [BookEntity] = []
-    @Stored var authors: [AuthorEntity] = []
+  @StateView
+  final class DB: Sendable {
+    var books: [BookEntity] = []
+    var authors: [AuthorEntity] = []
   }
 
   let db: DB
 
-  override init() {
+  init() {
 
     self.db = .init()
 
-    super.init()
   }
 
 }

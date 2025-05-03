@@ -2,6 +2,46 @@ import Testing
 
 @testable import StateGraph
 
+@StateView
+final class Author {
+  var name: String
+  
+  init(
+    name: String
+  ) {
+    self.name = name
+  }
+}
+
+@StateView
+final class Tag {
+  var name: String
+  
+  init(
+    name: String
+  ) {
+    self.name = name
+  }
+}
+
+@StateView
+final class Book {
+  
+  let author: Author
+  var title: String
+  var tags: [Tag]
+  
+  init(
+    author: Author,
+    title: String,
+    tags: [Tag]
+  ) {
+    self.author = author
+    self.title = title
+    self.tags = tags
+  }
+}
+
 @Suite
 struct Tests {
   @Test
@@ -76,45 +116,6 @@ struct Tests {
   }
 
   @Test func db() {
-
-    final class Author: StateView {
-      @Stored var name: String
-
-      init(
-        name: String
-      ) {
-        self._name = .init(wrappedValue: name)
-        super.init()
-      }
-    }
-
-    final class Tag: StateView {
-      @Stored var name: String
-
-      init(
-        name: String
-      ) {
-        self._name = .init(wrappedValue: name)
-        super.init()
-      }
-    }
-
-    final class Book: StateView {
-      let author: Author
-      @Stored var title: String
-      @Stored var tags: [Tag]
-
-      init(
-        author: Author,
-        title: String,
-        tags: [Tag]
-      ) {
-        self.author = author
-        self._title = .init(wrappedValue: title)
-        self._tags = .init(wrappedValue: tags)
-        super.init()
-      }
-    }
 
     func makeTag(name: String) -> Tag {
       return Tag(
@@ -273,4 +274,33 @@ struct SubscriptionTests {
     #expect(computedNode.wrappedValue == 40)
   }
 
+}
+
+import Observation
+
+@Suite
+struct StateViewTests {
+  
+  @StateView
+  final class Model: Sendable {
+    var count: Int = 0
+  }
+  
+  @Test func tracking() async {
+    
+    let m = Model()
+    
+    await confirmation(expectedCount: 1) { c in
+      
+      withObservationTracking { 
+        _ = m.count
+      } onChange: { 
+        c.confirm()
+      }
+      
+      m.count += 1
+      
+    }
+           
+  }
 }

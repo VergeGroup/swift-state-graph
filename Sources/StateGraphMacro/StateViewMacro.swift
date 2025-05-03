@@ -4,7 +4,7 @@ import SwiftSyntax
 import SwiftSyntaxBuilder
 import SwiftSyntaxMacros
 
-public struct FragmentMacro: Macro {
+public struct StateViewMacro: Macro {
   
   public enum Error: Swift.Error {
     case needsTypeAnnotation
@@ -17,7 +17,7 @@ public struct FragmentMacro: Macro {
   
 }
 
-extension FragmentMacro: MemberAttributeMacro {
+extension StateViewMacro: MemberAttributeMacro {
   
   public static func expansion(
     of node: AttributeSyntax,
@@ -34,8 +34,9 @@ extension FragmentMacro: MemberAttributeMacro {
     
     let ignoreMacros = Set(
       [
-        "@Node",
-        "@WeakNode",
+        "@_Stored",
+        "@_Computed",
+        "@_Ignored",
       ]
     )
     
@@ -52,19 +53,21 @@ extension FragmentMacro: MemberAttributeMacro {
     }
     
     if variableDecl.isComputed {      
-      return [AttributeSyntax(stringLiteral: "@Computed")]
+      return [
+//        AttributeSyntax(stringLiteral: "@_Computed")
+      ]
     } else {          
       if isWeak {
-        return [AttributeSyntax(stringLiteral: "@StoredWeak")]
+        return [AttributeSyntax(stringLiteral: "@_StoredWeak")]
       } else {
-        return [AttributeSyntax(stringLiteral: "@Stored")]
+        return [AttributeSyntax(stringLiteral: "@_Stored")]
       }
     }
     
   }
 }
 
-extension FragmentMacro: MemberMacro {
+extension StateViewMacro: MemberMacro {
   
   public static func expansion(
     of node: AttributeSyntax,
@@ -72,18 +75,26 @@ extension FragmentMacro: MemberMacro {
     conformingTo protocols: [TypeSyntax],
     in context: some MacroExpansionContext
   ) throws -> [DeclSyntax] {
-    let isPublic = declaration.modifiers.contains(where: { $0.name.tokenKind == .keyword(.public) })
+    
+    guard let classDecl = declaration.as(ClassDeclSyntax.self) else {
+      fatalError()
+    }
+    let className = classDecl.name.text
+    print(className)
+    let isPublic = declaration.modifiers.contains(where: { $0.name.tokenKind == .keyword(.public) })  
+    
+    let accessor = isPublic ? "public" : "internal"
     
     return [
-      """
-      \(raw: isPublic ? "public" : "internal") var stateGraph: StateGraph
-      """ as DeclSyntax
+//      """
+//      \(raw: accessor) var sink: Sink<Void> = .init()          
+//      """ as DeclSyntax,           
     ]
   }
     
 }
 
-extension FragmentMacro: ExtensionMacro {
+extension StateViewMacro: ExtensionMacro {
   public static func expansion(
     of node: AttributeSyntax,
     attachedTo declaration: some DeclGroupSyntax,
@@ -98,7 +109,7 @@ extension FragmentMacro: ExtensionMacro {
     
     return [
       ("""
-      extension \(classDecl.name.trimmed): StateFragment {      
+      extension \(classDecl.name.trimmed): StateViewType {      
       }
       """ as DeclSyntax).cast(ExtensionDeclSyntax.self)
     ]
