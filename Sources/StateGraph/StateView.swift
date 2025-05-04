@@ -1,7 +1,7 @@
 import os.lock
 
 public protocol StateViewType: Observable, Equatable, Hashable, AnyObject {
-      
+  
 }
 
 extension StateViewType {
@@ -60,8 +60,8 @@ extension StateViewType {
 
 extension StateViewType {
 
-  public typealias Computed<Value> = ComputedMember<Value>
-  public typealias Stored<Value> = StoredMember<Value>
+//  public typealias Computed<Value> = ComputedMember<Value>
+//  public typealias Stored<Value> = StoredMember<Value>
 
 }
 

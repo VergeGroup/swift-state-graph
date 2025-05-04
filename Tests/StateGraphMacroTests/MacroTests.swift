@@ -52,8 +52,6 @@ final class MacroTests: XCTestCase {
         
         }
 
-        internal var sink: Sink<Void> = .init()
-
       }
 
       extension Model: StateViewType {

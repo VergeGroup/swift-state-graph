@@ -23,22 +23,11 @@ protocol NodeType: Hashable, AnyObject, Sendable, CustomDebugStringConvertible {
   /// inverse edges that depending on nodes
   var incomingEdges: ContiguousArray<Edge> { get set }
 
-  ///
-  var stateViews: ContiguousArray<WeakStateView> { get set }
+  var trackingRegistrations: Set<TrackingRegistration> { get set }
 
   var potentiallyDirty: Bool { get set }
 
   func recomputeIfNeeded()
-}
-
-extension NodeType {
-  func register(_ value: any StateViewType) {
-    let box = WeakStateView(value)
-    guard stateViews.contains(box) == false else {
-      return
-    }
-    stateViews.append(box)
-  }
 }
 
 struct WeakStateView: Equatable {
@@ -86,7 +75,7 @@ public final class StoredNode<Value>: NodeType, Observable, CustomDebugStringCon
 
   #if canImport(Observation)
     nonisolated(unsafe)
-      private var observationRegistrar: ObservationRegistrar?
+  private var observationRegistrar: ObservationRegistrar = .init()
   #endif
 
   public var potentiallyDirty: Bool {
@@ -103,48 +92,53 @@ public final class StoredNode<Value>: NodeType, Observable, CustomDebugStringCon
 
   public var wrappedValue: Value {
     _read {
+      
+#if canImport(Observation)
+      observationRegistrar.access(self, keyPath: \.self)
+#endif
+      
       lock.lock()
       defer { lock.unlock() }
-      #if canImport(Observation)
-        synchronized_prepareObservationRegistrar()
-        observationRegistrar!.access(self, keyPath: \.self)
-      #endif
+                
       // record dependency
       if let c = TaskLocals.currentNode {
         let edge = Edge(from: self, to: c)
         outgoingEdges.append(edge)
         c.incomingEdges.append(edge)
       }
+      // record tracking
+      if let registration = TrackingRegistration.registration {
+        self.trackingRegistrations.insert(registration)
+      }
       yield _value
     }
     _modify {
 
+#if canImport(Observation)
+      observationRegistrar.willSet(self, keyPath: \.self)
+      
+      defer {
+        observationRegistrar.didSet(self, keyPath: \.self)
+      }
+#endif
+      
       lock.lock()
 
-      do {
-        #if canImport(Observation)
-          synchronized_prepareObservationRegistrar()
-          observationRegistrar!.willSet(self, keyPath: \.self)
-
-          defer {
-            observationRegistrar!.didSet(self, keyPath: \.self)
-          }
-        #endif
-
-        yield &_value
-
-        for e in outgoingEdges {
-          e.isPending = true
-          e.to.potentiallyDirty = true
-        }
-        // TODO:
-//        stateViews.compactForEach {
-//          $0._onMemberChange()
-//        }
-        _sink.send(output: self)
+      yield &_value
+      
+      for e in outgoingEdges {
+        e.isPending = true
+        e.to.potentiallyDirty = true
       }
-
+      
+      let _trackingRegistrations = trackingRegistrations
+      self.trackingRegistrations.removeAll()
+                           
       lock.unlock()
+      
+      for r in _trackingRegistrations {
+        r.perform()
+      }
     }
   }
 
@@ -159,9 +153,9 @@ public final class StoredNode<Value>: NodeType, Observable, CustomDebugStringCon
 
   nonisolated(unsafe)
     var outgoingEdges: ContiguousArray<Edge> = []
-
+  
   nonisolated(unsafe)
-  var stateViews: ContiguousArray<WeakStateView> = []
+  var trackingRegistrations: Set<TrackingRegistration> = []
 
   public init(
     _ file: StaticString = #fileID,
@@ -185,22 +179,6 @@ public final class StoredNode<Value>: NodeType, Observable, CustomDebugStringCon
 
   public func recomputeIfNeeded() {
     // no operation
-  }
-
-  @inline(__always)
-  private func synchronized_prepareObservationRegistrar() {
-    if observationRegistrar == nil {
-      observationRegistrar = .init()
-    }
-  }
-
-  nonisolated(unsafe)
-  private var _sink: _Sink<StoredNode<Value>> = .init()
-
-  public func onChange() -> AsyncStream<StoredNode<Value>> {
-    lock.lock()
-    defer { lock.unlock() }
-    return _sink.addStream()
   }
 
   public var debugDescription: String {
@@ -239,7 +217,7 @@ public final class ComputedNode<Value>: NodeType, Observable, CustomDebugStringC
 
   #if canImport(Observation)
     nonisolated(unsafe)
-      private var observationRegistrar: ObservationRegistrar?
+  private var observationRegistrar: ObservationRegistrar = .init()
   #endif
 
   public var potentiallyDirty: Bool {
@@ -267,20 +245,17 @@ public final class ComputedNode<Value>: NodeType, Observable, CustomDebugStringC
       guard _potentiallyDirty, _potentiallyDirty != oldValue else { return }
 
       #if canImport(Observation)
-        prepareObservationRegistrar()
-        observationRegistrar!.willSet(self, keyPath: \.self)
+        observationRegistrar.willSet(self, keyPath: \.self)
       #endif
 
       for e in outgoingEdges {
         e.to.potentiallyDirty = true
       }
 
-      // TODO:
-//      stateViews.compactForEach {        
-//        $0._onMemberChange()
-//      }
-
-      _sink.send(output: self)
+      for r in trackingRegistrations {
+        r.perform()
+      }
+      trackingRegistrations.removeAll()
     }
   }
 
@@ -290,8 +265,7 @@ public final class ComputedNode<Value>: NodeType, Observable, CustomDebugStringC
   public var wrappedValue: Value {
     _read {
       #if canImport(Observation)
-        prepareObservationRegistrar()
-        observationRegistrar!.access(self, keyPath: \.self)
+        observationRegistrar.access(self, keyPath: \.self)
       #endif
       recomputeIfNeeded()
       yield _cachedValue!
@@ -305,7 +279,7 @@ public final class ComputedNode<Value>: NodeType, Observable, CustomDebugStringC
   nonisolated(unsafe)
     var outgoingEdges: ContiguousArray<Edge> = []
   nonisolated(unsafe)
-    var stateViews: ContiguousArray<WeakStateView> = []
+  var trackingRegistrations: Set<TrackingRegistration> = []
 
   /// Initializes a computed node.
   ///
@@ -376,6 +350,10 @@ public final class ComputedNode<Value>: NodeType, Observable, CustomDebugStringC
       outgoingEdges.append(edge)
       c.incomingEdges.append(edge)
     }
+    // record tracking
+    if let registration = TrackingRegistration.registration {
+      self.trackingRegistrations.insert(registration)
+    }
 
     if !_potentiallyDirty && _cachedValue != nil { return }
 
@@ -421,25 +399,7 @@ public final class ComputedNode<Value>: NodeType, Observable, CustomDebugStringC
     }
     incomingEdges.removeAll()
   }
-
-  @inline(__always)
-  private func prepareObservationRegistrar() {
-    if observationRegistrar == nil {
-      observationRegistrar = .init()
-    }
-  }
-
-  nonisolated(unsafe)
-  private var _sink: _Sink<ComputedNode<Value>> = .init()
-
-  public func onChange() -> AsyncStream<ComputedNode<Value>> {
-    lock.lock()
-    defer {
-      lock.unlock()
-    }
-    return _sink.addStream()
-  }
-  
+   
   public var debugDescription: String {
     "ComputedNode<\(Value.self)>(\(String(describing: _cachedValue)))"
   }

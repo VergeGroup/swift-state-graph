@@ -206,74 +206,6 @@ struct Tests {
 @Suite
 struct SubscriptionTests {
 
-  @MainActor
-  @Test func test() async {
-
-    let node = StoredNode(wrappedValue: "A")
-
-    let ex = Task {
-      await confirmation(expectedCount: 1) { c in
-
-        for await _ in node.onChange() {
-          c.confirm()
-          return
-        }
-      }
-    }
-
-    Task {
-      node.wrappedValue = "B"
-    }
-
-    await ex.value
-  }
-
-  @MainActor
-  @Test func testComputedNodeSubscription() async {
-
-    // 入力ノードを作成
-    let inputNode = StoredNode(name: "input", wrappedValue: 10)
-
-    // 計算ノードを作成（入力ノードに依存）
-    let computedNode = ComputedNode(name: "computed") {
-      inputNode.wrappedValue * 2
-    }
-
-    // 最初の計算結果を確認
-    #expect(computedNode.wrappedValue == 20)
-
-    // computedNodeの変更を監視
-    let s1 = Task {
-      await confirmation(expectedCount: 1) { c in
-        for await _ in computedNode.onChange() {
-          c.confirm()
-          return
-        }
-      }
-    }
-
-    let s2 = Task {
-      await confirmation(expectedCount: 1) { c in
-        for await _ in computedNode.onChange() {
-          c.confirm()
-          return
-        }
-      }
-    }
-
-    // 入力ノードの値を変更
-    Task {
-      inputNode.wrappedValue = 20
-    }
-
-    // 通知が届くのを待つ
-    await s1.value
-    await s2.value
-
-    // 計算結果が更新されていることを確認
-    #expect(computedNode.wrappedValue == 40)
-  }
-
 }
 
 import Observation
@@ -295,6 +227,7 @@ struct StateViewTests {
       withObservationTracking { 
         _ = m.count
       } onChange: { 
+        #expect(m.count == 0)
         c.confirm()
       }
       
@@ -302,5 +235,49 @@ struct StateViewTests {
       
     }
            
+  }
+  
+
+}
+
+@Suite
+struct StateGraphTrackingTests {
+  
+  @StateView
+  final class Model: Sendable {
+    var count: Int = 0
+  }
+  
+  @Test func basic() async {
+    
+    let m = Model()
+    
+    await confirmation(expectedCount: 1) { c in
+      withStateGraphTracking { 
+        _ = m.count              
+      } didChange: { 
+        #expect(m.count == 1)
+        c.confirm()        
+      }
+      m.count += 1
+    }
+    
+  }
+  
+  @Test func twice_access_single_call() async {
+    
+    let m = Model()
+    
+    await confirmation(expectedCount: 1) { c in
+      withStateGraphTracking { 
+        _ = m.count              
+        _ = m.count              
+      } didChange: { 
+        #expect(m.count == 1)
+        c.confirm()        
+      }
+      m.count += 1
+    }
+    
   }
 }
