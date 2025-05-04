@@ -4,7 +4,7 @@ import SwiftSyntax
 import SwiftSyntaxBuilder
 import SwiftSyntaxMacros
 
-public struct StateViewMacro: Macro {
+public struct GraphViewMacro: Macro {
   
   public enum Error: Swift.Error {
     case needsTypeAnnotation
@@ -17,7 +17,7 @@ public struct StateViewMacro: Macro {
   
 }
 
-extension StateViewMacro: MemberAttributeMacro {
+extension GraphViewMacro: MemberAttributeMacro {
   
   public static func expansion(
     of node: AttributeSyntax,
@@ -67,7 +67,7 @@ extension StateViewMacro: MemberAttributeMacro {
   }
 }
 
-extension StateViewMacro: MemberMacro {
+extension GraphViewMacro: MemberMacro {
   
   public static func expansion(
     of node: AttributeSyntax,
@@ -94,7 +94,7 @@ extension StateViewMacro: MemberMacro {
     
 }
 
-extension StateViewMacro: ExtensionMacro {
+extension GraphViewMacro: ExtensionMacro {
   public static func expansion(
     of node: AttributeSyntax,
     attachedTo declaration: some DeclGroupSyntax,
@@ -109,7 +109,7 @@ extension StateViewMacro: ExtensionMacro {
     
     return [
       ("""
-      extension \(classDecl.name.trimmed): StateViewType {      
+      extension \(classDecl.name.trimmed): GraphViewType {      
       }
       """ as DeclSyntax).cast(ExtensionDeclSyntax.self)
     ]

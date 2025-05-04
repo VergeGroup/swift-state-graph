@@ -10,7 +10,7 @@ final class MacroTests: XCTestCase {
     withMacroTesting(
       record: false,
       macros: [
-        "StateView": StateViewMacro.self,
+        "GraphView": GraphViewMacro.self,
         "_Stored" : StoredMacro.self,
       ]
     ) {
@@ -22,7 +22,7 @@ final class MacroTests: XCTestCase {
     
     assertMacro {
       """
-      @StateView
+      @GraphView
       final class Model {
       
         var count: Int = 0
@@ -54,7 +54,7 @@ final class MacroTests: XCTestCase {
 
       }
 
-      extension Model: StateViewType {
+      extension Model: GraphViewType {
       }
       """
     }

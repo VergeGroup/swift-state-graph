@@ -2,7 +2,7 @@ import Testing
 
 @testable import StateGraph
 
-@StateView
+@GraphView
 final class Author {
   var name: String
   
@@ -13,7 +13,7 @@ final class Author {
   }
 }
 
-@StateView
+@GraphView
 final class Tag {
   var name: String
   
@@ -24,7 +24,7 @@ final class Tag {
   }
 }
 
-@StateView
+@GraphView
 final class Book {
   
   let author: Author
@@ -213,7 +213,7 @@ import Observation
 @Suite
 struct StateViewTests {
   
-  @StateView
+  @GraphView
   final class Model: Sendable {
     var count: Int = 0
   }
@@ -243,7 +243,7 @@ struct StateViewTests {
 @Suite
 struct StateGraphTrackingTests {
   
-  @StateView
+  @GraphView
   final class Model: Sendable {
     var count: Int = 0
   }

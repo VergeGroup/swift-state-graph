@@ -36,9 +36,9 @@ struct WeakStateView: Equatable {
     return lhs.value === rhs.value
   }
 
-  weak var value: (any StateViewType)?
+  weak var value: (any GraphViewType)?
 
-  init(_ value: any StateViewType) {
+  init(_ value: any GraphViewType) {
     self.value = value
   }
 }
@@ -431,7 +431,7 @@ public final class Edge: CustomDebugStringConvertible {
 
 extension ContiguousArray<WeakStateView> {
 
-  mutating func compactForEach(_ body: (any StateViewType) -> Void) {
+  mutating func compactForEach(_ body: (any GraphViewType) -> Void) {
 
     self.removeAll {
       if let value = $0.value {

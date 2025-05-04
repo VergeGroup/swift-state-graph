@@ -1,8 +1,8 @@
 
 //@attached(member, names: named(sink))
-@attached(extension, conformances: StateViewType)
+@attached(extension, conformances: GraphViewType)
 @attached(memberAttribute)
-public macro StateView() = #externalMacro(module: "StateGraphMacro", type: "StateViewMacro")
+public macro GraphView() = #externalMacro(module: "StateGraphMacro", type: "GraphViewMacro")
 
 @attached(accessor, names: named(init), named(get), named(set))
 @attached(peer, names: prefixed(`$`))
@@ -25,7 +25,7 @@ public macro _Ignored() = #externalMacro(module: "StateGraphMacro", type: "Ignor
 
 import os.lock
 
-@StateView
+@GraphView
 final class StateViewModel {
   
   let constant_init: Int = 0

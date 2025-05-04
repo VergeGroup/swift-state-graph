@@ -1,10 +1,13 @@
 import os.lock
 
-public protocol StateViewType: Observable, Equatable, Hashable, AnyObject {
+/**
+ Use @StateView macro
+ */
+public protocol GraphViewType: Observable, Equatable, Hashable, AnyObject {
   
 }
 
-extension StateViewType {
+extension GraphViewType {
   
   public func hash(into hasher: inout Hasher) {
     hasher.combine(ObjectIdentifier(self))
