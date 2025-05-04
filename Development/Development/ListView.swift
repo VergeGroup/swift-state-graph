@@ -23,16 +23,8 @@ final class TagEntity: Sendable {
 }
 
 @StateView
-final class AuthorEntity: Hashable, Sendable {
+final class AuthorEntity: Sendable {
   
-  public static func == (lhs: AuthorEntity, rhs: AuthorEntity) -> Bool {
-    lhs === rhs
-  }
-  
-  func hash(into hasher: inout Hasher) {
-    id.hash(into: &hasher)
-  }
-
   let id: String
   var name: String = ""
 
@@ -47,16 +39,8 @@ final class AuthorEntity: Hashable, Sendable {
 }
 
 @StateView
-final class BookEntity: Sendable, Hashable {
+final class BookEntity: Sendable {
   
-  public static func == (lhs: BookEntity, rhs: BookEntity) -> Bool {
-    lhs === rhs
-  }
-  
-  func hash(into hasher: inout Hasher) {
-    id.hash(into: &hasher)
-  }
-
   let id: String
   var title: String
   var author: AuthorEntity

@@ -1,7 +1,18 @@
 import os.lock
 
-public protocol StateViewType: Observable, AnyObject {
+public protocol StateViewType: Observable, Equatable, Hashable, AnyObject {
       
+}
+
+extension StateViewType {
+  
+  public func hash(into hasher: inout Hasher) {
+    hasher.combine(ObjectIdentifier(self))
+  }
+  
+  public static func == (lhs: Self, rhs: Self) -> Bool {
+    lhs === rhs
+  }
 }
 
 //open class StateView: Hashable, StateViewType {

@@ -50,7 +50,7 @@ private struct Book_SingleStoredNode: View {
 private struct Book_StateView: View {
   
   @StateView
-  final class Entity {
+  final class Entity: Equatable {
     
     var name: String = ""
     var count: Int = 0
