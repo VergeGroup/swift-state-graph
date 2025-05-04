@@ -44,7 +44,7 @@ public func withContinuousStateGraphTracking(
   isolation: isolated (any Actor)? = #isolation
 ) {
   
-  let applyBox = UnsafeSendable(apply)    
+  let applyBox = UnsafeSendable(apply) 
       
   withStateGraphTracking(apply: apply) { 
     let continuation = didChange()
@@ -60,6 +60,18 @@ public func withContinuousStateGraphTracking(
         )
       }
       
+    }
+  }
+}
+
+public func withStateGraphTrackingStream(
+  apply: @escaping () -> Void
+) -> AsyncStream<StateGraphTrackingContinuation> {
+  
+  return AsyncStream { continuation in
+    withContinuousStateGraphTracking(apply: apply) { 
+      continuation.yield(.next)
+      return .next
     }
   }
 }
