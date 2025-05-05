@@ -56,7 +56,7 @@ extension StoredMacro: PeerMacro {
     var _variableDecl = variableDecl
       .trimmed
       .makeConstant()
-      .makePrivate()
+      .useModifier(sameAs: variableDecl)
 
     _variableDecl.attributes = [.init(.init(stringLiteral: "@StageGraphIgnored"))]
         
@@ -230,6 +230,10 @@ extension VariableDeclSyntax {
     self.with(\.modifiers, [
       .init(name: .keyword(.private)),
     ])
+  }
+  
+  consuming func useModifier(sameAs: VariableDeclSyntax) -> Self {
+    self.with(\.modifiers, sameAs.modifiers)
   }
   
   var hasInitializer: Bool {
