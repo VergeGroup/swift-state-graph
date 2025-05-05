@@ -9,6 +9,10 @@ public macro GraphView() = #externalMacro(module: "StateGraphMacro", type: "Grap
 public macro _Stored() = #externalMacro(module: "StateGraphMacro", type: "StoredMacro")
 
 @attached(accessor, names: named(init), named(get), named(set))
+@attached(peer, names: prefixed(`$`))
+public macro GraphStored() = #externalMacro(module: "StateGraphMacro", type: "StoredMacro")
+
+@attached(accessor, names: named(init), named(get), named(set))
 @attached(peer, names: prefixed(_backing_), prefixed(_has_registered))
 public macro _StoredWeak() = #externalMacro(module: "StateGraphMacro", type: "StoredMacro")
 
