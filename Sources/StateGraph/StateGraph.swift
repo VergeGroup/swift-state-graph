@@ -43,6 +43,19 @@ struct WeakStateView: Equatable {
   }
 }
 
+struct WeakNode: Equatable {
+  
+  public static func == (lhs: WeakNode, rhs: WeakNode) -> Bool {
+    return lhs.value === rhs.value
+  }
+  
+  weak var value: (any NodeType)?
+  
+  init(_ value: any NodeType) {
+    self.value = value
+  }
+}
+
 /// A node that functions as an endpoint in a Directed Acyclic Graph (DAG).
 ///
 /// `StoredNode` can have its value set directly from the outside, and changes to its value
@@ -168,6 +181,12 @@ public final class StoredNode<Value>: NodeType, Observable, CustomDebugStringCon
     self.name = name
     self.lock = .init()
     self._value = wrappedValue
+    
+    #if DEBUG
+    Task {
+      await NodeStore.shared.register(node: self)
+    }
+    #endif
   }
 
   deinit {
@@ -304,6 +323,12 @@ public final class ComputedNode<Value>: NodeType, Observable, CustomDebugStringC
     self.rule = rule
     self.lock = .init()
     self.comparator = { _, _ in false }
+    
+#if DEBUG
+    Task {
+      await NodeStore.shared.register(node: self)
+    }
+#endif
   }
 
   /// Initializes a computed node.
@@ -330,6 +355,12 @@ public final class ComputedNode<Value>: NodeType, Observable, CustomDebugStringC
     self.rule = rule
     self.lock = .init()
     self.comparator = { $0 == $1 }
+        
+#if DEBUG
+    Task {
+      await NodeStore.shared.register(node: self)
+    }
+#endif
   }
 
   deinit {

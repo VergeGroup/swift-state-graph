@@ -1,3 +1,4 @@
+import Observation
 import Testing
 
 @testable import StateGraph
@@ -5,7 +6,7 @@ import Testing
 @GraphView
 final class Author {
   var name: String
-  
+
   init(
     name: String
   ) {
@@ -16,7 +17,7 @@ final class Author {
 @GraphView
 final class Tag {
   var name: String
-  
+
   init(
     name: String
   ) {
@@ -26,11 +27,11 @@ final class Tag {
 
 @GraphView
 final class Book {
-  
+
   let author: Author
   var title: String
   var tags: [Tag]
-  
+
   init(
     author: Author,
     title: String,
@@ -208,76 +209,182 @@ struct SubscriptionTests {
 
 }
 
-import Observation
-
 @Suite
 struct StateViewTests {
-  
+
   @GraphView
   final class Model: Sendable {
     var count: Int = 0
   }
-  
+
   @Test func tracking() async {
-    
+
     let m = Model()
-    
+
     await confirmation(expectedCount: 1) { c in
-      
-      withObservationTracking { 
+
+      withObservationTracking {
         _ = m.count
-      } onChange: { 
+      } onChange: {
         #expect(m.count == 0)
         c.confirm()
       }
-      
+
       m.count += 1
-      
+
     }
-           
+
   }
-  
 
 }
 
 @Suite
 struct StateGraphTrackingTests {
-  
+
   @GraphView
   final class Model: Sendable {
     var count: Int = 0
   }
-  
+
   @Test func basic() async {
-    
+
     let m = Model()
-    
+
     await confirmation(expectedCount: 1) { c in
-      withStateGraphTracking { 
-        _ = m.count              
-      } didChange: { 
+      withStateGraphTracking {
+        _ = m.count
+      } didChange: {
         #expect(m.count == 1)
-        c.confirm()        
+        c.confirm()
       }
       m.count += 1
     }
+
+  }
+
+  @Test func twice_access_single_call() async {
+
+    let m = Model()
+
+    await confirmation(expectedCount: 1) { c in
+      withStateGraphTracking {
+        _ = m.count
+        _ = m.count
+      } didChange: {
+        #expect(m.count == 1)
+        c.confirm()
+      }
+      m.count += 1
+    }
+
+  }
+}
+
+@Suite
+struct GraphViewAdvancedTests {
+
+  @GraphView
+  final class NestedModel: Sendable {
     
+    var counter: Int = 0
+    
+    var subModel: SubModel?
+    
+    init() {
+      self.subModel = nil
+    }
+
+    func incrementCounter() {
+      counter += 1
+    }
+
+    func createSubModel() {
+      subModel = SubModel()
+    }
+  }
+
+  @GraphView
+  final class SubModel: Sendable {
+    var value: String = "default"
+
+    init() {}
+
+    func updateValue(_ newValue: String) {
+      value = newValue
+    }
+  }
+
+  @Test func nested_model_tracking() async {
+    let model = NestedModel()
+    model.createSubModel()
+
+    await confirmation(expectedCount: 1) { c in
+      withStateGraphTracking {
+        _ = model.subModel?.value
+      } didChange: {
+        #expect(model.subModel?.value == "updated")
+        c.confirm()
+      }
+
+      model.subModel?.updateValue("updated")
+    }
+  }
+
+  @Test func multiple_properties_tracking() async {
+    let model = NestedModel()
+
+    await confirmation(expectedCount: 1) { c in
+      withStateGraphTracking {
+        _ = model.counter
+        model.createSubModel()
+        _ = model.subModel?.value
+      } didChange: {
+        #expect(model.counter == 1)
+        c.confirm()
+      }
+
+      model.incrementCounter()
+    }
   }
   
-  @Test func twice_access_single_call() async {
-    
-    let m = Model()
-    
-    await confirmation(expectedCount: 1) { c in
-      withStateGraphTracking { 
-        _ = m.count              
-        _ = m.count              
-      } didChange: { 
-        #expect(m.count == 1)
-        c.confirm()        
+  @Test func continuous_tracking() async {
+    let model = NestedModel()
+
+    await confirmation(expectedCount: 3) { c in
+      
+      var expectation: Int = -1
+      let task = Task {
+        for await _ in withStateGraphTrackingStream(apply: {
+          _ = model.counter
+        }) {       
+          print(model.counter)
+          #expect(model.counter == expectation)
+          c.confirm()
+          if model.counter == 3 {
+            break
+          }
+        }
       }
-      m.count += 1
-    }
+
+      try! await Task.sleep(for: .milliseconds(100))
+
+      // Trigger updates
+      expectation = 1
+      model.counter = expectation
     
+      try! await Task.sleep(for: .milliseconds(100))
+      
+      expectation = 2
+      model.counter = expectation
+      try! await Task.sleep(for: .milliseconds(100))
+      
+      expectation = 3
+      model.counter = expectation
+
+      try! await Task.sleep(for: .milliseconds(100))
+      
+      await task.value
+    }
+
   }
 }
