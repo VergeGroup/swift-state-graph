@@ -58,7 +58,7 @@ extension StoredMacro: PeerMacro {
       .makeConstant()
       .makePrivate()
 
-    _variableDecl.attributes = [.init(.init(stringLiteral: "@_Ignored"))]
+    _variableDecl.attributes = [.init(.init(stringLiteral: "@StageGraphIgnored"))]
         
     if variableDecl.isOptional && variableDecl.hasInitializer == false {
       _variableDecl =

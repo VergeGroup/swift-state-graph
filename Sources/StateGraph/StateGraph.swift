@@ -30,19 +30,6 @@ protocol NodeType: Hashable, AnyObject, Sendable, CustomDebugStringConvertible {
   func recomputeIfNeeded()
 }
 
-struct WeakStateView: Equatable {
-
-  public static func == (lhs: WeakStateView, rhs: WeakStateView) -> Bool {
-    return lhs.value === rhs.value
-  }
-
-  weak var value: (any GraphViewType)?
-
-  init(_ value: any GraphViewType) {
-    self.value = value
-  }
-}
-
 struct WeakNode: Equatable {
   
   public static func == (lhs: WeakNode, rhs: WeakNode) -> Bool {
@@ -487,20 +474,4 @@ public final class Edge: CustomDebugStringConvertible {
     Log.generic.debug("Deinit Edge")
   }
   
-}
-
-extension ContiguousArray<WeakStateView> {
-
-  mutating func compactForEach(_ body: (any GraphViewType) -> Void) {
-
-    self.removeAll {
-      if let value = $0.value {
-        body(value)
-        return false
-      } else {
-        return true
-      }
-    }
-
-  }
 }

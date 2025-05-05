@@ -18,7 +18,7 @@ public macro _StoredWeak() = #externalMacro(module: "StateGraphMacro", type: "St
 //public macro _Computed() = #externalMacro(module: "StateGraphMacro", type: "ComputedMacro")
 
 @attached(peer)
-public macro _Ignored() = #externalMacro(module: "StateGraphMacro", type: "IgnoredMacro")
+public macro StageGraphIgnored() = #externalMacro(module: "StateGraphMacro", type: "IgnoredMacro")
 
 @_exported import os.lock
 
@@ -45,10 +45,10 @@ final class StateViewModel {
     0
   }
   
-  @_Ignored
+  @StageGraphIgnored
   weak var weak_variable: AnyObject?
   
-  @_Ignored
+  @StageGraphIgnored
   unowned var unowned_variable: AnyObject
   
   unowned let unowned_constant: AnyObject

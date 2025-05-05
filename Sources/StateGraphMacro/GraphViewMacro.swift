@@ -36,7 +36,7 @@ extension GraphViewMacro: MemberAttributeMacro {
       [
         "@_Stored",
         "@_Computed",
-        "@_Ignored",
+        "@StageGraphIgnored",
       ]
     )
     

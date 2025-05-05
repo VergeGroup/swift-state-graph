@@ -1,6 +1,6 @@
 
 /**
- Tracks access to the properties of the instance compatible with ``GraphViewType``. 
+ Tracks access to the properties of StoredNode or ComputedNode.
  Similarly to Observation.withObservationTracking, didChange runs one time after property changes applied.
  To observe properties continuously, use ``withContinuousStateGraphTracking``.
  */
@@ -20,7 +20,7 @@ public enum StateGraphTrackingContinuation {
 }
 
 /**
- Tracks access to the properties of the instance compatible with ``GraphViewType``. 
+ Tracks access to the properties of StoredNode or ComputedNode.
  Continuously tracks until `didChange` returns `.stop`.
  It does not provides update of the properties granurarly. some frequency of updates may be aggregated into single event.
  */
