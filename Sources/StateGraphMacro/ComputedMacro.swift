@@ -18,6 +18,9 @@ public struct ComputedMacro {
 
 }
 
+extension ComputedMacro: AttachedMacro {
+}
+
 extension ComputedMacro: PeerMacro {
 
   public static func expansion(
@@ -72,7 +75,7 @@ extension ComputedMacro: PeerMacro {
         _variableDecl
         .renamingIdentifier(with: "_backing_")
         .modifyingTypeAnnotation({ type in
-          return "StateNode<\(type.trimmed)>?"
+          return "ComputedNode<\(type.trimmed)>?"
         })
 
       //      // add init
@@ -89,7 +92,7 @@ extension ComputedMacro: PeerMacro {
         _variableDecl
         .renamingIdentifier(with: "_backing_")
         .modifyingTypeAnnotation({ type in
-          return "StateNode<\(type.trimmed)>?"
+          return "ComputedNode<\(type.trimmed)>?"
         })
       //        .modifyingInit({ initializer in
       //          return .init(value: "StateNode.init(\(initializer.trimmed.value))" as ExprSyntax)
@@ -114,21 +117,5 @@ extension ComputedMacro: PeerMacro {
 
     return newMembers
 
-  }
-}
-
-extension ComputedMacro: BodyMacro {
-
-  public static func expansion(
-    of node: AttributeSyntax,
-    providingBodyFor declaration: some DeclSyntaxProtocol & WithOptionalCodeBlockSyntax,
-    in context: some MacroExpansionContext
-  ) throws -> [CodeBlockItemSyntax] {
-    
-    [
-            """
-            "hello," + \(declaration.body!)
-            """
-    ]
   }
 }

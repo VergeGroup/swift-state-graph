@@ -12,9 +12,10 @@ public macro _Stored() = #externalMacro(module: "StateGraphMacro", type: "Stored
 @attached(peer, names: prefixed(_backing_), prefixed(_has_registered))
 public macro _StoredWeak() = #externalMacro(module: "StateGraphMacro", type: "StoredMacro")
 
-@attached(body)
-@attached(peer, names: prefixed(_backing_))
-public macro _Computed() = #externalMacro(module: "StateGraphMacro", type: "ComputedMacro")
+//@attached(body)
+//@attached(peer, names: prefixed(_backing_))
+//@attached(accessor, names: named(init), named(get), named(set))
+//public macro _Computed() = #externalMacro(module: "StateGraphMacro", type: "ComputedMacro")
 
 @attached(peer)
 public macro _Ignored() = #externalMacro(module: "StateGraphMacro", type: "IgnoredMacro")

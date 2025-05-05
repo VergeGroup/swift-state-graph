@@ -205,6 +205,29 @@ public final class StoredNode<Value>: NodeType, Observable, CustomDebugStringCon
   }
 }
 
+/*
+public protocol ComputedNodeDescriptor {
+  
+  associatedtype Value
+  
+  func compute(context: inout ComputedNode<Value>.Context) -> Value
+}
+
+public struct AnyComputedNodeDescriptor<Value>: ComputedNodeDescriptor {
+  
+  private let computeClosure: (inout ComputedNode<Value>.Context) -> Value
+  
+  public init(compute: @escaping (inout ComputedNode<Value>.Context) -> Value) {
+    self.computeClosure = compute  
+  }
+    
+  public func compute(context: inout ComputedNode<Value>.Context) -> Value {
+    computeClosure(&context)
+  }
+  
+}
+*/
+
 /// A node that computes its value based on other nodes in a Directed Acyclic Graph (DAG).
 ///
 /// `ComputedNode` derives its value from other nodes through a computation rule.
@@ -216,6 +239,10 @@ public final class StoredNode<Value>: NodeType, Observable, CustomDebugStringCon
 /// - Changes propagate: When this node's value changes, downstream nodes are notified
 /// ```
 public final class ComputedNode<Value>: NodeType, Observable, CustomDebugStringConvertible {
+  
+  public struct Context {
+    
+  }
     
   // MARK: Equatable
   public static func == (lhs: ComputedNode<Value>, rhs: ComputedNode<Value>) -> Bool {
@@ -233,7 +260,7 @@ public final class ComputedNode<Value>: NodeType, Observable, CustomDebugStringC
     private var _cachedValue: Value?
 
   private let comparator: @Sendable (Value, Value) -> Bool
-
+  
   #if canImport(Observation)
     nonisolated(unsafe)
   private var observationRegistrar: ObservationRegistrar = .init()
@@ -291,7 +318,7 @@ public final class ComputedNode<Value>: NodeType, Observable, CustomDebugStringC
     }
   }
 
-  private let rule: @Sendable () -> Value
+  private let rule: @Sendable (inout Context) -> Value
 
   nonisolated(unsafe)
     var incomingEdges: ContiguousArray<Edge> = []
@@ -316,7 +343,7 @@ public final class ComputedNode<Value>: NodeType, Observable, CustomDebugStringC
     _ line: UInt = #line,
     _ column: UInt = #column,
     name: String? = nil,
-    rule: @escaping @Sendable () -> Value
+    rule: @escaping @Sendable (inout Context) -> Value
   ) {
     self.sourceLocation = .init(file: file, line: line, column: column)
     self.name = name
@@ -348,7 +375,7 @@ public final class ComputedNode<Value>: NodeType, Observable, CustomDebugStringC
     _ line: UInt = #line,
     _ column: UInt = #column,
     name: String? = nil,
-    rule: @escaping @Sendable () -> Value
+    rule: @escaping @Sendable (inout Context) -> Value
   ) where Value: Equatable {
     self.sourceLocation = .init(file: file, line: line, column: column)
     self.name = name
@@ -378,6 +405,7 @@ public final class ComputedNode<Value>: NodeType, Observable, CustomDebugStringC
     // record dependency
     if let c = TaskLocals.currentNode {
       let edge = Edge(from: self, to: c)
+      // TODO: consider removing duplicated edges
       outgoingEdges.append(edge)
       c.incomingEdges.append(edge)
     }
@@ -399,7 +427,8 @@ public final class ComputedNode<Value>: NodeType, Observable, CustomDebugStringC
       TaskLocals.$currentNode.withValue(self) { () -> Void in
         let previousValue = _cachedValue
         removeIncomingEdges()
-        _cachedValue = rule()
+        var context = Context()
+        _cachedValue = rule(&context)
 
         // propagate changes to dependent nodes
         do {
@@ -457,7 +486,7 @@ public final class Edge: CustomDebugStringConvertible {
   deinit {
     Log.generic.debug("Deinit Edge")
   }
-
+  
 }
 
 extension ContiguousArray<WeakStateView> {

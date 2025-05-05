@@ -45,7 +45,7 @@ extension GraphViewType {
       _ file: StaticString = #file,
       _ line: UInt = #line,
       _ column: UInt = #column,
-      compute: @escaping @Sendable () -> Value
+      compute: @escaping @Sendable (inout ComputedNode<Value>.Context) -> Value
     ) {
       self.node = .init(
         wrappedValue: .init(
