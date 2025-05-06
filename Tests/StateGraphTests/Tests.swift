@@ -285,11 +285,11 @@ struct GraphViewAdvancedTests {
 
   @GraphView
   final class NestedModel: Sendable {
-    
+
     var counter: Int = 0
-    
+
     var subModel: SubModel?
-    
+
     init() {
       self.subModel = nil
     }
@@ -346,17 +346,17 @@ struct GraphViewAdvancedTests {
       model.incrementCounter()
     }
   }
-  
+
   @Test func continuous_tracking() async {
     let model = NestedModel()
 
     await confirmation(expectedCount: 3) { c in
-      
+
       var expectation: Int = -1
       let task = Task {
         for await _ in withStateGraphTrackingStream(apply: {
           _ = model.counter
-        }) {       
+        }) {
           print(model.counter)
           #expect(model.counter == expectation)
           c.confirm()
@@ -371,18 +371,18 @@ struct GraphViewAdvancedTests {
       // Trigger updates
       expectation = 1
       model.counter = expectation
-    
+
       try! await Task.sleep(for: .milliseconds(100))
-      
+
       expectation = 2
       model.counter = expectation
       try! await Task.sleep(for: .milliseconds(100))
-      
+
       expectation = 3
       model.counter = expectation
 
       try! await Task.sleep(for: .milliseconds(100))
-      
+
       await task.value
     }
 
@@ -391,39 +391,36 @@ struct GraphViewAdvancedTests {
 
 @Suite
 struct SinkTest {
-  
 
   final class Model: Sendable {
-    
+
     @GraphStored
     var value: String = "default"
-    
+
     init() {}
-    
+
     func updateValue(_ newValue: String) {
       value = newValue
     }
   }
-  
+
   @Test func test() async {
-    
+
     let m = Model()
-    
-    let t = Task {
-      await confirmation { c  in      
-        m.$value.ifChanged { value in
-          c.confirm(count: 1)
-          withExtendedLifetime(m) {}
-        }
-        
-        try! await Task.sleep(for: .milliseconds(100))
-        
-        m.value = "updated"
+
+    await confirmation { c in
+
+      m.$value.ifChanged { value in
+        c.confirm()
+        print("confirm")
+        withExtendedLifetime(m) {}
       }
+
+      m.value = "updated"
+      try! await Task.sleep(for: .milliseconds(100))
     }
-    
-    await t.value
+
     print("done")
-    
+
   }
 }
