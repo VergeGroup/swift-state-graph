@@ -75,21 +75,7 @@ extension GraphViewMacro: MemberMacro {
     conformingTo protocols: [TypeSyntax],
     in context: some MacroExpansionContext
   ) throws -> [DeclSyntax] {
-    
-    guard let classDecl = declaration.as(ClassDeclSyntax.self) else {
-      fatalError()
-    }
-    let className = classDecl.name.text
-    print(className)
-    let isPublic = declaration.modifiers.contains(where: { $0.name.tokenKind == .keyword(.public) })  
-    
-    let accessor = isPublic ? "public" : "internal"
-    
-    return [
-//      """
-//      \(raw: accessor) var sink: Sink<Void> = .init()          
-//      """ as DeclSyntax,           
-    ]
+    return []
   }
     
 }

@@ -30,6 +30,23 @@ public macro StageGraphIgnored() = #externalMacro(module: "StateGraphMacro", typ
 
 import os.lock
 
+final class A {
+  
+  @GraphStored
+  weak var weak_variable: AnyObject?
+  
+  @GraphStored
+  unowned var unowned_variable: AnyObject
+    
+  unowned let unowned_constant: AnyObject
+
+  init(weak_variable: AnyObject? = nil, unowned_variable: AnyObject, unowned_constant: AnyObject) {
+    self.weak_variable = weak_variable
+    self.unowned_variable = unowned_variable
+    self.unowned_constant = unowned_constant
+  }  
+}
+
 @GraphView
 final class StateViewModel {
   

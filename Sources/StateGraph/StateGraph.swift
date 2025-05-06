@@ -30,18 +30,6 @@ protocol NodeType: Hashable, AnyObject, Sendable, CustomDebugStringConvertible {
   func recomputeIfNeeded()
 }
 
-struct WeakNode: Equatable {
-  
-  public static func == (lhs: WeakNode, rhs: WeakNode) -> Bool {
-    return lhs.value === rhs.value
-  }
-  
-  weak var value: (any NodeType)?
-  
-  init(_ value: any NodeType) {
-    self.value = value
-  }
-}
 
 /// A node that functions as an endpoint in a Directed Acyclic Graph (DAG).
 ///

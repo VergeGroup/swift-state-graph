@@ -12,6 +12,7 @@ final class MacroTests: XCTestCase {
       macros: [
         "GraphView": GraphViewMacro.self,
         "_Stored" : StoredMacro.self,
+        "GraphStored": StoredMacro.self,
       ]
     ) {
       super.invokeTest()
@@ -46,7 +47,7 @@ final class MacroTests: XCTestCase {
           }
         }
 
-        @_Ignored private let $count: StoredNode<Int> = .init(wrappedValue: 0)
+        @StageGraphIgnored let $count: StoredNode<Int> = .init(wrappedValue: 0)
 
         init() {
         
@@ -61,5 +62,65 @@ final class MacroTests: XCTestCase {
     
   }
  
-  
+  func test_weak_reference() {
+    
+    assertMacro {
+      """
+      public final class A {
+      
+        @GraphStored
+        public weak var weak_variable: AnyObject?             
+        
+        @GraphStored
+        unowned var unowned_variable: AnyObject
+        
+        unowned let unowned_constant: AnyObject
+      
+      }
+      """
+    } expansion: {
+      """
+      public final class A {
+        public weak var weak_variable: AnyObject? {             
+          @storageRestrictions(
+            initializes: $weak_variable
+          )
+          init(initialValue) {
+            $weak_variable = .init(wrappedValue: .init(initialValue))
+          }
+          get {
+            return $weak_variable.wrappedValue.value
+          }
+          set {
+            $weak_variable.wrappedValue.value = newValue
+          }
+        }
+
+        @StageGraphIgnored
+          public let $weak_variable: StoredNode<Weak<AnyObject>>
+
+        unowned var unowned_variable: AnyObject {
+          @storageRestrictions(
+            initializes: $unowned_variable
+          )
+          init(initialValue) {
+            $unowned_variable = .init(wrappedValue: .init(initialValue))
+          }
+          get {
+            return $unowned_variable.wrappedValue.value
+          }
+          set {
+            $unowned_variable.wrappedValue.value = newValue
+          }
+        }
+
+        @StageGraphIgnored let $unowned_variable: StoredNode<Unowned<AnyObject>>
+        
+        unowned let unowned_constant: AnyObject
+
+      }
+      """
+    }
+    
+  }
 }
