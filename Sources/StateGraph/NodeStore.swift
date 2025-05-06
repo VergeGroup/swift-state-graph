@@ -4,7 +4,7 @@ actor NodeStore {
   
   private var nodes: ContiguousArray<WeakNode> = []
   
-  func register(node: any NodeType) {
+  func register(node: any TypeErasedNode) {
     nodes.append(.init(node))
     compact()
   }
@@ -24,9 +24,9 @@ private struct WeakNode: Equatable {
     return lhs.value === rhs.value
   }
   
-  weak var value: (any NodeType)?
+  weak var value: (any TypeErasedNode)?
   
-  init(_ value: any NodeType) {
+  init(_ value: any TypeErasedNode) {
     self.value = value
   }
 }

@@ -85,7 +85,7 @@ final class TrackingRegistration: Sendable, Hashable {
   static var registration: TrackingRegistration?
 }
 
-private struct UnsafeSendable<V>: ~Copyable, @unchecked Sendable {
+struct UnsafeSendable<V>: ~Copyable, @unchecked Sendable {
 
   let _value: V
 
@@ -95,7 +95,7 @@ private struct UnsafeSendable<V>: ~Copyable, @unchecked Sendable {
 
 }
 
-private func perform<Return>(_ closure: () -> Return, isolation: isolated (any Actor)? = #isolation)
+func perform<Return>(_ closure: () -> Return, isolation: isolated (any Actor)? = #isolation)
   -> Return
 {
   closure()

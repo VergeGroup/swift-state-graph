@@ -388,3 +388,42 @@ struct GraphViewAdvancedTests {
 
   }
 }
+
+@Suite
+struct SinkTest {
+  
+
+  final class Model: Sendable {
+    
+    @GraphStored
+    var value: String = "default"
+    
+    init() {}
+    
+    func updateValue(_ newValue: String) {
+      value = newValue
+    }
+  }
+  
+  @Test func test() async {
+    
+    let m = Model()
+    
+    let t = Task {
+      await confirmation { c  in      
+        m.$value.ifChanged { value in
+          c.confirm(count: 1)
+          withExtendedLifetime(m) {}
+        }
+        
+        try! await Task.sleep(for: .milliseconds(100))
+        
+        m.value = "updated"
+      }
+    }
+    
+    await t.value
+    print("done")
+    
+  }
+}

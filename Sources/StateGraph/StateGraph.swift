@@ -11,10 +11,10 @@ import os.lock
 
 private enum TaskLocals {
   @TaskLocal
-  static var currentNode: (any NodeType)?
+  static var currentNode: (any TypeErasedNode)?
 }
 
-protocol NodeType: Hashable, AnyObject, Sendable, CustomDebugStringConvertible {
+protocol TypeErasedNode: Hashable, AnyObject, Sendable, CustomDebugStringConvertible {
   var name: String? { get }
 
   /// edges affecting nodes
@@ -30,6 +30,56 @@ protocol NodeType: Hashable, AnyObject, Sendable, CustomDebugStringConvertible {
   func recomputeIfNeeded()
 }
 
+protocol Node: TypeErasedNode {
+  
+  associatedtype Value
+  
+  var wrappedValue: Value { get }
+  
+}
+
+extension Node {
+  // MARK: Equatable
+  public static func == (lhs: Self, rhs: Self) -> Bool {
+    return lhs === rhs
+  }
+  
+  // MARK: Hashable
+  public func hash(into hasher: inout Hasher) {
+    hasher.combine(ObjectIdentifier(self))
+  }
+  
+  public func ifChanged(
+    _ body: @escaping (Self.Value) -> Void,
+    isolation: isolated (any Actor)? = #isolation
+  ) where Value : Equatable {
+    
+    let _body = UnsafeSendable(body)
+        
+    let currentValue = UnsafeSendable(self.wrappedValue)
+    
+    withStateGraphTracking { 
+      _ = self.wrappedValue
+    } didChange: { [weak self] in
+      Task {
+        // implicit capture
+        // https://forums.swift.org/t/closure-isolation-control/70378/48
+        let _ = isolation
+        await perform({
+          guard let self = self else { 
+            return 
+          }
+          let newValue = self.wrappedValue
+          guard newValue != currentValue._value else {
+            return 
+          }
+          _body._value(newValue)
+        }, isolation: isolation)
+      }
+    }
+    
+  }
+}
 
 /// A node that functions as an endpoint in a Directed Acyclic Graph (DAG).
 ///
@@ -44,17 +94,7 @@ protocol NodeType: Hashable, AnyObject, Sendable, CustomDebugStringConvertible {
 /// ```swift
 /// let graph = StateGraph()
 /// ```
-public final class StoredNode<Value>: NodeType, Observable, CustomDebugStringConvertible {
-
-  // MARK: Equatable
-  public static func == (lhs: StoredNode<Value>, rhs: StoredNode<Value>) -> Bool {
-    return lhs === rhs
-  }
-
-  // MARK: Hashable
-  public func hash(into hasher: inout Hasher) {
-    hasher.combine(ObjectIdentifier(self))
-  }
+public final class StoredNode<Value>: Node, Observable, CustomDebugStringConvertible {
 
   private let lock: OSAllocatedUnfairLock<Void>
 
@@ -213,22 +253,12 @@ public struct AnyComputedNodeDescriptor<Value>: ComputedNodeDescriptor {
 /// - Dependencies are tracked: The node automatically tracks which nodes it depends on
 /// - Changes propagate: When this node's value changes, downstream nodes are notified
 /// ```
-public final class ComputedNode<Value>: NodeType, Observable, CustomDebugStringConvertible {
+public final class ComputedNode<Value>: Node, Observable, CustomDebugStringConvertible {
   
   public struct Context {
     
   }
     
-  // MARK: Equatable
-  public static func == (lhs: ComputedNode<Value>, rhs: ComputedNode<Value>) -> Bool {
-    return lhs === rhs
-  }
-
-  // MARK: Hashable
-  public func hash(into hasher: inout Hasher) {
-    hasher.combine(ObjectIdentifier(self))
-  }
-
   private let lock: OSAllocatedUnfairLock<Void>
 
   nonisolated(unsafe)
@@ -444,12 +474,12 @@ public final class ComputedNode<Value>: NodeType, Observable, CustomDebugStringC
 @DebugDescription
 public final class Edge: CustomDebugStringConvertible {
 
-  unowned let from: any NodeType
-  unowned let to: any NodeType
+  unowned let from: any TypeErasedNode
+  unowned let to: any TypeErasedNode
 
   var isPending: Bool = false
 
-  init(from: any NodeType, to: any NodeType) {
+  init(from: any TypeErasedNode, to: any TypeErasedNode) {
     self.from = from
     self.to = to
   }
