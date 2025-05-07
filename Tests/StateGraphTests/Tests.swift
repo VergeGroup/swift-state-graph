@@ -404,7 +404,7 @@ struct SinkTest {
     }
   }
 
-  @Test func test() async {
+  @Test func if_changed() async {
 
     let m = Model()
 
@@ -412,7 +412,6 @@ struct SinkTest {
 
       m.$value.ifChanged { value in
         c.confirm()
-        print("confirm")
         withExtendedLifetime(m) {}
       }
 
@@ -420,7 +419,24 @@ struct SinkTest {
       try! await Task.sleep(for: .milliseconds(100))
     }
 
-    print("done")
-
+  }
+  
+  @Test
+  func if_not_changed() async {
+    
+    let m = Model()
+    m.value = "default"
+    
+    await confirmation(expectedCount: 0) { c in
+      
+      m.$value.ifChanged { value in
+        #expect(Bool(false))
+        withExtendedLifetime(m) {}
+      }
+      
+      m.value = "default"
+      try! await Task.sleep(for: .milliseconds(100))
+    }
+    
   }
 }

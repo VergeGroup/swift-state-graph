@@ -49,11 +49,21 @@ public func withContinuousStateGraphTracking(
 
 public func withStateGraphTrackingStream(
   apply: @escaping () -> Void
-) -> AsyncStream<StateGraphTrackingContinuation> {
+) -> AsyncStream<Void> {
 
-  return AsyncStream { continuation in
-    withContinuousStateGraphTracking(apply: apply) {
-      continuation.yield(.next)
+  AsyncStream<Void> { (continuation: AsyncStream<Void>.Continuation) in 
+    
+    let isCancelled = OSAllocatedUnfairLock(initialState: false)
+    
+    continuation.onTermination = { termination in
+      isCancelled.withLock { $0 = true }
+    }
+        
+    withContinuousStateGraphTracking(apply: apply) { 
+      continuation.yield()
+      if isCancelled.withLock({ $0 }) {
+        return .stop
+      }
       return .next
     }
   }

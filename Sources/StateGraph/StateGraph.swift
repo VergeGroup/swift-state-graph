@@ -81,6 +81,25 @@ extension Node {
   }
 }
 
+import Combine
+import os.lock
+
+extension Node {
+  
+  public func observe() -> AsyncMapSequence<AsyncStream<Void>, Self.Value> {
+        
+   let stream = withStateGraphTrackingStream {
+      _ = self.wrappedValue
+    }
+    .map { 
+      self.wrappedValue
+    }
+             
+    return stream
+  }
+  
+}
+
 /// A node that functions as an endpoint in a Directed Acyclic Graph (DAG).
 ///
 /// `StoredNode` can have its value set directly from the outside, and changes to its value
