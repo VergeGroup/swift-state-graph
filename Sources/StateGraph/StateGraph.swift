@@ -14,7 +14,7 @@ private enum TaskLocals {
   static var currentNode: (any TypeErasedNode)?
 }
 
-protocol TypeErasedNode: Hashable, AnyObject, Sendable, CustomDebugStringConvertible {
+public protocol TypeErasedNode: Hashable, AnyObject, Sendable, CustomDebugStringConvertible {
   var name: String? { get }
 
   /// edges affecting nodes
@@ -23,6 +23,7 @@ protocol TypeErasedNode: Hashable, AnyObject, Sendable, CustomDebugStringConvert
   /// inverse edges that depending on nodes
   var incomingEdges: ContiguousArray<Edge> { get set }
 
+  @_spi(Internal)
   var trackingRegistrations: Set<TrackingRegistration> { get set }
 
   var potentiallyDirty: Bool { get set }
@@ -30,7 +31,7 @@ protocol TypeErasedNode: Hashable, AnyObject, Sendable, CustomDebugStringConvert
   func recomputeIfNeeded()
 }
 
-protocol Node: TypeErasedNode {
+public protocol Node: TypeErasedNode {
   
   associatedtype Value
   
@@ -245,10 +246,10 @@ public final class StoredNode<Value>: Node, Observable, CustomDebugStringConvert
   }
 
   nonisolated(unsafe)
-    var outgoingEdges: ContiguousArray<Edge> = []
+  public var outgoingEdges: ContiguousArray<Edge> = []
   
   nonisolated(unsafe)
-  var trackingRegistrations: Set<TrackingRegistration> = []
+  public var trackingRegistrations: Set<TrackingRegistration> = []
 
   public init(
     _ file: StaticString = #fileID,
@@ -391,11 +392,13 @@ public final class ComputedNode<Value>: Node, Observable, CustomDebugStringConve
   private let rule: @Sendable (inout Context) -> Value
 
   nonisolated(unsafe)
-    var incomingEdges: ContiguousArray<Edge> = []
+  public var incomingEdges: ContiguousArray<Edge> = []
+  
   nonisolated(unsafe)
-    var outgoingEdges: ContiguousArray<Edge> = []
+  public var outgoingEdges: ContiguousArray<Edge> = []
+  
   nonisolated(unsafe)
-  var trackingRegistrations: Set<TrackingRegistration> = []
+  public var trackingRegistrations: Set<TrackingRegistration> = []
 
   /// Initializes a computed node.
   ///

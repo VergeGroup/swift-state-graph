@@ -71,13 +71,13 @@ public func withStateGraphTrackingStream(
 
 // MARK: - Internals
 
-final class TrackingRegistration: Sendable, Hashable {
+public final class TrackingRegistration: Sendable, Hashable {
 
-  static func == (lhs: TrackingRegistration, rhs: TrackingRegistration) -> Bool {
+  public static func == (lhs: TrackingRegistration, rhs: TrackingRegistration) -> Bool {
     lhs === rhs
   }
 
-  func hash(into hasher: inout Hasher) {
+  public func hash(into hasher: inout Hasher) {
     hasher.combine(ObjectIdentifier(self))
   }
 
