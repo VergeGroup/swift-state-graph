@@ -86,7 +86,7 @@ import os.lock
 
 extension Node {
   
-  public func observe() -> AsyncMapSequence<AsyncStream<Void>, Self.Value> {
+  public func observe() -> AsyncStartWithSequence<AsyncMapSequence<AsyncStream<Void>, Self.Value>> {
         
    let stream = withStateGraphTrackingStream {
       _ = self.wrappedValue
@@ -94,11 +94,57 @@ extension Node {
     .map { 
       self.wrappedValue
     }
+    .startWith(self.wrappedValue)
              
     return stream
   }
   
 }
+
+extension AsyncSequence {
+  func startWith(_ value: Element) -> AsyncStartWithSequence<Self> {
+    return AsyncStartWithSequence(self, startWith: value)
+  }
+}
+
+public struct AsyncStartWithSequence<Base: AsyncSequence>: AsyncSequence {
+  
+  public struct AsyncIterator: AsyncIteratorProtocol {
+    public typealias Element = Base.Element
+    
+    private var base: Base.AsyncIterator
+    private var first: Base.Element?
+
+    init(_ value: Base.AsyncIterator, startWith: Base.Element) {
+      self.base = value
+      self.first = startWith
+    }
+    
+    public mutating func next() async throws -> Base.Element? {
+      if let first = first {
+        self.first = nil
+        return first
+      }
+      return try await base.next()
+    }
+  }
+  
+  public typealias Element = Base.Element
+  
+  let base: Base
+  let startWith: Base.Element
+
+  init(_ base: Base, startWith: Base.Element) {
+    self.base = base
+    self.startWith = startWith
+  }
+  
+  public func makeAsyncIterator() -> AsyncIterator {
+    return AsyncIterator(base.makeAsyncIterator(), startWith: startWith)
+  }
+}
+
+extension AsyncStartWithSequence: Sendable where Base.Element: Sendable, Base: Sendable {}
 
 /// A node that functions as an endpoint in a Directed Acyclic Graph (DAG).
 ///
