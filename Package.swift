@@ -13,7 +13,7 @@ let package = Package(
     .iOS(.v17),
     .tvOS(.v13),
     .watchOS(.v6),
-    .macCatalyst(.v13)
+    .macCatalyst(.v13),
   ],
   products: [
     // Products define the executables and libraries a package produces, making them visible to other packages.
@@ -23,6 +23,7 @@ let package = Package(
     )
   ],
   dependencies: [
+    .package(url: "https://github.com/VergeGroup/swift-typed-identifier.git", from: "2.0.3"),
     .package(url: "https://github.com/swiftlang/swift-syntax.git", "600.0.0"..<"602.0.0"),
     .package(url: "https://github.com/pointfreeco/swift-macro-testing.git", from: "0.5.2"),
   ],
@@ -40,6 +41,10 @@ let package = Package(
         "StateGraphMacro"
       ]
     ),
+    .target(
+      name: "StateGraphNormalization",
+      dependencies: [.product(name: "TypedIdentifier", package: "swift-typed-identifier")]
+    ),
     .testTarget(
       name: "StateGraphMacroTests",
       dependencies: [
@@ -51,6 +56,13 @@ let package = Package(
     .testTarget(
       name: "StateGraphTests",
       dependencies: ["StateGraph"]
+    ),
+    .testTarget(
+      name: "StateGraphNormalizationTests",
+      dependencies: [
+        "StateGraph",
+        "StateGraphNormalization"
+      ]
     ),
   ],
   swiftLanguageModes: [.v6]

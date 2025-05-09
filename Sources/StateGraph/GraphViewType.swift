@@ -1,7 +1,7 @@
 import os.lock
 
 /**
- Use @StateView macro
+ Use @GraphView macro
  */
 public protocol GraphViewType: Observable, Equatable, Hashable, AnyObject {
   

@@ -1,4 +1,4 @@
-import os.lock
+import Foundation.NSLock
 
 #if canImport(Observation)
   import Observation
@@ -15,7 +15,9 @@ private enum TaskLocals {
 }
 
 public protocol TypeErasedNode: Hashable, AnyObject, Sendable, CustomDebugStringConvertible {
+  
   var name: String? { get }
+  var lock: NodeLock { get }
 
   /// edges affecting nodes
   var outgoingEdges: ContiguousArray<Edge> { get set }
@@ -49,41 +51,8 @@ extension Node {
   public func hash(into hasher: inout Hasher) {
     hasher.combine(ObjectIdentifier(self))
   }
-  
-  public func ifChanged(
-    _ body: @escaping (Self.Value) -> Void,
-    isolation: isolated (any Actor)? = #isolation
-  ) where Value : Equatable {
-    
-    let _body = UnsafeSendable(body)
-        
-    let currentValue = UnsafeSendable(self.wrappedValue)
-    
-    withStateGraphTracking { 
-      _ = self.wrappedValue
-    } didChange: { [weak self] in
-      Task {
-        // implicit capture
-        // https://forums.swift.org/t/closure-isolation-control/70378/48
-        let _ = isolation
-        await perform({
-          guard let self = self else { 
-            return 
-          }
-          let newValue = self.wrappedValue
-          guard newValue != currentValue._value else {
-            return 
-          }
-          _body._value(newValue)
-        }, isolation: isolation)
-      }
-    }
-    
-  }
+ 
 }
-
-import Combine
-import os.lock
 
 extension Node {
   
@@ -100,6 +69,18 @@ extension Node {
     return stream
   }
   
+  public func map<Computed>(
+    _ file: StaticString = #fileID,
+    _ line: UInt = #line,
+    _ column: UInt = #column,
+    name: String? = nil,
+    _ computer: @escaping @Sendable (Self.Value) -> Computed
+  ) -> ComputedNode<Computed> {
+    return ComputedNode(file, line, column, name: name) { context in
+      computer(self.wrappedValue)
+    }
+  }
+    
 }
 
 extension AsyncSequence {
@@ -162,7 +143,7 @@ extension AsyncStartWithSequence: Sendable where Base.Element: Sendable, Base: S
 /// ```
 public final class StoredNode<Value>: Node, Observable, CustomDebugStringConvertible {
 
-  private let lock: OSAllocatedUnfairLock<Void>
+  public let lock: NodeLock
 
   nonisolated(unsafe)
     private var _value: Value
@@ -219,12 +200,8 @@ public final class StoredNode<Value>: Node, Observable, CustomDebugStringConvert
       lock.lock()
 
       yield &_value
-      
-      for e in outgoingEdges {
-        e.isPending = true
-        e.to.potentiallyDirty = true
-      }
-      
+          
+      let _outgoingEdges = outgoingEdges
       let _trackingRegistrations = trackingRegistrations
       self.trackingRegistrations.removeAll()
                            
@@ -232,6 +209,11 @@ public final class StoredNode<Value>: Node, Observable, CustomDebugStringConvert
       
       for r in _trackingRegistrations {
         r.perform()
+      }
+      
+      for e in _outgoingEdges {
+        e.isPending = true
+        e.to.potentiallyDirty = true
       }
     }
   }
@@ -260,7 +242,7 @@ public final class StoredNode<Value>: Node, Observable, CustomDebugStringConvert
   ) {
     self.sourceLocation = .init(file: file, line: line, column: column)
     self.name = name
-    self.lock = .init()
+    self.lock = sharedLock
     self._value = wrappedValue
     
     #if DEBUG
@@ -325,7 +307,7 @@ public final class ComputedNode<Value>: Node, Observable, CustomDebugStringConve
     
   }
     
-  private let lock: OSAllocatedUnfairLock<Void>
+  public let lock: NodeLock
 
   nonisolated(unsafe)
     private var _cachedValue: Value?
@@ -347,34 +329,38 @@ public final class ComputedNode<Value>: Node, Observable, CustomDebugStringConve
     }
     set {
       lock.lock()
-      defer {
-        lock.unlock()
-      }
+          
+      let oldValue = _potentiallyDirty
       _potentiallyDirty = newValue
+      
+      guard _potentiallyDirty, _potentiallyDirty != oldValue else {
+        lock.unlock()
+        return 
+      }
+      
+#if canImport(Observation)
+      observationRegistrar.willSet(self, keyPath: \.self)
+#endif
+      
+      let _outgoingEdges = outgoingEdges
+      let _trackingRegistrations = trackingRegistrations
+      trackingRegistrations.removeAll()
+      
+      lock.unlock()
+      
+      for e in _outgoingEdges {
+        e.to.potentiallyDirty = true
+      }
+      
+      for r in _trackingRegistrations {
+        r.perform()
+      }
+            
     }
   }
 
   nonisolated(unsafe)
-    private var _potentiallyDirty: Bool = false
-  {
-    didSet {
-
-      guard _potentiallyDirty, _potentiallyDirty != oldValue else { return }
-
-      #if canImport(Observation)
-        observationRegistrar.willSet(self, keyPath: \.self)
-      #endif
-
-      for e in outgoingEdges {
-        e.to.potentiallyDirty = true
-      }
-
-      for r in trackingRegistrations {
-        r.perform()
-      }
-      trackingRegistrations.removeAll()
-    }
-  }
+  private var _potentiallyDirty: Bool = false
 
   public let name: String?
   private let sourceLocation: SourceLocation
@@ -453,7 +439,7 @@ public final class ComputedNode<Value>: Node, Observable, CustomDebugStringConve
     self.sourceLocation = .init(file: file, line: line, column: column)
     self.name = name
     self.rule = rule
-    self.lock = .init()
+    self.lock = sharedLock
     self.comparator = { $0 == $1 }
         
 #if DEBUG
@@ -528,7 +514,9 @@ public final class ComputedNode<Value>: Node, Observable, CustomDebugStringConve
 
   private func removeIncomingEdges() {
     for e in incomingEdges {
+      e.from.lock.lock()
       e.from.outgoingEdges.removeAll(where: { $0 === e })
+      e.from.lock.unlock()
     }
     incomingEdges.removeAll()
   }
@@ -544,8 +532,23 @@ public final class Edge: CustomDebugStringConvertible {
 
   unowned let from: any TypeErasedNode
   unowned let to: any TypeErasedNode
+  
+  private let lock: NodeLock = sharedLock
+  
+  var isPending: Bool {
+    _read {
+      lock.lock()
+      defer { lock.unlock() }
+      yield _isPending
+    }
+    _modify {
+      lock.lock()
+      defer { lock.unlock() }
+      yield &_isPending
+    }
+  }
 
-  var isPending: Bool = false
+  private var _isPending: Bool = false
 
   init(from: any TypeErasedNode, to: any TypeErasedNode) {
     self.from = from
@@ -561,3 +564,7 @@ public final class Edge: CustomDebugStringConvertible {
   }
   
 }
+
+public typealias NodeLock = NSRecursiveLock
+
+let sharedLock: NodeLock = NodeLock()

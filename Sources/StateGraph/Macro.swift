@@ -6,23 +6,15 @@ public macro GraphView() = #externalMacro(module: "StateGraphMacro", type: "Grap
 
 @attached(accessor, names: named(init), named(get), named(set))
 @attached(peer, names: prefixed(`$`))
-public macro _Stored() = #externalMacro(module: "StateGraphMacro", type: "StoredMacro")
-
-@attached(accessor, names: named(init), named(get), named(set))
-@attached(peer, names: prefixed(`$`))
 public macro GraphStored() = #externalMacro(module: "StateGraphMacro", type: "StoredMacro")
 
-@attached(accessor, names: named(init), named(get), named(set))
-@attached(peer, names: prefixed(_backing_), prefixed(_has_registered))
-public macro _StoredWeak() = #externalMacro(module: "StateGraphMacro", type: "StoredMacro")
+@attached(accessor, names: named(get), named(set))
+@attached(peer, names: prefixed(`$`))
+public macro GraphComputed() = #externalMacro(module: "StateGraphMacro", type: "ComputedMacro")
 
-//@attached(body)
-//@attached(peer, names: prefixed(_backing_))
-//@attached(accessor, names: named(init), named(get), named(set))
-//public macro _Computed() = #externalMacro(module: "StateGraphMacro", type: "ComputedMacro")
 
 @attached(peer)
-public macro StageGraphIgnored() = #externalMacro(module: "StateGraphMacro", type: "IgnoredMacro")
+public macro GraphIgnored() = #externalMacro(module: "StateGraphMacro", type: "IgnoredMacro")
 
 @_exported import os.lock
 
@@ -66,10 +58,10 @@ final class StateViewModel {
     0
   }
   
-  @StageGraphIgnored
+  @GraphIgnored
   weak var weak_variable: AnyObject?
   
-  @StageGraphIgnored
+  @GraphIgnored
   unowned var unowned_variable: AnyObject
   
   unowned let unowned_constant: AnyObject

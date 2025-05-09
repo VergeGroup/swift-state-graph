@@ -11,7 +11,6 @@ final class MacroTests: XCTestCase {
       record: false,
       macros: [
         "GraphView": GraphViewMacro.self,
-        "_Stored" : StoredMacro.self,
         "GraphStored": StoredMacro.self,
       ]
     ) {
@@ -47,7 +46,7 @@ final class MacroTests: XCTestCase {
           }
         }
 
-        @StageGraphIgnored let $count: StoredNode<Int> = .init(wrappedValue: 0)
+        @GraphIgnored let $count: StoredNode<Int> = .init(wrappedValue: 0)
 
         init() {
         
@@ -96,7 +95,7 @@ final class MacroTests: XCTestCase {
           }
         }
 
-        @StageGraphIgnored
+        @GraphIgnored
           public let $weak_variable: StoredNode<Weak<AnyObject>>
 
         unowned var unowned_variable: AnyObject {
@@ -114,7 +113,7 @@ final class MacroTests: XCTestCase {
           }
         }
 
-        @StageGraphIgnored let $unowned_variable: StoredNode<Unowned<AnyObject>>
+        @GraphIgnored let $unowned_variable: StoredNode<Unowned<AnyObject>>
         
         unowned let unowned_constant: AnyObject
 
