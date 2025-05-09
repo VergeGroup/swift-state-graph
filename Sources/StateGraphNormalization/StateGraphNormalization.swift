@@ -3,7 +3,7 @@
 
 import TypedIdentifier
 
-public struct EntityStore<T: TypedIdentifiable> {
+public struct EntityStore<T: TypedIdentifiable & Sendable>: Sendable {
   private var entities: [T.TypedID : T]
   
   public init(entities: [T.TypedID: T] = [:]) {
@@ -27,6 +27,10 @@ public struct EntityStore<T: TypedIdentifiable> {
       block(&entity)
       entities[id] = entity
     }
+  }
+  
+  public func filter(_ predicate: (T) -> Bool) -> [T] {
+    return entities.values.filter(predicate)
   }
   
   public mutating func update(_ entity: T) {
