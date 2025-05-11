@@ -305,6 +305,9 @@ struct PostListContainerView: View {
         StateGraphGlobal.computedEnvironmentValues.withLock {
           $0.normalizedStore = nil
         }   
+        Task {
+          print("👨🏻", await NodeStore.shared._nodes.count)
+        }
       }
   }
 }

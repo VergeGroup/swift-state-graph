@@ -279,14 +279,16 @@ public protocol ComputedDescriptor<Value>: Sendable {
 
 extension ComputedDescriptor {
   
+  @Sendable
   public static func any<Value>(
-    _ compute: @escaping @Sendable (inout Computed<Value>.Context) -> Value
+    _ compute: @Sendable @escaping (inout Computed<Value>.Context) -> Value
   ) -> Self where Self == AnyComputedDescriptor<Value> {
     AnyComputedDescriptor(compute: compute, isEqual: { _, _ in false })
   }
   
+  @Sendable
   public static func any<Value>(
-    _ compute: @escaping @Sendable (
+    _ compute: @Sendable @escaping (
       inout Computed<Value>.Context
     ) -> Value
   ) -> Self where Self == AnyComputedDescriptor<Value>, Value: Equatable {
