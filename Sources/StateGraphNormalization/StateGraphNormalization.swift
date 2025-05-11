@@ -52,7 +52,7 @@ public struct EntityStore<T: TypedIdentifiable & Sendable>: Sendable {
   public func contains(_ id: T.TypedID) -> Bool {
     return entities[id] != nil
   }
-  
+    
   public subscript(_ id: T.TypedID) -> T? {
     get {
       return entities[id]
@@ -64,5 +64,5 @@ public struct EntityStore<T: TypedIdentifiable & Sendable>: Sendable {
         entities.removeValue(forKey: id)
       }
     }
-  }
+  }    
 }

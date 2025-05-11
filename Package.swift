@@ -20,6 +20,10 @@ let package = Package(
     .library(
       name: "StateGraph",
       targets: ["StateGraph"]
+    ),
+    .library(
+      name: "StateGraphNormalization",
+      targets: ["StateGraphNormalization"]
     )
   ],
   dependencies: [
@@ -43,7 +47,10 @@ let package = Package(
     ),
     .target(
       name: "StateGraphNormalization",
-      dependencies: [.product(name: "TypedIdentifier", package: "swift-typed-identifier")]
+      dependencies: [
+        "StateGraph",
+        .product(name: "TypedIdentifier", package: "swift-typed-identifier")
+      ]
     ),
     .testTarget(
       name: "StateGraphMacroTests",

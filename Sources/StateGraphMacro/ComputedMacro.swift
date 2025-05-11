@@ -82,13 +82,15 @@ extension ComputedMacro: PeerMacro {
       .renamingIdentifier(with: prefix)
       .modifyingTypeAnnotation({ type in
         if variableDecl.isWeak {
-          return "ComputedNode<Weak<\(type.removingOptionality().trimmed)>>"
+          return "Computed<Weak<\(type.removingOptionality().trimmed)>>"
         } else if variableDecl.isUnowned {
-          return "ComputedNode<Unowned<\(type.removingOptionality().trimmed)>>"
+          return "Computed<Unowned<\(type.removingOptionality().trimmed)>>"
         } else {
-          return "ComputedNode<\(type.trimmed)>"
+          return "Computed<\(type.trimmed)>"
         }
       })
+    
+    let name = variableDecl.name
     
     if variableDecl.isOptional && variableDecl.hasInitializer == false {
       
@@ -97,12 +99,12 @@ extension ComputedMacro: PeerMacro {
         
         if variableDecl.isWeak {
           return .init(
-            value: ".init(wrappedValue: .init(\(initializer.trimmed.value)))" as ExprSyntax)
+            value: #".init(name: "\#(raw: name)", wrappedValue: .init(\#(initializer.trimmed.value)))"# as ExprSyntax)
         } else if variableDecl.isUnowned {
           return .init(
-            value: ".init(wrappedValue: .init(\(initializer.trimmed.value)))" as ExprSyntax)
+            value: #".init(name: "\#(raw: name)", wrappedValue: .init(\#(initializer.trimmed.value)))"# as ExprSyntax)
         } else {
-          return .init(value: ".init(wrappedValue: \(initializer.trimmed.value))" as ExprSyntax)
+          return .init(value: #".init(name: "\#(raw: name)", wrappedValue: \#(initializer.trimmed.value))"# as ExprSyntax)
         }
         
       })
@@ -177,18 +179,9 @@ extension ComputedMacro: AccessorMacro {
         """
       )
       
-      let setAccessor = AccessorDeclSyntax(
-        """
-        set { 
-          $\(raw: propertyName).wrappedValue.value = newValue
-        }
-        """
-      )
-      
       var accessors: [AccessorDeclSyntax] = []
           
       accessors.append(readAccessor)
-      accessors.append(setAccessor)
       
       return accessors
       
@@ -202,18 +195,9 @@ extension ComputedMacro: AccessorMacro {
         """
       )
       
-      let setAccessor = AccessorDeclSyntax(
-        """
-        set { 
-          $\(raw: propertyName).wrappedValue = newValue
-        }
-        """
-      )
-      
       var accessors: [AccessorDeclSyntax] = []
             
       accessors.append(readAccessor)
-      accessors.append(setAccessor)
       
       return accessors
     }

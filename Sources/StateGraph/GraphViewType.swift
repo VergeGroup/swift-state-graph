@@ -39,13 +39,13 @@ extension GraphViewType {
       return .init(node: node.wrappedValue)
     }
 
-    private let node: ObjectEdge<ComputedNode<Value>>
+    private let node: ObjectEdge<Computed<Value>>
 
     public init(
       _ file: StaticString = #file,
       _ line: UInt = #line,
       _ column: UInt = #column,
-      compute: @escaping @Sendable (inout ComputedNode<Value>.Context) -> Value
+      compute: @escaping @Sendable (inout Computed<Value>.Context) -> Value
     ) {
       self.node = .init(
         wrappedValue: .init(
@@ -57,7 +57,7 @@ extension GraphViewType {
     }
 
     public init(
-      node: ComputedNode<Value>
+      node: Computed<Value>
     ) {
       self.node = .init(wrappedValue: node)
     }
@@ -76,7 +76,7 @@ extension GraphViewType {
       .init(node: node.wrappedValue)
     }
 
-    private let node: ObjectEdge<StoredNode<Value>>
+    private let node: ObjectEdge<Stored<Value>>
 
     public init(
       _ file: StaticString = #file,
@@ -91,7 +91,7 @@ extension GraphViewType {
       _ file: StaticString = #file,
       _ line: UInt = #line,
       _ column: UInt = #column,
-      node: StoredNode<Value>
+      node: Stored<Value>
     ) {
       self.node = .init(wrappedValue: node)
     }

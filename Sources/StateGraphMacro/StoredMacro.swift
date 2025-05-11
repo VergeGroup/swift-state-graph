@@ -79,13 +79,15 @@ extension StoredMacro: PeerMacro {
       .renamingIdentifier(with: prefix)
       .modifyingTypeAnnotation({ type in
         if variableDecl.isWeak {
-          return "StoredNode<Weak<\(type.removingOptionality().trimmed)>>"
+          return "Stored<Weak<\(type.removingOptionality().trimmed)>>"
         } else if variableDecl.isUnowned {
-          return "StoredNode<Unowned<\(type.removingOptionality().trimmed)>>"
+          return "Stored<Unowned<\(type.removingOptionality().trimmed)>>"
         } else {
-          return "StoredNode<\(type.trimmed)>"
+          return "Stored<\(type.trimmed)>"
         }
       })
+    
+    let name = variableDecl.name
 
     if variableDecl.isOptional && variableDecl.hasInitializer == false {
 
@@ -94,12 +96,12 @@ extension StoredMacro: PeerMacro {
 
         if variableDecl.isWeak {
           return .init(
-            value: ".init(wrappedValue: .init(\(initializer.trimmed.value)))" as ExprSyntax)
+            value: #".init(name: "\#(raw: name)", wrappedValue: .init(\#(initializer.trimmed.value)))"# as ExprSyntax)
         } else if variableDecl.isUnowned {
           return .init(
-            value: ".init(wrappedValue: .init(\(initializer.trimmed.value)))" as ExprSyntax)
+            value: #".init(name: "\#(raw: name)", wrappedValue: .init(\#(initializer.trimmed.value)))"# as ExprSyntax)
         } else {
-          return .init(value: ".init(wrappedValue: \(initializer.trimmed.value))" as ExprSyntax)
+          return .init(value: #".init(name: "\#(raw: name)", wrappedValue: \#(initializer.trimmed.value))"# as ExprSyntax)
         }
 
       })

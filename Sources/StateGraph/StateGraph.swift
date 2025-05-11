@@ -16,7 +16,7 @@ private enum TaskLocals {
 
 public protocol TypeErasedNode: Hashable, AnyObject, Sendable, CustomDebugStringConvertible {
   
-  var name: String? { get }
+  var name: String { get }
   var lock: NodeLock { get }
 
   /// edges affecting nodes
@@ -56,6 +56,18 @@ extension Node {
 
 extension Node {
   
+  public func map<ComputedValue>(
+    _ project: @escaping @Sendable (Computed<ComputedValue>.Context, Self.Value) -> ComputedValue
+  ) -> Computed<ComputedValue> {
+    return Computed { context in
+      project(context, self.wrappedValue)
+    }
+  }
+    
+}
+
+extension Node {
+  
   public func observe() -> AsyncStartWithSequence<AsyncMapSequence<AsyncStream<Void>, Self.Value>> {
         
    let stream = withStateGraphTrackingStream {
@@ -67,18 +79,6 @@ extension Node {
     .startWith(self.wrappedValue)
              
     return stream
-  }
-  
-  public func map<Computed>(
-    _ file: StaticString = #fileID,
-    _ line: UInt = #line,
-    _ column: UInt = #column,
-    name: String? = nil,
-    _ computer: @escaping @Sendable (Self.Value) -> Computed
-  ) -> ComputedNode<Computed> {
-    return ComputedNode(file, line, column, name: name) { context in
-      computer(self.wrappedValue)
-    }
   }
     
 }
@@ -141,7 +141,7 @@ extension AsyncStartWithSequence: Sendable where Base.Element: Sendable, Base: S
 /// ```swift
 /// let graph = StateGraph()
 /// ```
-public final class StoredNode<Value>: Node, Observable, CustomDebugStringConvertible {
+public final class Stored<Value>: Node, Observable, CustomDebugStringConvertible {
 
   public let lock: NodeLock
 
@@ -162,7 +162,7 @@ public final class StoredNode<Value>: Node, Observable, CustomDebugStringConvert
     }
   }
 
-  public let name: String?
+  public let name: String
   let sourceLocation: SourceLocation
 
   public var wrappedValue: Value {
@@ -241,7 +241,7 @@ public final class StoredNode<Value>: Node, Observable, CustomDebugStringConvert
     wrappedValue: Value
   ) {
     self.sourceLocation = .init(file: file, line: line, column: column)
-    self.name = name
+    self.name = "\(makeUniqueNumber())\(name.map { "\($0)" } ?? "")"
     self.lock = sharedLock
     self._value = wrappedValue
     
@@ -264,36 +264,108 @@ public final class StoredNode<Value>: Node, Observable, CustomDebugStringConvert
   }
 
   public var debugDescription: String {
-    "StoredNode<\(Value.self)>(\(String(describing: _value)))"
+    "Stored<\(Value.self)>(\(String(describing: _value)))"
   }
 }
 
-/*
-public protocol ComputedNodeDescriptor {
+public protocol ComputedDescriptor<Value>: Sendable {
   
   associatedtype Value
   
-  func compute(context: inout ComputedNode<Value>.Context) -> Value
+  func compute(context: inout Computed<Value>.Context) -> Value
+  
+  func isEqual(lhs: Value, rhs: Value) -> Bool
 }
 
-public struct AnyComputedNodeDescriptor<Value>: ComputedNodeDescriptor {
+extension ComputedDescriptor {
   
-  private let computeClosure: (inout ComputedNode<Value>.Context) -> Value
-  
-  public init(compute: @escaping (inout ComputedNode<Value>.Context) -> Value) {
-    self.computeClosure = compute  
+  public static func any<Value>(
+    _ compute: @escaping @Sendable (inout Computed<Value>.Context) -> Value
+  ) -> Self where Self == AnyComputedDescriptor<Value> {
+    AnyComputedDescriptor(compute: compute, isEqual: { _, _ in false })
   }
-    
-  public func compute(context: inout ComputedNode<Value>.Context) -> Value {
+  
+  public static func any<Value>(
+    _ compute: @escaping @Sendable (
+      inout Computed<Value>.Context
+    ) -> Value
+  ) -> Self where Self == AnyComputedDescriptor<Value>, Value: Equatable {
+    AnyComputedDescriptor(compute: compute)
+  }
+  
+}
+
+public struct AnyComputedDescriptor<Value>: ComputedDescriptor {
+
+  private let computeClosure: @Sendable (inout Computed<Value>.Context) -> Value
+  private let isEqualClosure: @Sendable (Value, Value) -> Bool
+  
+  public init(
+    compute: @escaping @Sendable (inout Computed<Value>.Context) -> Value,
+    isEqual: @escaping @Sendable (Value, Value) -> Bool
+  ) {
+    self.computeClosure = compute  
+    self.isEqualClosure = isEqual
+  }
+  
+  public init(
+    compute: @escaping @Sendable (inout Computed<Value>.Context) -> Value
+  ) where Value : Equatable {
+    self.computeClosure = compute  
+    self.isEqualClosure = { $0 == $1 }
+  }
+      
+  public func compute(context: inout Computed<Value>.Context) -> Value {
     computeClosure(&context)
   }
   
+  public func isEqual(lhs: Value, rhs: Value) -> Bool {
+    isEqualClosure(lhs, rhs)
+  }
+      
 }
-*/
 
+public protocol ComputedEnvironmentKey {
+  associatedtype Value
+}
+
+public struct ComputedEnvironmentValues {
+  
+  struct AnyMetatypeWrapper: Hashable {
+    let metatype: Any.Type
+    
+    static func ==(lhs: Self, rhs: Self) -> Bool {
+      lhs.metatype == rhs.metatype
+    }
+    
+    func hash(into hasher: inout Hasher) {
+      hasher.combine(ObjectIdentifier(metatype))
+    }    
+  }
+  
+  private var values: [AnyMetatypeWrapper: Any] = [:]
+  
+  public subscript<K: ComputedEnvironmentKey>(key: K.Type) -> K.Value? {
+    get {
+      return values[.init(metatype: key)] as? K.Value
+    }
+    set {
+      values[.init(metatype: key)] = newValue      
+    }
+  }
+}
+
+public enum StateGraphGlobal {
+  
+  public static let computedEnvironmentValues: OSAllocatedUnfairLock<ComputedEnvironmentValues> = .init(
+    uncheckedState: .init()
+  )
+  
+}
+  
 /// A node that computes its value based on other nodes in a Directed Acyclic Graph (DAG).
 ///
-/// `ComputedNode` derives its value from other nodes through a computation rule.
+/// `Computed` derives its value from other nodes through a computation rule.
 /// When any of its dependencies change, the node becomes dirty and will recalculate
 /// its value on the next access. This node caches its computed value for performance.
 ///
@@ -301,9 +373,24 @@ public struct AnyComputedNodeDescriptor<Value>: ComputedNodeDescriptor {
 /// - Dependencies are tracked: The node automatically tracks which nodes it depends on
 /// - Changes propagate: When this node's value changes, downstream nodes are notified
 /// ```
-public final class ComputedNode<Value>: Node, Observable, CustomDebugStringConvertible {
-  
+public final class Computed<Value>: Node, Observable, CustomDebugStringConvertible {
+    
   public struct Context {
+    
+    @dynamicMemberLookup
+    public struct Environment {
+      
+      public subscript<T: ComputedEnvironmentKey>(
+        dynamicMember keyPath: KeyPath<ComputedEnvironmentValues, T>
+      ) -> T {
+        StateGraphGlobal.computedEnvironmentValues.withLockUnchecked {
+          $0[keyPath: keyPath]
+        }
+      }
+
+    }
+    
+    public let environment: Environment
     
   }
     
@@ -311,8 +398,6 @@ public final class ComputedNode<Value>: Node, Observable, CustomDebugStringConve
 
   nonisolated(unsafe)
     private var _cachedValue: Value?
-
-  private let comparator: @Sendable (Value, Value) -> Bool
   
   #if canImport(Observation)
     nonisolated(unsafe)
@@ -362,7 +447,7 @@ public final class ComputedNode<Value>: Node, Observable, CustomDebugStringConve
   nonisolated(unsafe)
   private var _potentiallyDirty: Bool = false
 
-  public let name: String?
+  public let name: String
   private let sourceLocation: SourceLocation
 
   public var wrappedValue: Value {
@@ -375,7 +460,7 @@ public final class ComputedNode<Value>: Node, Observable, CustomDebugStringConve
     }
   }
 
-  private let rule: @Sendable (inout Context) -> Value
+  private let descriptor: any ComputedDescriptor<Value>
 
   nonisolated(unsafe)
   public var incomingEdges: ContiguousArray<Edge> = []
@@ -402,13 +487,42 @@ public final class ComputedNode<Value>: Node, Observable, CustomDebugStringConve
     _ line: UInt = #line,
     _ column: UInt = #column,
     name: String? = nil,
+    descriptor: some ComputedDescriptor<Value>
+  ) {
+    self.sourceLocation = .init(file: file, line: line, column: column)
+    self.name = "\(makeUniqueNumber())\(name.map { "\($0)" } ?? "")"
+    self.descriptor = descriptor
+    self.lock = .init()
+    
+#if DEBUG
+    Task {
+      await NodeStore.shared.register(node: self)
+    }
+#endif
+  }
+  
+  /// Initializes a computed node.
+  ///
+  /// This initializer uses a comparison function that always returns `false`.
+  /// This means updates will always occur regardless of whether the value has changed.
+  ///
+  /// - Parameters:
+  ///   - file: The file where the node is created (defaults to current file)
+  ///   - line: The line number where the node is created (defaults to current line)
+  ///   - column: The column number where the node is created (defaults to current column)
+  ///   - name: Optional name for the node
+  ///   - rule: The rule that computes the node's value
+  public init(
+    _ file: StaticString = #fileID,
+    _ line: UInt = #line,
+    _ column: UInt = #column,
+    name: String? = nil,
     rule: @escaping @Sendable (inout Context) -> Value
   ) {
     self.sourceLocation = .init(file: file, line: line, column: column)
-    self.name = name
-    self.rule = rule
+    self.name = "\(makeUniqueNumber())\(name.map { "\($0)" } ?? "")"
+    self.descriptor = AnyComputedDescriptor(compute: rule, isEqual: { _, _ in false })      
     self.lock = .init()
-    self.comparator = { _, _ in false }
     
 #if DEBUG
     Task {
@@ -419,9 +533,8 @@ public final class ComputedNode<Value>: Node, Observable, CustomDebugStringConve
 
   /// Initializes a computed node.
   ///
-  /// This initializer is used for value types that conform to `Equatable`,
-  /// using the `==` operator to compare values for equality.
-  /// Updates will only occur when the value has changed.
+  /// This initializer uses a comparison function that always returns `false`.
+  /// This means updates will always occur regardless of whether the value has changed.
   ///
   /// - Parameters:
   ///   - file: The file where the node is created (defaults to current file)
@@ -437,18 +550,17 @@ public final class ComputedNode<Value>: Node, Observable, CustomDebugStringConve
     rule: @escaping @Sendable (inout Context) -> Value
   ) where Value: Equatable {
     self.sourceLocation = .init(file: file, line: line, column: column)
-    self.name = name
-    self.rule = rule
-    self.lock = sharedLock
-    self.comparator = { $0 == $1 }
-        
+    self.name = "\(makeUniqueNumber())\(name.map { "\($0)" } ?? "")"
+    self.descriptor = AnyComputedDescriptor(compute: rule, isEqual: { $0 == $1 })
+    self.lock = .init()
+    
 #if DEBUG
     Task {
       await NodeStore.shared.register(node: self)
     }
 #endif
   }
-
+  
   deinit {
     Log.generic.debug("Deinit Computed: \(self.name ?? "noname")")
     for e in incomingEdges {
@@ -486,17 +598,14 @@ public final class ComputedNode<Value>: Node, Observable, CustomDebugStringConve
       TaskLocals.$currentNode.withValue(self) { () -> Void in
         let previousValue = _cachedValue
         removeIncomingEdges()
-        var context = Context()
-        _cachedValue = rule(&context)
+        var context = Context(environment: .init())
+        _cachedValue = descriptor.compute(context: &context)
 
         // propagate changes to dependent nodes
         do {
 
           if let previousValue = previousValue,
-             comparator(
-              previousValue,
-              _cachedValue!
-             ) == false 
+             descriptor.isEqual(lhs: previousValue, rhs: _cachedValue!) == false
           {
             for o in outgoingEdges {
               o.isPending = true
@@ -522,7 +631,7 @@ public final class ComputedNode<Value>: Node, Observable, CustomDebugStringConve
   }
    
   public var debugDescription: String {
-    "ComputedNode<\(Value.self)>(\(String(describing: _cachedValue)))"
+    "Computed<\(Value.self)>(\(String(describing: _cachedValue)))"
   }
   
 }
@@ -560,7 +669,7 @@ public final class Edge: CustomDebugStringConvertible {
   }
 
   deinit {
-    Log.generic.debug("Deinit Edge")
+//    Log.generic.debug("Deinit Edge")
   }
   
 }

@@ -11,8 +11,19 @@ import StorybookKit
 
 struct ContentView: View {
   var body: some View {
-    ListView(rootState: RootState())
-//    Storybook.init()
+    NavigationStack {
+      NavigationLink { 
+        Text("Empty")
+      } label: { 
+        Text("Empty") 
+      }
+
+      NavigationLink {
+        PostListContainerView()
+      } label: { 
+        Text("Posts") 
+      }
+    }
   }
 }
 
@@ -22,9 +33,9 @@ import SwiftUI
 
 private struct Book_SingleStoredNode: View {
   
-  let node: StoredNode<Int>
+  let node: Stored<Int>
   
-  init(node: StoredNode<Int>) {
+  init(node: Stored<Int>) {
     self.node = node
   }
   
@@ -40,7 +51,7 @@ private struct Book_SingleStoredNode: View {
 
 #Preview("_Book") {
   Book_SingleStoredNode(
-    node: StoredNode(wrappedValue: 1)
+    node: Stored(wrappedValue: 1)
   )
   .frame(width: 300, height: 300)
 }
@@ -49,11 +60,13 @@ private struct Book_SingleStoredNode: View {
 
 private struct Book_StateView: View {
   
-  @StateView
-  final class Entity: Equatable {
+  final class Entity {
     
+    @GraphStored
     var name: String = ""
+    @GraphStored
     var count: Int = 0
+    @GraphStored
     var count2: Int = 0
     
     init(

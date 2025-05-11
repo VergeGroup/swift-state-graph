@@ -1,12 +1,12 @@
 import Testing
 @testable import StateGraph
 
-@Suite("StoredNode.observe()")
+@Suite("Stored.observe()")
 struct NodeObserveTests {
   
   @Test
   func basic() async throws {
-    let node = StoredNode(wrappedValue: 0)
+    let node = Stored(wrappedValue: 0)
     let stream = node.observe()
           
     try await confirmation(expectedCount: 2) { c in
@@ -23,7 +23,7 @@ struct NodeObserveTests {
     
   @Test("Can observe value changes")
   func testObserveValueChanges() async throws {
-    let node = StoredNode(wrappedValue: 0)
+    let node = Stored(wrappedValue: 0)
     let stream = node.observe()
     
     var results: [Int] = []
@@ -63,7 +63,7 @@ struct NodeObserveTests {
       var value: Int
     }
     
-    let node = StoredNode(wrappedValue: TestStruct(value: 0))
+    let node = Stored(wrappedValue: TestStruct(value: 0))
     let stream = node.observe()
     
     var results: [TestStruct] = []
@@ -98,7 +98,7 @@ struct NodeObserveTests {
   
   @Test("Multiple subscribers can exist simultaneously")
   func testObserveWithMultipleSubscribers() async throws {
-    let node = StoredNode(wrappedValue: 0)
+    let node = Stored(wrappedValue: 0)
     
     var results1: [Int] = []
     var results2: [Int] = []

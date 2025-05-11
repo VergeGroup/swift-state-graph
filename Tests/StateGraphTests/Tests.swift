@@ -48,9 +48,9 @@ struct Tests {
   @Test
   func test() {
 
-    let a = StoredNode(name: "A", wrappedValue: 10)
-    let b = StoredNode(name: "B", wrappedValue: 20)
-    let c = ComputedNode(name: "C") { _ in a.wrappedValue + b.wrappedValue }
+    let a = Stored(name: "A", wrappedValue: 10)
+    let b = Stored(name: "B", wrappedValue: 20)
+    let c = Computed(name: "C") { _ in a.wrappedValue + b.wrappedValue }
 
     #expect(c.wrappedValue == 30)
 
@@ -60,11 +60,11 @@ struct Tests {
   }
 
   @Test func graph() {
-    let a = StoredNode(name: "A", wrappedValue: 10)
-    let b = StoredNode(name: "B", wrappedValue: 20)
-    let c = ComputedNode(name: "C") { _ in a.wrappedValue + b.wrappedValue }
-    let d = ComputedNode(name: "D") { _ in c.wrappedValue * 2 }
-    let e = ComputedNode(name: "E") { _ in a.wrappedValue * 2 }
+    let a = Stored(name: "A", wrappedValue: 10)
+    let b = Stored(name: "B", wrappedValue: 20)
+    let c = Computed(name: "C") { _ in a.wrappedValue + b.wrappedValue }
+    let d = Computed(name: "D") { _ in c.wrappedValue * 2 }
+    let e = Computed(name: "E") { _ in a.wrappedValue * 2 }
 
     #expect(d.wrappedValue == 60)
     #expect(e.wrappedValue == 20)
@@ -72,10 +72,10 @@ struct Tests {
   }
 
   @Test func graph2() {
-    let a = StoredNode(name: "A", wrappedValue: 0)
-    let b = StoredNode(name: "B", wrappedValue: 20)
+    let a = Stored(name: "A", wrappedValue: 0)
+    let b = Stored(name: "B", wrappedValue: 20)
 
-    let e = ComputedNode(name: "E") { _ in
+    let e = Computed(name: "E") { _ in
       if a.wrappedValue < 10 {
         a
       } else {
@@ -95,22 +95,22 @@ struct Tests {
   func node_in_node() {
 
     let bookNodes = (0..<10).map {
-      StoredNode(name: "book\($0)", wrappedValue: 0)
+      Stored(name: "book\($0)", wrappedValue: 0)
     }
 
-    let allBooks = StoredNode(name: "bookNodes", wrappedValue: bookNodes)
+    let allBooks = Stored(name: "bookNodes", wrappedValue: bookNodes)
 
-    let filteredBooks = ComputedNode(name: "allBooks") { _ in
+    let filteredBooks = Computed(name: "allBooks") { _ in
       allBooks
         .wrappedValue
         .filter {
-          $0.name?.hasPrefix("book") == true
+          $0.name.hasPrefix("book") == true
         }
     }
 
     #expect(filteredBooks.wrappedValue.count == 10)
 
-    allBooks.wrappedValue.append(StoredNode(name: "book100", wrappedValue: 0))
+    allBooks.wrappedValue.append(Stored(name: "book100", wrappedValue: 0))
 
     #expect(filteredBooks.wrappedValue.count == 11)
 
@@ -163,9 +163,9 @@ struct Tests {
 
     #expect(book2.author.name == "Mike")
 
-    let books = StoredNode(wrappedValue: [book1, book2])
+    let books = Stored(wrappedValue: [book1, book2])
 
-    let filteredBooksByJohn = ComputedNode(name: "booksByJohn") { _ in
+    let filteredBooksByJohn = Computed(name: "booksByJohn") { _ in
       books
         .wrappedValue
         .filter {

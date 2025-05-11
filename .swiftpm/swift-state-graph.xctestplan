@@ -1,0 +1,40 @@
+{
+  "configurations" : [
+    {
+      "id" : "675224CF-4A61-4D3C-BD32-31A1A1A36C88",
+      "name" : "Test Scheme Action",
+      "options" : {
+
+      }
+    }
+  ],
+  "defaultOptions" : {
+    "mallocStackLoggingOptions" : {
+      "loggingType" : "liveAllocations"
+    }
+  },
+  "testTargets" : [
+    {
+      "target" : {
+        "containerPath" : "container:",
+        "identifier" : "StateGraphMacroTests",
+        "name" : "StateGraphMacroTests"
+      }
+    },
+    {
+      "target" : {
+        "containerPath" : "container:",
+        "identifier" : "StateGraphTests",
+        "name" : "StateGraphTests"
+      }
+    },
+    {
+      "target" : {
+        "containerPath" : "container:",
+        "identifier" : "StateGraphNormalizationTests",
+        "name" : "StateGraphNormalizationTests"
+      }
+    }
+  ],
+  "version" : 1
+}

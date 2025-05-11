@@ -9,6 +9,7 @@
 /* Begin PBXBuildFile section */
 		4B386A1B2DBF1A70008ADCDB /* StateGraph in Frameworks */ = {isa = PBXBuildFile; productRef = 4B386A1A2DBF1A70008ADCDB /* StateGraph */; };
 		4B386A1E2DBF1AE1008ADCDB /* StorybookKit in Frameworks */ = {isa = PBXBuildFile; productRef = 4B386A1D2DBF1AE1008ADCDB /* StorybookKit */; };
+		4BBE13BF2DD07F36001AF6FF /* StateGraphNormalization in Frameworks */ = {isa = PBXBuildFile; productRef = 4BBE13BE2DD07F36001AF6FF /* StateGraphNormalization */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -29,6 +30,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				4B386A1E2DBF1AE1008ADCDB /* StorybookKit in Frameworks */,
+				4BBE13BF2DD07F36001AF6FF /* StateGraphNormalization in Frameworks */,
 				4B386A1B2DBF1A70008ADCDB /* StateGraph in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -40,6 +42,7 @@
 			isa = PBXGroup;
 			children = (
 				4B386A0A2DBF1A1A008ADCDB /* Development */,
+				4BBE13BD2DD07F36001AF6FF /* Frameworks */,
 				4B386A092DBF1A1A008ADCDB /* Products */,
 			);
 			sourceTree = "<group>";
@@ -50,6 +53,13 @@
 				4B386A082DBF1A1A008ADCDB /* Development.app */,
 			);
 			name = Products;
+			sourceTree = "<group>";
+		};
+		4BBE13BD2DD07F36001AF6FF /* Frameworks */ = {
+			isa = PBXGroup;
+			children = (
+			);
+			name = Frameworks;
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */
@@ -74,6 +84,7 @@
 			packageProductDependencies = (
 				4B386A1A2DBF1A70008ADCDB /* StateGraph */,
 				4B386A1D2DBF1AE1008ADCDB /* StorybookKit */,
+				4BBE13BE2DD07F36001AF6FF /* StateGraphNormalization */,
 			);
 			productName = Development;
 			productReference = 4B386A082DBF1A1A008ADCDB /* Development.app */;
@@ -367,6 +378,11 @@
 			isa = XCSwiftPackageProductDependency;
 			package = 4B386A1C2DBF1AE1008ADCDB /* XCRemoteSwiftPackageReference "swift-storybook" */;
 			productName = StorybookKit;
+		};
+		4BBE13BE2DD07F36001AF6FF /* StateGraphNormalization */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 4B386A192DBF1A70008ADCDB /* XCLocalSwiftPackageReference "../../swift-state-graph" */;
+			productName = StateGraphNormalization;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};

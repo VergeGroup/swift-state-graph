@@ -6,8 +6,8 @@ import os.lock
 final class ConcurrencyTests: XCTestCase {
 
   func testConcurrentAccess() async throws {
-    let source = StoredNode(name: "source", wrappedValue: 0)
-    let computed = ComputedNode(name: "computed") { _ in source.wrappedValue * 2 }
+    let source = Stored(name: "source", wrappedValue: 0)
+    let computed = Computed(name: "computed") { _ in source.wrappedValue * 2 }
 
     await withTaskGroup(of: Void.self) { group in
       for i in 0..<100 {
@@ -26,11 +26,11 @@ final class ConcurrencyTests: XCTestCase {
   }
 
   func testDependencyTracking() async throws {
-    let source1 = StoredNode(name: "source1", wrappedValue: 1)
-    let source2 = StoredNode(name: "source2", wrappedValue: 2)
+    let source1 = Stored(name: "source1", wrappedValue: 1)
+    let source2 = Stored(name: "source2", wrappedValue: 2)
 
     // Node whose dependencies change based on conditions
-    let conditional = ComputedNode(name: "conditional") { _ in
+    let conditional = Computed(name: "conditional") { _ in
       if source1.wrappedValue > 5 {
         return source2.wrappedValue
       } else {
@@ -51,11 +51,11 @@ final class ConcurrencyTests: XCTestCase {
   }
 
   func testReentrancy() async throws {
-    let counter = StoredNode(name: "counter", wrappedValue: 0)
-    let trigger = StoredNode(name: "trigger", wrappedValue: false)
+    let counter = Stored(name: "counter", wrappedValue: 0)
+    let trigger = Stored(name: "trigger", wrappedValue: false)
 
     // Node that may cause reentrancy
-    let reentrant = ComputedNode(name: "reentrant") { _ in
+    let reentrant = Computed(name: "reentrant") { _ in
       let value = counter.wrappedValue
       if trigger.wrappedValue && value < 5 {
         counter.wrappedValue = value + 1  // Trigger recalculation
@@ -70,12 +70,12 @@ final class ConcurrencyTests: XCTestCase {
   }
 
   func testComplexDependencyGraph() async throws {
-    let a = StoredNode(name: "a", wrappedValue: 1)
-    let b = StoredNode(name: "b", wrappedValue: 2)
+    let a = Stored(name: "a", wrappedValue: 1)
+    let b = Stored(name: "b", wrappedValue: 2)
 
-    let c = ComputedNode(name: "c") { _ in a.wrappedValue + b.wrappedValue }
-    let d = ComputedNode(name: "d") { _ in b.wrappedValue * 2 }
-    let e = ComputedNode(name: "e") { _ in c.wrappedValue + d.wrappedValue }
+    let c = Computed(name: "c") { _ in a.wrappedValue + b.wrappedValue }
+    let d = Computed(name: "d") { _ in b.wrappedValue * 2 }
+    let e = Computed(name: "e") { _ in c.wrappedValue + d.wrappedValue }
 
     // Modify multiple source nodes simultaneously
     await withTaskGroup(of: Void.self) { group in
@@ -90,11 +90,11 @@ final class ConcurrencyTests: XCTestCase {
   }
 
   func testPropagationTiming() async throws {
-    let source = StoredNode(name: "source", wrappedValue: 0)
+    let source = Stored(name: "source", wrappedValue: 0)
 
     let valuesLock = OSAllocatedUnfairLock<[Int]>(initialState: [])
 
-    let computed = ComputedNode(name: "computed") { _ in
+    let computed = Computed(name: "computed") { _ in
       let value = source.wrappedValue
       valuesLock.withLock { $0.append(value) }
       return value
@@ -118,9 +118,9 @@ final class ConcurrencyTests: XCTestCase {
 
   func testHighConcurrency() async throws {
     // Test with many nodes and high concurrency
-    let sources = (0..<10).map { StoredNode(name: "source\($0)", wrappedValue: $0) }
+    let sources = (0..<10).map { Stored(name: "source\($0)", wrappedValue: $0) }
 
-    let computed = ComputedNode(name: "sum") { _ in
+    let computed = Computed(name: "sum") { _ in
       sources.reduce(0) { $0 + $1.wrappedValue }
     }
 
@@ -149,11 +149,11 @@ final class ConcurrencyTests: XCTestCase {
 
   func testAtomicUpdates() async throws {
     // Test if multiple value updates happen atomically
-    let a = StoredNode(name: "a", wrappedValue: 0)
-    let b = StoredNode(name: "b", wrappedValue: 0)
+    let a = Stored(name: "a", wrappedValue: 0)
+    let b = Stored(name: "b", wrappedValue: 0)
 
     // Node that calculates a + b
-    let sum = ComputedNode(name: "sum") { _ in a.wrappedValue + b.wrappedValue }
+    let sum = Computed(name: "sum") { _ in a.wrappedValue + b.wrappedValue }
 
     // Track recorded inconsistencies
     let inconsistenciesLock = OSAllocatedUnfairLock<[String]>(initialState: [])
@@ -199,14 +199,14 @@ final class ConcurrencyTests: XCTestCase {
 
   func testEdgePropagation() async throws {
     // Test if edge propagation works correctly
-    let source = StoredNode(name: "source", wrappedValue: 0)
+    let source = Stored(name: "source", wrappedValue: 0)
 
     // Multiple computed nodes that depend on the source
-    let computed1 = ComputedNode(name: "computed1") { _ in source.wrappedValue * 2 }
-    let computed2 = ComputedNode(name: "computed2") { _ in source.wrappedValue + 10 }
+    let computed1 = Computed(name: "computed1") { _ in source.wrappedValue * 2 }
+    let computed2 = Computed(name: "computed2") { _ in source.wrappedValue + 10 }
 
     // Final node that depends on both computed nodes
-    let finalNode = ComputedNode(name: "final") { _ in
+    let finalNode = Computed(name: "final") { _ in
       computed1.wrappedValue + computed2.wrappedValue
     }
 
