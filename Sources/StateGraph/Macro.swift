@@ -1,8 +1,7 @@
 
-//@attached(member, names: named(sink))
-@attached(extension, conformances: GraphViewType)
-@attached(memberAttribute)
-public macro GraphView() = #externalMacro(module: "StateGraphMacro", type: "GraphViewMacro")
+//@attached(extension, conformances: GraphViewType)
+//@attached(memberAttribute)
+//public macro GraphView() = #externalMacro(module: "StateGraphMacro", type: "GraphViewMacro")
 
 @attached(accessor, names: named(init), named(get), named(set))
 @attached(peer, names: prefixed(`$`))
@@ -39,19 +38,20 @@ final class A {
   }  
 }
 
-@GraphView
 final class StateViewModel {
-  
+    
   let constant_init: Int = 0
   
   var variable_init: Int = 0
-  
-  let optional_constant_init: Int? = 0
     
+  let optional_constant_init: Int? = 0
+  
+  @GraphStored
   var optional_variable_init: Int? = 0
   
   let optional_constant: Int?
   
+  @GraphStored
   var optional_variable: Int?
   
   var computed: Int {
@@ -76,33 +76,4 @@ final class StateViewModel {
   
 }
 
-/*
-import SwiftData
-
-@Model
-final class SwiftDataModel {
-  
-  let constant: Int = 0
-  
-  var variable: Int = 0
-  
-  var optional_variable: Int?
-  
-  var computed: Int {
-    0
-  }
-  
-  weak var weak_variable: AnyObject?
-    
-  unowned var unowned_variable: AnyObject
-  
-
-  unowned let unowned_constant: AnyObject
-  
-  init() {
-    
-  }
-  
-}
-*/
 #endif

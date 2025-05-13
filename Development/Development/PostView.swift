@@ -92,11 +92,10 @@ final class Post: TypedIdentifiable, Hashable, Sendable {
         .filter { $0.post.id.raw == id }
         .sorted(by: { $0.createdAt < $1.createdAt })
     }
-    self.$activeComments = .init(name: "activeComments") { context in
-      context.environment.normalizedStore.comments
-        .filter { $0.post.id.raw == id }
+    self.$activeComments = .init(name: "activeComments") { [allComments = $allComments] context in
+      allComments
+        .wrappedValue
         .filter { !$0.isDeleted }
-        .sorted(by: { $0.createdAt < $1.createdAt })
     }
   }
 }
@@ -261,7 +260,8 @@ final class PostListViewModel: ObservableObject {
   @GraphComputed
   var posts: [Post]     
   
-  @GraphComputed var postsCount: Int
+  @GraphComputed
+  var postsCount: Int
   
   let mockServer: MockServerService
   
@@ -341,6 +341,7 @@ struct PostCellView: View {
         Text("By: \(post.author.name)")
           .font(.caption)
           .foregroundColor(.secondary)
+        Text(post.createdAt.formatted(date: .omitted, time: .complete))
       }
       
       // Comments

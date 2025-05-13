@@ -60,7 +60,7 @@ private struct Book_SingleStoredNode: View {
 
 private struct Book_StateView: View {
   
-  final class Entity {
+  final class Entity: Sendable {
     
     @GraphStored
     var name: String = ""
