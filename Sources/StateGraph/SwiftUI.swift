@@ -2,6 +2,21 @@
 
 import SwiftUI
 
+extension Stored {
+  
+  /**
+    Creates a SwiftUI binding from the stored property.
+   */
+  public var binding: Binding<Value> {
+    .init(
+      get: { self.wrappedValue },
+      set: { self.wrappedValue = $0 }
+    )
+  }
+  
+}
+
+#if false
 extension SwiftUI.View {
   
   public typealias Computed = SwiftUI_Computed
@@ -105,4 +120,5 @@ private struct ObjectEdge<O>: DynamicProperty {
   
 }
 
+#endif
 #endif
