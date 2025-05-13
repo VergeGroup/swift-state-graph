@@ -10,7 +10,6 @@ final class MacroTests: XCTestCase {
     withMacroTesting(
       record: false,
       macros: [
-        "GraphView": GraphViewMacro.self,
         "GraphStored": StoredMacro.self,
       ]
     ) {
@@ -22,9 +21,9 @@ final class MacroTests: XCTestCase {
     
     assertMacro {
       """
-      @GraphView
       final class Model {
       
+        @GraphStored
         var count: Int = 0
       
         init() {
@@ -36,7 +35,6 @@ final class MacroTests: XCTestCase {
     } expansion: {
       """
       final class Model {
-
         var count: Int {
           get {
             return $count.wrappedValue
@@ -46,15 +44,12 @@ final class MacroTests: XCTestCase {
           }
         }
 
-        @GraphIgnored let $count: StoredNode<Int> = .init(wrappedValue: 0)
+        @GraphIgnored let $count: Stored<Int> = .init(name: "count", wrappedValue: 0)
 
         init() {
         
         }
 
-      }
-
-      extension Model: GraphViewType {
       }
       """
     }
@@ -96,7 +91,7 @@ final class MacroTests: XCTestCase {
         }
 
         @GraphIgnored
-          public let $weak_variable: StoredNode<Weak<AnyObject>>
+          public let $weak_variable: Stored<Weak<AnyObject>>
 
         unowned var unowned_variable: AnyObject {
           @storageRestrictions(
@@ -113,7 +108,7 @@ final class MacroTests: XCTestCase {
           }
         }
 
-        @GraphIgnored let $unowned_variable: StoredNode<Unowned<AnyObject>>
+        @GraphIgnored let $unowned_variable: Stored<Unowned<AnyObject>>
         
         unowned let unowned_constant: AnyObject
 

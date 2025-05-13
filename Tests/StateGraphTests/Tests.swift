@@ -3,8 +3,8 @@ import Testing
 
 @testable import StateGraph
 
-@GraphView
 final class Author {
+  @GraphStored
   var name: String
 
   init(
@@ -14,8 +14,8 @@ final class Author {
   }
 }
 
-@GraphView
 final class Tag {
+  @GraphStored
   var name: String
 
   init(
@@ -25,11 +25,12 @@ final class Tag {
   }
 }
 
-@GraphView
 final class Book {
 
   let author: Author
+  @GraphStored
   var title: String
+  @GraphStored
   var tags: [Tag]
 
   init(
@@ -104,7 +105,7 @@ struct Tests {
       allBooks
         .wrappedValue
         .filter {
-          $0.name.hasPrefix("book") == true
+          $0.name?.hasPrefix("book") == true
         }
     }
 
@@ -212,8 +213,8 @@ struct SubscriptionTests {
 @Suite
 struct StateViewTests {
 
-  @GraphView
   final class Model: Sendable {
+    @GraphStored
     var count: Int = 0
   }
 
@@ -241,8 +242,8 @@ struct StateViewTests {
 @Suite
 struct StateGraphTrackingTests {
 
-  @GraphView
   final class Model: Sendable {
+    @GraphStored
     var count: Int = 0
   }
 
@@ -283,11 +284,12 @@ struct StateGraphTrackingTests {
 @Suite
 struct GraphViewAdvancedTests {
 
-  @GraphView
   final class NestedModel: Sendable {
 
+    @GraphStored
     var counter: Int = 0
 
+    @GraphStored
     var subModel: SubModel?
 
     init() {
@@ -303,8 +305,8 @@ struct GraphViewAdvancedTests {
     }
   }
 
-  @GraphView
   final class SubModel: Sendable {
+    @GraphStored
     var value: String = "default"
 
     init() {}

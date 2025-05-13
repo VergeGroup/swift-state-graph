@@ -1,18 +1,26 @@
 
-struct SourceLocation: ~Copyable {
+public struct SourceLocation: ~Copyable, Sendable {
   
-  let file: StaticString
-  let line: UInt
-  let column: UInt
+  public let file: StaticString
+  public let line: UInt
+  public let column: UInt
   
-  init(file: StaticString, line: UInt, column: UInt) {
+  public init(file: StaticString, line: UInt, column: UInt) {
     self.file = file
     self.line = line
     self.column = column
   }
   
-  var text: String {
+  public var text: String {
     "\(file):\(line):\(column)"
   }
   
+}
+
+public struct NodeInfo: ~Copyable, Sendable {
+  
+  public let id: UInt64
+  
+  public let sourceLocation: SourceLocation
+ 
 }

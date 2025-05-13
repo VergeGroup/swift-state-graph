@@ -16,7 +16,8 @@ private enum TaskLocals {
 
 public protocol TypeErasedNode: Hashable, AnyObject, Sendable, CustomDebugStringConvertible {
   
-  var name: String { get }
+  var name: String? { get }
+  var info: NodeInfo { get }
   var lock: NodeLock { get }
 
   /// edges affecting nodes
@@ -162,8 +163,8 @@ public final class Stored<Value>: Node, Observable, CustomDebugStringConvertible
     }
   }
 
-  public let name: String
-  let sourceLocation: SourceLocation
+  public let name: String?
+  public let info: NodeInfo
 
   public var wrappedValue: Value {
     _read {
@@ -240,8 +241,11 @@ public final class Stored<Value>: Node, Observable, CustomDebugStringConvertible
     name: String? = nil,
     wrappedValue: Value
   ) {
-    self.sourceLocation = .init(file: file, line: line, column: column)
-    self.name = "\(makeUniqueNumber())\(name.map { "\($0)" } ?? "")"
+    self.info = .init(
+      id: makeUniqueNumber(),
+      sourceLocation: .init(file: file, line: line, column: column)
+    )
+    self.name = name
     self.lock = sharedLock
     self._value = wrappedValue
     
@@ -449,8 +453,8 @@ public final class Computed<Value>: Node, Observable, CustomDebugStringConvertib
   nonisolated(unsafe)
   private var _potentiallyDirty: Bool = false
 
-  public let name: String
-  private let sourceLocation: SourceLocation
+  public let name: String?
+  public let info: NodeInfo
 
   public var wrappedValue: Value {
     _read {
@@ -491,8 +495,11 @@ public final class Computed<Value>: Node, Observable, CustomDebugStringConvertib
     name: String? = nil,
     descriptor: some ComputedDescriptor<Value>
   ) {
-    self.sourceLocation = .init(file: file, line: line, column: column)
-    self.name = "\(makeUniqueNumber())\(name.map { "\($0)" } ?? "")"
+    self.info = .init(
+      id: makeUniqueNumber(),
+      sourceLocation: .init(file: file, line: line, column: column)
+    )
+    self.name = name
     self.descriptor = descriptor
     self.lock = .init()
     
@@ -521,8 +528,11 @@ public final class Computed<Value>: Node, Observable, CustomDebugStringConvertib
     name: String? = nil,
     rule: @escaping @Sendable (inout Context) -> Value
   ) {
-    self.sourceLocation = .init(file: file, line: line, column: column)
-    self.name = "\(makeUniqueNumber())\(name.map { "\($0)" } ?? "")"
+    self.info = .init(
+      id: makeUniqueNumber(),
+      sourceLocation: .init(file: file, line: line, column: column)
+    )
+    self.name = name
     self.descriptor = AnyComputedDescriptor(compute: rule, isEqual: { _, _ in false })      
     self.lock = .init()
     
@@ -551,8 +561,11 @@ public final class Computed<Value>: Node, Observable, CustomDebugStringConvertib
     name: String? = nil,
     rule: @escaping @Sendable (inout Context) -> Value
   ) where Value: Equatable {
-    self.sourceLocation = .init(file: file, line: line, column: column)
-    self.name = "\(makeUniqueNumber())\(name.map { "\($0)" } ?? "")"
+    self.info = .init(
+      id: makeUniqueNumber(),
+      sourceLocation: .init(file: file, line: line, column: column)
+    )
+    self.name = name
     self.descriptor = AnyComputedDescriptor(compute: rule, isEqual: { $0 == $1 })
     self.lock = .init()
     
