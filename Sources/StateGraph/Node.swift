@@ -42,6 +42,15 @@ extension Node {
 
 extension Node {
   
+  /**
+    Create a computed value node that depends on this node.
+
+    ```swift
+    let computed = node.map { context, value in
+      value * 2
+    }
+    ```
+  */
   public func map<ComputedValue>(
     _ project: @escaping @Sendable (Computed<ComputedValue>.Context, Self.Value) -> ComputedValue
   ) -> Computed<ComputedValue> {
