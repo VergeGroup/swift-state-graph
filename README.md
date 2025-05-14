@@ -1,5 +1,9 @@
 # Swift State Graph
 
+## Introduction
+
+StateGraph is a Swift framework designed for managing application state using a graph-based approach. It provides tools for creating and managing stored and computed properties, enabling efficient and reactive data flow within an application.
+
 ## Overview
 
 ```swift
