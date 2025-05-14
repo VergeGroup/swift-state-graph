@@ -28,8 +28,9 @@ struct MyView {
 
 There are 2 primitive types.
 
-- Stored value node
-- Computed value node
+**Stored value node**
+
+**Computed value node**
 
 Computed value nodes depend on other nodes.
 
@@ -47,3 +48,4 @@ stored.wrappedValue = 20
 
 ## What's the difference from using `Observable` protocol object
 
+swift-state-graph provides the Computed value node.
