@@ -139,6 +139,7 @@ extension Node {
         _ = self.wrappedValue
       },
       didChange: {
+        guard !isCancelled.withLock({ $0 }) else { return .stop }
         _handler._value(filter.send(value: self.wrappedValue))
         return .next
       },

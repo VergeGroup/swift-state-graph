@@ -17,6 +17,12 @@ struct ContentView: View {
       } label: { 
         Text("Empty") 
       }
+      
+      NavigationLink {
+        Book_StateView(entity: .init(name: "A", count: 1))
+      } label: { 
+        Text("StateView") 
+      }
 
       NavigationLink {
         PostListContainerView()
@@ -58,47 +64,69 @@ private struct Book_SingleStoredNode: View {
 
 // MARK: -
 
-private struct Book_StateView: View {
+final class Model: Sendable {
   
-  final class Entity: Sendable {
-    
-    @GraphStored
-    var name: String = ""
-    @GraphStored
-    var count: Int = 0
-    @GraphStored
-    var count2: Int = 0
-    
-    init(
-      name: String,
-      count: Int
-    ) {      
-      self.name = name
-      self.count = count
-    }
-    
+  @GraphStored
+  var name: String = ""
+  @GraphStored
+  var count: Int = 0
+  @GraphStored
+  var count2: Int = 0
+  
+  init(
+    name: String,
+    count: Int
+  ) {      
+    self.name = name
+    self.count = count
   }
   
-  let entity: Entity
+}
+
+private struct Book_StateView: View {
+    
+  let model: Model
+  @State var subscription: AnyCancellable?
   
-  init(entity: Entity) {
-    self.entity = entity
+  init(entity: Model) {
+    self.model = entity
   }
   
   var body: some View {
     let _ = Self._printChanges()
     Form {
-      Text("\(entity.name)")
-      Text("\(entity.count)")
+      Text("\(model.name)")
+      Text("\(model.count)")
       Button("Update Name") {
-        entity.name += "+"        
+        model.name += "+"        
       }
       Button("Update Count") {
-        entity.count += 1
+        model.count += 1
       }
       Button("Update Count 2") {
-        entity.count2 += 1
+        model.count2 += 1
       }
+    }
+    .onAppear {
+      
+      print("onAppear")
+      
+      let node = Computed { _ in
+        model.count + model.count2
+      }
+            
+      subscription = withGraphTracking { 
+        node.onChange { value in
+          print("computed \(node)", value)          
+        }
+        model.$count.onChange { value in
+          print("count", value)
+        }
+      }
+      
+    }
+    .onDisappear {
+      subscription?.cancel()      
     }
   }
 }
