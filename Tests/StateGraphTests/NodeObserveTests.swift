@@ -91,6 +91,7 @@ struct NodeObserveTests {
     // Even with the same value, change notification is sent
     node.wrappedValue = TestStruct(value: 2)
     try await Task.sleep(nanoseconds: 100_000)
+    
     #expect(results == [TestStruct(value: 0), TestStruct(value: 1), TestStruct(value: 2), TestStruct(value: 2)])
     
     task.cancel()

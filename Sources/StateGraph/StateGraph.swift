@@ -14,7 +14,6 @@ private enum TaskLocals {
   static var currentNode: (any TypeErasedNode)?
 }
 
-
 /// A node that functions as an endpoint in a Directed Acyclic Graph (DAG).
 ///
 /// `StoredNode` can have its value set directly from the outside, and changes to its value
@@ -31,8 +30,11 @@ public final class Stored<Value>: Node, Observable, CustomDebugStringConvertible
     private var _value: Value
 
   #if canImport(Observation)
-    nonisolated(unsafe)
-  private var observationRegistrar: ObservationRegistrar = .init()
+  @available(macOS 14.0, iOS 17.0, watchOS 10.0, tvOS 17.0, *)
+  private var observationRegistrar: ObservationRegistrar {
+    _observationRegistrar as! ObservationRegistrar
+  }
+  private let _observationRegistrar: (Any & Sendable)?
   #endif
 
   public var potentiallyDirty: Bool {
@@ -51,7 +53,9 @@ public final class Stored<Value>: Node, Observable, CustomDebugStringConvertible
     _read {
       
 #if canImport(Observation)
-      observationRegistrar.access(self, keyPath: \.self)
+      if #available(macOS 14.0, iOS 17.0, watchOS 10.0, tvOS 17.0, *) {
+        observationRegistrar.access(self, keyPath: \.self)
+      }
 #endif
       
       lock.lock()
@@ -72,10 +76,14 @@ public final class Stored<Value>: Node, Observable, CustomDebugStringConvertible
     _modify {
 
 #if canImport(Observation)
-      observationRegistrar.willSet(self, keyPath: \.self)
+      if #available(macOS 14.0, iOS 17.0, watchOS 10.0, tvOS 17.0, *) { 
+        observationRegistrar.willSet(self, keyPath: \.self)
+      }
       
       defer {
-        observationRegistrar.didSet(self, keyPath: \.self)
+        if #available(macOS 14.0, iOS 17.0, watchOS 10.0, tvOS 17.0, *) {
+          observationRegistrar.didSet(self, keyPath: \.self)
+        }
       }
 #endif
       
@@ -129,7 +137,13 @@ public final class Stored<Value>: Node, Observable, CustomDebugStringConvertible
     self.name = name
     self.lock = sharedLock
     self._value = wrappedValue
-    
+
+    if #available(macOS 14.0, iOS 17.0, watchOS 10.0, tvOS 17.0, *) {
+      self._observationRegistrar = ObservationRegistrar()
+    } else {
+      self._observationRegistrar = nil
+    }
+
     #if DEBUG
     Task {
       await NodeStore.shared.register(node: self)
@@ -287,8 +301,11 @@ public final class Computed<Value>: Node, Observable, CustomDebugStringConvertib
     private var _cachedValue: Value?
   
   #if canImport(Observation)
-    nonisolated(unsafe)
-  private var observationRegistrar: ObservationRegistrar = .init()
+    @available(macOS 14.0, iOS 17.0, watchOS 10.0, tvOS 17.0, *)
+    private var observationRegistrar: ObservationRegistrar {
+      _observationRegistrar as! ObservationRegistrar
+    }
+    private let _observationRegistrar: (Any & Sendable)?
   #endif
 
   public var potentiallyDirty: Bool {
@@ -311,7 +328,9 @@ public final class Computed<Value>: Node, Observable, CustomDebugStringConvertib
       }
       
 #if canImport(Observation)
-      observationRegistrar.willSet(self, keyPath: \.self)
+      if #available(macOS 14.0, iOS 17.0, watchOS 10.0, tvOS 17.0, *) {
+        observationRegistrar.willSet(self, keyPath: \.self)
+      }
 #endif
       
       let _outgoingEdges = outgoingEdges
@@ -340,7 +359,9 @@ public final class Computed<Value>: Node, Observable, CustomDebugStringConvertib
   public var wrappedValue: Value {
     _read {
       #if canImport(Observation)
-        observationRegistrar.access(self, keyPath: \.self)
+        if #available(macOS 14.0, iOS 17.0, watchOS 10.0, tvOS 17.0, *) {
+          observationRegistrar.access(self, keyPath: \.self)
+        }
       #endif
       recomputeIfNeeded()
       yield _cachedValue!
@@ -383,7 +404,13 @@ public final class Computed<Value>: Node, Observable, CustomDebugStringConvertib
     self.name = name
     self.descriptor = descriptor
     self.lock = .init()
-    
+
+    if #available(macOS 14.0, iOS 17.0, watchOS 10.0, tvOS 17.0, *) {
+      self._observationRegistrar = ObservationRegistrar()
+    } else {
+      self._observationRegistrar = nil
+    }
+
 #if DEBUG
     Task {
       await NodeStore.shared.register(node: self)
@@ -415,8 +442,14 @@ public final class Computed<Value>: Node, Observable, CustomDebugStringConvertib
     )
     self.name = name
     self.descriptor = AnyComputedDescriptor(compute: rule, isEqual: { _, _ in false })      
-    self.lock = .init()
-    
+    self.lock = sharedLock
+
+    if #available(macOS 14.0, iOS 17.0, watchOS 10.0, tvOS 17.0, *) {
+      self._observationRegistrar = ObservationRegistrar()
+    } else {
+      self._observationRegistrar = nil
+    }
+
 #if DEBUG
     Task {
       await NodeStore.shared.register(node: self)
@@ -448,8 +481,14 @@ public final class Computed<Value>: Node, Observable, CustomDebugStringConvertib
     )
     self.name = name
     self.descriptor = AnyComputedDescriptor(compute: rule, isEqual: { $0 == $1 })
-    self.lock = .init()
-    
+    self.lock = sharedLock
+
+    if #available(macOS 14.0, iOS 17.0, watchOS 10.0, tvOS 17.0, *) {
+      self._observationRegistrar = ObservationRegistrar()
+    } else {
+      self._observationRegistrar = nil
+    }
+
 #if DEBUG
     Task {
       await NodeStore.shared.register(node: self)
