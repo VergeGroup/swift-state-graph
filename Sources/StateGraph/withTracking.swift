@@ -1,7 +1,7 @@
 /// Tracks access to the properties of StoredNode or Computed.
 /// Similarly to Observation.withObservationTracking, didChange runs one time after property changes applied.
 /// To observe properties continuously, use ``withContinuousStateGraphTracking``.
-public func withStateGraphTracking(
+func withStateGraphTracking(
   apply: () -> Void,
   didChange: @escaping @Sendable () -> Void
 ) {
@@ -19,7 +19,7 @@ public enum StateGraphTrackingContinuation: Sendable {
 /// Tracks access to the properties of StoredNode or Computed.
 /// Continuously tracks until `didChange` returns `.stop`.
 /// It does not provides update of the properties granurarly. some frequency of updates may be aggregated into single event.
-public func withContinuousStateGraphTracking(
+func withContinuousStateGraphTracking(
   apply: @escaping () -> Void,
   didChange: @escaping () -> StateGraphTrackingContinuation,
   isolation: isolated (any Actor)? = #isolation
@@ -47,7 +47,7 @@ public func withContinuousStateGraphTracking(
   }
 }
 
-public func withStateGraphTrackingStream(
+func withStateGraphTrackingStream(
   apply: @escaping () -> Void
 ) -> AsyncStream<Void> {
 
