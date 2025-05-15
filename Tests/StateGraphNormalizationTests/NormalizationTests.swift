@@ -144,6 +144,7 @@ final class NormalizedStore: ComputedEnvironmentKey, Sendable {
 @Suite
 struct NormalizationTests {
 
+  @MainActor
   @Test func basic() async {
     
     let store = NormalizedStore()
@@ -175,6 +176,7 @@ struct NormalizationTests {
       
   } 
 
+  @MainActor
   @Test func randomDataGeneration() async {
     
     let task = Task {
