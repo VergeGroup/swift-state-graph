@@ -83,18 +83,16 @@ public func withGraphTracking(_ scope: () -> Void) -> AnyCancellable {
   }
   
   return AnyCancellable {
-    withExtendedLifetime(subscriptions) { 
-      
-    }
+    withExtendedLifetime(subscriptions) {}
   }
   
 }
 
-public protocol Filter {
+public protocol Filter<Value> {
   
   associatedtype Value
     
-  func send(value: Value) -> Value
+  mutating func send(value: Value) -> Value
 }
 
 public struct PassthroughFilter<Value>: Filter {
@@ -106,11 +104,25 @@ public struct PassthroughFilter<Value>: Filter {
   public init() {}
 }
 
+public struct DistinctFilter<Value: Equatable>: Filter {
+  
+  private var lastValue: Value?
+  
+  public mutating func send(value: Value) -> Value {
+    guard value != lastValue else { return value }
+    lastValue = value
+    return value
+  }
+  
+  public init() {}
+}
+
 extension Node {
   
   public func onChange(
-    _ filter: some Filter = PassthroughFilter<Value>(),
-    _ handler: @escaping (Self.Value) -> Void
+    _ filter: consuming some Filter<Self.Value>,
+    _ handler: @escaping (Self.Value) -> Void,
+    isolation: isolated (any Actor)? = #isolation
   ) {
     
     guard Subscriptions.subscriptions != nil else {
@@ -118,17 +130,23 @@ extension Node {
       return
     }
     
+    let _handler = UnsafeSendable(handler)
+        
     let isCancelled = OSAllocatedUnfairLock(initialState: false)
     
-    withContinuousStateGraphTracking { 
-      _ = self.wrappedValue
-    } didChange: {       
-      handler(self.wrappedValue)
-      return .next
-    }
-
+    withContinuousStateGraphTracking(
+      apply: {
+        _ = self.wrappedValue
+      },
+      didChange: {
+        _handler._value(filter.send(value: self.wrappedValue))
+        return .next
+      },
+      isolation: isolation
+    ) 
+                  
     // init    
-    handler(self.wrappedValue)
+    handler(filter.send(value: self.wrappedValue))
     
     let cancellabe = AnyCancellable {
       isCancelled.withLock { $0 = true }     
@@ -138,11 +156,28 @@ extension Node {
           
   }
   
+  public func onChange(
+    _ handler: @escaping (Self.Value) -> Void,
+    isolation: isolated (any Actor)? = #isolation
+  ) {    
+    onChange(PassthroughFilter<Self.Value>(), handler, isolation: isolation)
+  }
+  
+  /**
+   Emits the value only when it changes.
+   */
+  public func onChange(
+    _ handler: @escaping (Self.Value) -> Void,
+    isolation: isolated (any Actor)? = #isolation
+  ) where Value : Equatable {
+    onChange(DistinctFilter<Self.Value>(), handler, isolation: isolation)
+  }
+  
 }
 
 // MARK: - Internals
 
-@preconcurrency import Combine
+@_exported @preconcurrency import class Combine.AnyCancellable
 
 final class Subscriptions: Sendable, Hashable {
   
