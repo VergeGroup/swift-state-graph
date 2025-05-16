@@ -46,7 +46,6 @@ public final class Stored<Value>: Node, Observable, CustomDebugStringConvertible
     }
   }
 
-  public let name: String?
   public let info: NodeInfo
 
   public var wrappedValue: Value {
@@ -127,14 +126,17 @@ public final class Stored<Value>: Node, Observable, CustomDebugStringConvertible
     _ file: StaticString = #fileID,
     _ line: UInt = #line,
     _ column: UInt = #column,
+    group: String? = nil,
     name: String? = nil,
     wrappedValue: Value
   ) {
     self.info = .init(
+      type: Value.self,
+      group: group,
+      name: name,
       id: makeUniqueNumber(),
       sourceLocation: .init(file: file, line: line, column: column)
     )
-    self.name = name
     self.lock = sharedLock
     self._value = wrappedValue
 
@@ -152,7 +154,7 @@ public final class Stored<Value>: Node, Observable, CustomDebugStringConvertible
   }
 
   deinit {
-    Log.generic.debug("Deinit Stored: \(self.name ?? "noname")")
+    Log.generic.debug("Deinit Stored: id=\(self.info.id)")
     for e in outgoingEdges {
       e.to.incomingEdges.removeAll(where: { $0 === e })
     }
@@ -163,7 +165,7 @@ public final class Stored<Value>: Node, Observable, CustomDebugStringConvertible
   }
 
   public var debugDescription: String {
-    "Stored<\(Value.self)>(\(String(describing: _value)))"
+    "Stored<\(Value.self)>(id=\(info.id), value=\(String(describing: _value)))"
   }
 }
 
@@ -353,7 +355,6 @@ public final class Computed<Value>: Node, Observable, CustomDebugStringConvertib
   nonisolated(unsafe)
   private var _potentiallyDirty: Bool = false
 
-  public let name: String?
   public let info: NodeInfo
 
   public var wrappedValue: Value {
@@ -388,7 +389,7 @@ public final class Computed<Value>: Node, Observable, CustomDebugStringConvertib
   ///   - file: The file where the node is created (defaults to current file)
   ///   - line: The line number where the node is created (defaults to current line)
   ///   - column: The column number where the node is created (defaults to current column)
-  ///   - name: Optional name for the node
+  ///   - name: The name of the node (defaults to nil)
   ///   - rule: The rule that computes the node's value
   public init(
     _ file: StaticString = #fileID,
@@ -398,10 +399,12 @@ public final class Computed<Value>: Node, Observable, CustomDebugStringConvertib
     descriptor: some ComputedDescriptor<Value>
   ) {
     self.info = .init(
+      type: Value.self,
+      group: nil,
+      name: name,
       id: makeUniqueNumber(),
       sourceLocation: .init(file: file, line: line, column: column)
     )
-    self.name = name
     self.descriptor = descriptor
     self.lock = .init()
 
@@ -427,7 +430,7 @@ public final class Computed<Value>: Node, Observable, CustomDebugStringConvertib
   ///   - file: The file where the node is created (defaults to current file)
   ///   - line: The line number where the node is created (defaults to current line)
   ///   - column: The column number where the node is created (defaults to current column)
-  ///   - name: Optional name for the node
+  ///   - name: The name of the node (defaults to nil)
   ///   - rule: The rule that computes the node's value
   public init(
     _ file: StaticString = #fileID,
@@ -437,10 +440,12 @@ public final class Computed<Value>: Node, Observable, CustomDebugStringConvertib
     rule: @escaping @Sendable (inout Context) -> Value
   ) {
     self.info = .init(
+      type: Value.self,
+      group: nil,
+      name: name,
       id: makeUniqueNumber(),
       sourceLocation: .init(file: file, line: line, column: column)
     )
-    self.name = name
     self.descriptor = AnyComputedDescriptor(compute: rule, isEqual: { _, _ in false })      
     self.lock = sharedLock
 
@@ -466,7 +471,7 @@ public final class Computed<Value>: Node, Observable, CustomDebugStringConvertib
   ///   - file: The file where the node is created (defaults to current file)
   ///   - line: The line number where the node is created (defaults to current line)
   ///   - column: The column number where the node is created (defaults to current column)
-  ///   - name: Optional name for the node
+  ///   - name: The name of the node (defaults to nil)
   ///   - rule: The rule that computes the node's value
   public init(
     _ file: StaticString = #fileID,
@@ -476,10 +481,12 @@ public final class Computed<Value>: Node, Observable, CustomDebugStringConvertib
     rule: @escaping @Sendable (inout Context) -> Value
   ) where Value: Equatable {
     self.info = .init(
+      type: Value.self,
+      group: nil,
+      name: name,
       id: makeUniqueNumber(),
       sourceLocation: .init(file: file, line: line, column: column)
     )
-    self.name = name
     self.descriptor = AnyComputedDescriptor(compute: rule, isEqual: { $0 == $1 })
     self.lock = sharedLock
 
@@ -497,7 +504,7 @@ public final class Computed<Value>: Node, Observable, CustomDebugStringConvertib
   }
   
   deinit {
-    Log.generic.debug("Deinit Computed: \(self.name ?? "noname")")
+    Log.generic.debug("Deinit Computed: id=\(self.info.id)")
     for e in incomingEdges {
       e.from.outgoingEdges.removeAll(where: { $0 === e })
     }
@@ -573,7 +580,7 @@ public final class Computed<Value>: Node, Observable, CustomDebugStringConvertib
   }
    
   public var debugDescription: String {
-    "Computed<\(Value.self)>(\(String(describing: _cachedValue)))"
+    "Computed<\(Value.self)>(id=\(info.id), value=\(String(describing: _cachedValue)))"
   }
   
 }
@@ -607,7 +614,7 @@ public final class Edge: CustomDebugStringConvertible {
   }
 
   public var debugDescription: String {
-    "\(from.debugDescription) -> \(to.name.debugDescription)"
+    "\(from.debugDescription) -> \(to.debugDescription)"
   }
 
   deinit {

@@ -44,7 +44,7 @@ final class MacroTests: XCTestCase {
           }
         }
 
-        @GraphIgnored let $count: Stored<Int> = .init(name: "count", wrappedValue: 0)
+        @GraphIgnored let $count: Stored<Int> = .init(group: "Model", name: "count", wrappedValue: 0)
 
         init() {
         

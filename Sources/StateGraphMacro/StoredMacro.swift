@@ -88,6 +88,7 @@ extension StoredMacro: PeerMacro {
       })
     
     let name = variableDecl.name
+    let groupName = context.lexicalContext.first?.as(ClassDeclSyntax.self)?.name.text ?? ""
 
     if variableDecl.isOptional && variableDecl.hasInitializer == false {
 
@@ -96,12 +97,12 @@ extension StoredMacro: PeerMacro {
 
         if variableDecl.isWeak {
           return .init(
-            value: #".init(name: "\#(raw: name)", wrappedValue: .init(\#(initializer.trimmed.value)))"# as ExprSyntax)
+            value: #".init(group: "\#(raw: groupName)", name: "\#(raw: name)", wrappedValue: .init(\#(initializer.trimmed.value)))"# as ExprSyntax)
         } else if variableDecl.isUnowned {
           return .init(
-            value: #".init(name: "\#(raw: name)", wrappedValue: .init(\#(initializer.trimmed.value)))"# as ExprSyntax)
+            value: #".init(group: "\#(raw: groupName)", name: "\#(raw: name)", wrappedValue: .init(\#(initializer.trimmed.value)))"# as ExprSyntax)
         } else {
-          return .init(value: #".init(name: "\#(raw: name)", wrappedValue: \#(initializer.trimmed.value))"# as ExprSyntax)
+          return .init(value: #".init(group: "\#(raw: groupName)", name: "\#(raw: name)", wrappedValue: \#(initializer.trimmed.value))"# as ExprSyntax)
         }
 
       })

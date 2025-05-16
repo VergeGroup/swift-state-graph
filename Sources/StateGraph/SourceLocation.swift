@@ -19,8 +19,24 @@ public struct SourceLocation: ~Copyable, Sendable {
 
 public struct NodeInfo: ~Copyable, Sendable {
   
+  public let group: String?
+  public let name: String?
+  public let typeName: String
   public let id: UInt64
   
   public let sourceLocation: SourceLocation
  
+  init<T>(    
+    type: T.Type,
+    group: String? = nil,
+    name: String? = nil,
+    id: UInt64,
+    sourceLocation: consuming SourceLocation
+  ) {
+    self.group = group
+    self.name = name
+    self.id = id
+    self.typeName = _typeName(type)
+    self.sourceLocation = sourceLocation    
+  }
 }
