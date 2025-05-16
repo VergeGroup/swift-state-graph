@@ -534,7 +534,14 @@ public final class Computed<Value>: Node, Observable, CustomDebugStringConvertib
         let previousValue = _cachedValue
         removeIncomingEdges()
         var context = Context(environment: .init())
-        _cachedValue = descriptor.compute(context: &context)
+
+        /**
+        To prevent adding tracking registration to the incoming nodes.
+        Only register the registration to the current node.
+        */        
+        _cachedValue = TrackingRegistration.$registration.withValue(nil) {
+          return descriptor.compute(context: &context)
+        }
 
         // propagate changes to dependent nodes
         do {

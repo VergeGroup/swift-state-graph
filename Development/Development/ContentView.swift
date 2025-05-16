@@ -12,22 +12,24 @@ import StorybookKit
 struct ContentView: View {
   var body: some View {
     NavigationStack {
-      NavigationLink { 
-        Text("Empty")
-      } label: { 
-        Text("Empty") 
-      }
-      
-      NavigationLink {
-        Book_StateView(entity: .init(name: "A", count: 1))
-      } label: { 
-        Text("StateView") 
-      }
-
-      NavigationLink {
-        PostListContainerView()
-      } label: { 
-        Text("Posts") 
+      Form {
+        NavigationLink { 
+          Text("Empty")
+        } label: { 
+          Text("Empty") 
+        }
+        
+        NavigationLink {
+          Book_StateView(entity: .init(name: "A", count: 1))
+        } label: { 
+          Text("StateView") 
+        }
+        
+        NavigationLink {
+          PostListContainerView()
+        } label: { 
+          Text("Posts") 
+        }
       }
     }
   }
@@ -69,7 +71,7 @@ final class Model: Sendable {
   @GraphStored
   var name: String = ""
   @GraphStored
-  var count: Int = 0
+  var count1: Int = 0
   @GraphStored
   var count2: Int = 0
   
@@ -78,7 +80,7 @@ final class Model: Sendable {
     count: Int
   ) {      
     self.name = name
-    self.count = count
+    self.count1 = count
   }
   
 }
@@ -96,32 +98,31 @@ private struct Book_StateView: View {
     let _ = Self._printChanges()
     Form {
       Text("\(model.name)")
-      Text("\(model.count)")
+      Text("\(model.count1)")
       Button("Update Name") {
         model.name += "+"        
       }
-      Button("Update Count") {
-        model.count += 1
+      Button("Update Count \(model.count1)") {
+        model.count1 += 1
       }
-      Button("Update Count 2") {
+      Button("Update Count \(model.count2)") {
         model.count2 += 1
       }
     }
     .onAppear {
       
       print("onAppear")
-      
-      let node = Computed { _ in
-        model.count + model.count2
-      }
-            
+                
       subscription = withGraphTracking { 
-        node.onChange { value in
-          print("computed \(node)", value)          
+        Computed { _ in
+          model.count1 + model.count2
         }
-        model.$count.onChange { value in
+        .onChange { value in
+          print("computed", value)          
+        }
+        model.$count1.onChange { value in
           print("count", value)
-        }
+        }       
       }
       
     }
@@ -129,6 +130,10 @@ private struct Book_StateView: View {
       subscription?.cancel()      
     }
   }
+}
+
+final class MyViewModel {
+  @GraphStored var count: Int = 0
 }
 
 #Preview {
