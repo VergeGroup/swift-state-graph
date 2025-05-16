@@ -7,7 +7,7 @@ public actor NodeStore {
 
   func register(node: any TypeErasedNode) {
     nodes.append(.init(node))
-    compact()
+    compact()  
   }
 
   private func compact() {
@@ -21,26 +21,40 @@ public actor NodeStore {
   }
 
   public func graphViz() -> String {
-    
-    func description(_ node: any TypeErasedNode) -> String {
-      return "\(node.name)"
+    func name(_ node: any TypeErasedNode) -> String {
+      return #""\#(node.info.id)_\#(node.info.typeName)""#
     }
-    
-    let nodesStr =
-      nodes
-      .compactMap { $0.value }
-      .map {
-        "\(description($0))"
-      }.joined(separator: "\n")
-    let edges =
-      nodes
+
+    let grouped = Dictionary(grouping: nodes.compactMap { $0.value }) { $0.info.group }
+
+    let clusters = grouped.compactMap { (group, nodes) -> String? in
+      guard let group, !nodes.isEmpty else { return nil }
+      let nodesStr = nodes.map { name($0) }.joined(separator: "\n")
+      return """
+      subgraph cluster_\(group) {
+        label = \"\(group)\";
+        \(nodesStr)
+      }
+      """
+    }.joined(separator: "\n")
+
+    // group == nil
+    let ungrouped = (grouped[nil] ?? []).map { name($0) }.joined(separator: "\n")
+
+    // edges
+    let edges = nodes
       .compactMap { $0.value }
       .flatMap(\.outgoingEdges).map {
-        "\(description($0.from)) -> \(description($0.to))\($0.isPending ? " [style=dashed]" : "")"
+        "\(name($0.from)) -> \(name($0.to))\($0.isPending ? " [style=dashed]" : "")"
       }.joined(separator: "\n")
+
     return """
-      digraph {
-      \(nodesStr)
+      digraph StateGraph {
+      
+      \(clusters)
+      
+      \(ungrouped)
+      
       \(edges)
       }
       """

@@ -1,7 +1,5 @@
-
 public protocol TypeErasedNode: Hashable, AnyObject, Sendable, CustomDebugStringConvertible {
-  
-  var name: String? { get }
+  // var name: String? { get }
   var info: NodeInfo { get }
   var lock: NodeLock { get }
   

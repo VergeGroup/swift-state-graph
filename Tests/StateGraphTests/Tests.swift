@@ -105,7 +105,7 @@ struct Tests {
       allBooks
         .wrappedValue
         .filter {
-          $0.name?.hasPrefix("book") == true
+          $0.info.name?.hasPrefix("book") == true
         }
     }
 
