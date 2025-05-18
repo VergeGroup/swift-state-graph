@@ -1,4 +1,3 @@
-> WIP
 
 # Swift State Graph
 
