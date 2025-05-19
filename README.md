@@ -60,8 +60,8 @@ let a = Stored(wrappedValue: 10)
 let b = Stored(wrappedValue: 20)
 
 // This computed node depends on nodes a and b
-let sum = Computed { _ in 
-    a.wrappedValue + b.wrappedValue 
+let sum = Computed { _ in
+    a.wrappedValue + b.wrappedValue
 }
 
 print(sum.wrappedValue) // 30
@@ -112,12 +112,12 @@ import StateGraph
 final class CounterViewModel {
   @GraphStored
   var count: Int = 0
-  
+
   @GraphComputed
   var isEven: Bool {
     count % 2 == 0
   }
-  
+
   func increment() {
     count += 1
   }
@@ -132,7 +132,7 @@ Swift State Graph makes it easy to define reactive data models. Here's an exampl
 final class Author {
   @GraphStored
   var name: String
-  
+
   init(name: String) {
     self.name = name
   }
@@ -141,7 +141,7 @@ final class Author {
 final class Tag {
   @GraphStored
   var name: String
-  
+
   init(name: String) {
     self.name = name
   }
@@ -149,13 +149,13 @@ final class Tag {
 
 final class Book {
   let author: Author
-  
+
   @GraphStored
   var title: String
-  
+
   @GraphStored
   var tags: [Tag]
-  
+
   init(author: Author, title: String, tags: [Tag]) {
     self.author = author
     self.title = title
@@ -179,8 +179,8 @@ let libraryCollection = Stored(wrappedValue: [book])
 
 // Creating a computed collection filtered by author
 let booksByJohn = Computed { _ in
-  libraryCollection.wrappedValue.filter { 
-    $0.author.name == "John Smith" 
+  libraryCollection.wrappedValue.filter {
+    $0.author.name == "John Smith"
   }
 }
 
@@ -210,16 +210,16 @@ final class CounterViewModel {
 
 struct CounterView: View {
   let viewModel: CounterViewModel
-  
+
   var body: some View {
     VStack {
       Text("Count: \(viewModel.count)")
-      
+
       // Using the viewModel directly
       Button("Increment") {
         viewModel.count += 1
       }
-      
+
       // Using a SwiftUI binding
       // The $count property accesses the underlying Stored node
       // And the binding property converts it to a SwiftUI Binding
@@ -240,7 +240,7 @@ import StateGraph
 final class CounterViewModel {
   @GraphStored
   var count: Int = 0
-  
+
   @GraphComputed
   var isEven: Bool {
     count % 2 == 0
@@ -250,53 +250,56 @@ final class CounterViewModel {
 class CounterViewController: UIViewController {
   private let viewModel = CounterViewModel()
   private var subscription: AnyCancellable?
-  
+
   private let countLabel = UILabel()
   private let evenOddLabel = UILabel()
   private let incrementButton = UIButton(type: .system)
-  
+
   override func viewDidLoad() {
     super.viewDidLoad()
     setupUI()
     bindViewModel()
   }
-  
+
   private func setupUI() {
     view.backgroundColor = .white
-    
+
     countLabel.translatesAutoresizingMaskIntoConstraints = false
     evenOddLabel.translatesAutoresizingMaskIntoConstraints = false
     incrementButton.translatesAutoresizingMaskIntoConstraints = false
-    
+
     incrementButton.setTitle("Increment", for: .normal)
     incrementButton.addTarget(self, action: #selector(incrementCount), for: .touchUpInside)
-    
+
     view.addSubview(countLabel)
     view.addSubview(evenOddLabel)
     view.addSubview(incrementButton)
-    
+
     NSLayoutConstraint.activate([
       countLabel.centerXAnchor.constraint(equalTo: view.centerXAnchor),
       countLabel.centerYAnchor.constraint(equalTo: view.centerYAnchor, constant: -40),
-      
+
       evenOddLabel.centerXAnchor.constraint(equalTo: view.centerXAnchor),
       evenOddLabel.topAnchor.constraint(equalTo: countLabel.bottomAnchor, constant: 20),
-      
+
       incrementButton.centerXAnchor.constraint(equalTo: view.centerXAnchor),
       incrementButton.topAnchor.constraint(equalTo: evenOddLabel.bottomAnchor, constant: 20)
     ])
   }
-  
+
   private func bindViewModel() {
     // Initial update
     updateUI()
-    
+
     // Reactive updates
     subscription = withGraphTracking {
-      // Access the properties to track their changes
-      _ = viewModel.count
-      _ = viewModel.isEven
-      
+      viewModel.$count.onChange { value in
+        // Handle count changes if needed
+      }
+      viewModel.$isEven.onChange { value in
+        // Handle isEven changes if needed
+      }
+
       // Define what happens when changes occur
       Computed { _ in
         (viewModel.count, viewModel.isEven)
@@ -306,12 +309,12 @@ class CounterViewController: UIViewController {
       }
     }
   }
-  
+
   private func updateUI() {
     countLabel.text = "Count: \(viewModel.count)"
     evenOddLabel.text = viewModel.isEven ? "Even" : "Odd"
   }
-  
+
   @objc private func incrementCount() {
     viewModel.count += 1
   }
@@ -337,13 +340,13 @@ let viewModel = StoreViewModel()
 
 // Subscription to track product availability
 // Keep this subscription instance to keep tracking active.
-var availabilitySubscription: AnyCancellable? 
+var availabilitySubscription: AnyCancellable?
 
 availabilitySubscription = withGraphTracking {
   // Computed node to determine if the product can be added to cart
   Computed { _ in
     // This computation runs when `stockLevel` or `itemsInCart` changes.
-    viewModel.stockLevel > viewModel.itemsInCart 
+    viewModel.stockLevel > viewModel.itemsInCart
   }
   .onChange { isAvailable in
     // This block is called when the `isAvailable` value changes.
@@ -367,7 +370,7 @@ availabilitySubscription = withGraphTracking {
 
 // --- Example of how this works ---
 // Simulate adding an item to the cart
-// viewModel.itemsInCart = 1 
+// viewModel.itemsInCart = 1
 // Output will be:
 // 🛒 Items in cart updated: 1
 // ✅ Product is available to add to cart.
@@ -379,7 +382,7 @@ availabilitySubscription = withGraphTracking {
 // ⚠️ Product is out of stock or cart limit reached.
 
 // To stop tracking, set the subscription to nil
-// availabilitySubscription = nil 
+// availabilitySubscription = nil
 ```
 
 ### Key Features
@@ -433,7 +436,7 @@ By storing the returned subscription object in a property, you ensure the tracki
 
 The key difference between Swift State Graph and Swift's standard `Observable` protocol is the presence of **Computed nodes** in Swift State Graph.
 
-While the standard `Observable` protocol in Swift is designed for observing changes to stored properties, Swift State Graph introduces **Computed nodes** that can automatically derive their values from other nodes.  
+While the standard `Observable` protocol in Swift is designed for observing changes to stored properties, Swift State Graph introduces **Computed nodes** that can automatically derive their values from other nodes.
 These computed nodes track dependencies and update reactively when any of their source nodes change, enabling more powerful and declarative state relationships.
 
 **Example:**
