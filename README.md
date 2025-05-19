@@ -111,11 +111,16 @@ import StateGraph
 
 final class CounterViewModel {
   @GraphStored
-  var count: Int = 0
+  var count: Int
 
   @GraphComputed
-  var isEven: Bool {
-    count % 2 == 0
+  var isEven: Bool
+
+  init(count: Int) {
+    self.count = count
+    self.$isEven = .init { [$count] _ in
+      $count.wrappedValue % 2 == 0
+    }
   }
 
   func increment() {
@@ -242,8 +247,12 @@ final class CounterViewModel {
   var count: Int = 0
 
   @GraphComputed
-  var isEven: Bool {
-    count % 2 == 0
+  var isEven: Bool
+
+  init() {
+    self.$isEven = .init { [$count] _ in
+      $count.wrappedValue % 2 == 0
+    }
   }
 }
 
