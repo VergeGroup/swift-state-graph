@@ -271,29 +271,7 @@ class CounterViewController: UIViewController {
   }
 
   private func setupUI() {
-    view.backgroundColor = .white
-
-    countLabel.translatesAutoresizingMaskIntoConstraints = false
-    evenOddLabel.translatesAutoresizingMaskIntoConstraints = false
-    incrementButton.translatesAutoresizingMaskIntoConstraints = false
-
-    incrementButton.setTitle("Increment", for: .normal)
-    incrementButton.addTarget(self, action: #selector(incrementCount), for: .touchUpInside)
-
-    view.addSubview(countLabel)
-    view.addSubview(evenOddLabel)
-    view.addSubview(incrementButton)
-
-    NSLayoutConstraint.activate([
-      countLabel.centerXAnchor.constraint(equalTo: view.centerXAnchor),
-      countLabel.centerYAnchor.constraint(equalTo: view.centerYAnchor, constant: -40),
-
-      evenOddLabel.centerXAnchor.constraint(equalTo: view.centerXAnchor),
-      evenOddLabel.topAnchor.constraint(equalTo: countLabel.bottomAnchor, constant: 20),
-
-      incrementButton.centerXAnchor.constraint(equalTo: view.centerXAnchor),
-      incrementButton.topAnchor.constraint(equalTo: evenOddLabel.bottomAnchor, constant: 20)
-    ])
+    ...
   }
 
   private func bindViewModel() {
