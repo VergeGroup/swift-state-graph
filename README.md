@@ -14,6 +14,7 @@
 - [UIKit Integration](#uikit-integration)
 - [Advanced Usage](#advanced-usage)
 - [Comparing with Swift's Observable Protocol](#comparing-with-swifts-observable-protocol)
+- [Data Normalization](#data-normalization)
 
 ## Introduction
 
@@ -441,3 +442,168 @@ stored.wrappedValue = 20
 ```
 
 With Swift State Graph, you can build complex, reactive data flows that are difficult to achieve with just the `Observable` protocol.
+
+## Data Normalization
+
+Swift State Graph provides a normalization module for efficiently managing and accessing related data. The `StateGraphNormalization` module helps you organize your data in a normalized structure, making it easier to handle complex relationships between entities.
+
+### Core Concepts
+
+#### EntityStore
+
+`EntityStore` is a generic container for managing collections of entities with unique identifiers:
+
+```swift
+// Creating an entity store for a specific entity type
+let userStore = EntityStore<User>()
+let postStore = EntityStore<Post>()
+
+// Adding entities
+userStore.add(user)
+postStore.add(post)
+
+// Retrieving entities
+let user = userStore.get(by: userId)
+let allUsers = userStore.getAll()
+
+// Filtering entities
+let activeUsers = userStore.filter { !$0.isDeleted }
+
+// Updating entities
+userStore.update(updatedUser)
+// or
+userStore.modify(userId) { user in 
+  user.name = "New Name"
+}
+
+// Checking conditions
+let hasUser = userStore.contains(userId)
+let count = userStore.count
+
+// Removing entities
+userStore.delete(userId)
+```
+
+#### TypedIdentifiable
+
+Entities stored in an `EntityStore` must conform to the `TypedIdentifiable` protocol, which provides type-safe identifiers:
+
+```swift
+final class User: TypedIdentifiable {
+  typealias TypedIdentifierRawValue = String
+  
+  let typedID: TypedID
+  
+  @GraphStored
+  var name: String
+  
+  init(id: String, name: String) {
+    self.typedID = .init(id)
+    self.name = name
+  }
+}
+```
+
+#### NormalizedStore
+
+`NormalizedStore` acts as a central repository for managing multiple entity types:
+
+```swift
+final class NormalizedStore {
+  @GraphStored
+  var users: EntityStore<User> = .init()
+  
+  @GraphStored
+  var posts: EntityStore<Post> = .init()
+  
+  @GraphStored
+  var comments: EntityStore<Comment> = .init()
+}
+```
+
+### Example: Social Media Application
+
+Here's an example of using normalization in a social media application:
+
+```swift
+// Define entity types
+final class User: TypedIdentifiable {
+  typealias TypedIdentifierRawValue = String
+  let typedID: TypedID
+  
+  @GraphStored var name: String
+  @GraphComputed var posts: [Post]
+  
+  init(id: String, name: String, store: NormalizedStore) {
+    self.typedID = .init(id)
+    self.name = name
+    self.$posts = .init { _ in
+      store.posts.filter { $0.author.id == self.id }
+    }
+  }
+}
+
+final class Post: TypedIdentifiable {
+  typealias TypedIdentifierRawValue = String
+  let typedID: TypedID
+  
+  @GraphStored var title: String
+  @GraphStored var content: String
+  let author: User
+  
+  @GraphComputed var comments: [Comment]
+  
+  init(id: String, title: String, content: String, author: User, store: NormalizedStore) {
+    self.typedID = .init(id)
+    self.title = title
+    self.content = content
+    self.author = author
+    self.$comments = .init { _ in
+      store.comments.filter { $0.post.id == self.id }
+    }
+  }
+}
+
+final class Comment: TypedIdentifiable {
+  typealias TypedIdentifierRawValue = String
+  let typedID: TypedID
+  
+  @GraphStored var text: String
+  let post: Post
+  let author: User
+  
+  init(id: String, text: String, post: Post, author: User) {
+    self.typedID = .init(id)
+    self.text = text
+    self.post = post
+    self.author = author
+  }
+}
+
+// Create and use a normalized store
+let store = NormalizedStore()
+
+// Create entities
+let user = User(id: "user1", name: "John", store: store)
+store.users.add(user)
+
+let post = Post(id: "post1", title: "Hello World", content: "My first post", author: user, store: store)
+store.posts.add(post)
+
+let comment = Comment(id: "comment1", text: "Great post!", post: post, author: user)
+store.comments.add(comment)
+
+// Access related entities through computed properties
+print(user.posts.count) // 1
+print(post.comments.count) // 1
+```
+
+### Benefits of Normalization
+
+Using the normalization module provides several advantages:
+
+1. **Single Source of Truth**: Entities are stored once, preventing duplication and inconsistencies
+2. **Efficient Updates**: Changes to an entity are automatically reflected in all computed properties
+3. **Relationship Management**: Easily handle one-to-many and many-to-many relationships
+4. **Performance**: Optimized for fast lookups and updates through ID-based access
+5. **Reactivity**: Combined with State Graph's dependency tracking for automatic UI updates
