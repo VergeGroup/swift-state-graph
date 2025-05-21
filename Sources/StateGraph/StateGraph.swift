@@ -64,7 +64,7 @@ public final class Stored<Value>: Node, Observable, CustomDebugStringConvertible
       if let c = TaskLocals.currentNode {
         let edge = Edge(from: self, to: c)
         outgoingEdges.append(edge)
-        c.incomingEdges.append(edge)
+        c.incomingEdges.append(Weak(edge))
       }
       // record tracking
       if let registration = TrackingRegistration.registration {
@@ -107,7 +107,7 @@ public final class Stored<Value>: Node, Observable, CustomDebugStringConvertible
     }
   }
 
-  public var incomingEdges: ContiguousArray<Edge> {
+  public var incomingEdges: ContiguousArray<Weak<Edge>> {
     get {
       fatalError()
     }
@@ -156,7 +156,7 @@ public final class Stored<Value>: Node, Observable, CustomDebugStringConvertible
   deinit {
     Log.generic.debug("Deinit Stored: \(self.info.name ?? "noname")")
     for e in outgoingEdges {
-      e.to.incomingEdges.removeAll(where: { $0 === e })
+      e.to.incomingEdges.removeAll(where: { $0.value === e })
     }
     outgoingEdges.removeAll()
   }
@@ -395,7 +395,7 @@ public final class Computed<Value>: Node, Observable, CustomDebugStringConvertib
   private let descriptor: any ComputedDescriptor<Value>
 
   nonisolated(unsafe)
-  public var incomingEdges: ContiguousArray<Edge> = []
+  public var incomingEdges: ContiguousArray<Weak<Edge>> = []
   
   nonisolated(unsafe)
   public var outgoingEdges: ContiguousArray<Edge> = []
@@ -528,8 +528,10 @@ public final class Computed<Value>: Node, Observable, CustomDebugStringConvertib
   
   deinit {
     Log.generic.debug("Deinit Computed: id=\(self.info.id)")
-    for e in incomingEdges {
-      e.from.outgoingEdges.removeAll(where: { $0 === e })
+    for weakEdge in incomingEdges {
+      if let e = weakEdge.value {
+        e.from.outgoingEdges.removeAll(where: { $0 === e })
+      }
     }
   }
 
@@ -541,9 +543,8 @@ public final class Computed<Value>: Node, Observable, CustomDebugStringConvertib
     // record dependency
     if let c = TaskLocals.currentNode {
       let edge = Edge(from: self, to: c)
-      // TODO: consider removing duplicated edges
       outgoingEdges.append(edge)
-      c.incomingEdges.append(edge)
+      c.incomingEdges.append(Weak(edge))
     }
     // record tracking
     if let registration = TrackingRegistration.registration {
@@ -552,11 +553,13 @@ public final class Computed<Value>: Node, Observable, CustomDebugStringConvertib
 
     if !_potentiallyDirty && _cachedValue != nil { return }
 
-    for edge in incomingEdges {
-      edge.from.recomputeIfNeeded()
+    for weakEdge in incomingEdges {
+      if let e = weakEdge.value {
+        e.from.recomputeIfNeeded()
+      }
     }
 
-    let hasPendingIncomingEdge = incomingEdges.contains(where: \.isPending)
+    let hasPendingIncomingEdge = incomingEdges.contains { $0.value?.isPending == true }
 
     if hasPendingIncomingEdge || _cachedValue == nil {
 
@@ -580,13 +583,13 @@ public final class Computed<Value>: Node, Observable, CustomDebugStringConvertib
         if let cached = storage {
           cached.value = computedValue
           for e in incomingEdges {
-            e.cachedValues.insert(_cachedValue!)
+            e.value?.cachedValues.insert(_cachedValue!)
           }
         } else {
           let newCached = Cached(value: computedValue)
           _cachedValue = newCached        
           for e in incomingEdges {
-            e.cachedValues.insert(newCached)
+            e.value?.cachedValues.insert(newCached)
           }
         }
        
@@ -612,13 +615,15 @@ public final class Computed<Value>: Node, Observable, CustomDebugStringConvertib
   }
 
   private func removeIncomingEdges(storage: Cached?) {
-    for e in incomingEdges {
-      if let storage {
-        e.cachedValues.remove(storage)
+    for weakEdge in incomingEdges {
+      if let e = weakEdge.value {
+        if let storage {
+          e.cachedValues.remove(storage)
+        }
+        e.from.lock.lock()
+        e.from.outgoingEdges.removeAll(where: { $0 === e })
+        e.from.lock.unlock()
       }
-      e.from.lock.lock()
-      e.from.outgoingEdges.removeAll(where: { $0 === e })
-      e.from.lock.unlock()
     }
     incomingEdges.removeAll()
   }
