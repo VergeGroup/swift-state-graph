@@ -183,12 +183,6 @@ final class MacroTests: XCTestCase {
       """
       final class Model {
         var count: Int {
-          @storageRestrictions(
-            initializes: $count
-          )
-          init(initialValue) {
-            $count = .init(wrappedValue: initialValue)
-          }
           get {
             return $count.wrappedValue
           }
