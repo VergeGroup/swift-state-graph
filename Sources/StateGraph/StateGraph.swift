@@ -64,7 +64,7 @@ public final class Stored<Value>: Node, Observable, CustomDebugStringConvertible
       if let c = TaskLocals.currentNode {
         let edge = Edge(from: self, to: c)
         outgoingEdges.append(edge)
-        c.incomingEdges.append(edge)
+        c.incomingEdges.append(Weak(edge))
       }
       // record tracking
       if let registration = TrackingRegistration.registration {
@@ -107,7 +107,7 @@ public final class Stored<Value>: Node, Observable, CustomDebugStringConvertible
     }
   }
 
-  public var incomingEdges: ContiguousArray<Edge> {
+  public var incomingEdges: ContiguousArray<Weak<Edge>> {
     get {
       fatalError()
     }
@@ -156,7 +156,7 @@ public final class Stored<Value>: Node, Observable, CustomDebugStringConvertible
   deinit {
     Log.generic.debug("Deinit Stored: \(self.info.name ?? "noname")")
     for e in outgoingEdges {
-      e.to.incomingEdges.removeAll(where: { $0 === e })
+      e.to.incomingEdges.removeAll(where: { $0.value === e })
     }
     outgoingEdges.removeAll()
   }
@@ -321,7 +321,7 @@ public final class Computed<Value>: Node, Observable, CustomDebugStringConvertib
   public let lock: NodeLock
 
   nonisolated(unsafe)
-    private var _cachedValue: Value?
+    private weak var _cachedValue: Cached?
   
   #if canImport(Observation)
     @available(macOS 14.0, iOS 17.0, watchOS 10.0, tvOS 17.0, *)
@@ -386,14 +386,16 @@ public final class Computed<Value>: Node, Observable, CustomDebugStringConvertib
         }
       #endif
       recomputeIfNeeded()
-      yield _cachedValue!
+      lock.lock()
+      yield _cachedValue!.value
+      lock.unlock()
     }
   }
 
   private let descriptor: any ComputedDescriptor<Value>
 
   nonisolated(unsafe)
-  public var incomingEdges: ContiguousArray<Edge> = []
+  public var incomingEdges: ContiguousArray<Weak<Edge>> = []
   
   nonisolated(unsafe)
   public var outgoingEdges: ContiguousArray<Edge> = []
@@ -526,8 +528,10 @@ public final class Computed<Value>: Node, Observable, CustomDebugStringConvertib
   
   deinit {
     Log.generic.debug("Deinit Computed: id=\(self.info.id)")
-    for e in incomingEdges {
-      e.from.outgoingEdges.removeAll(where: { $0 === e })
+    for weakEdge in incomingEdges {
+      if let e = weakEdge.value {
+        e.from.outgoingEdges.removeAll(where: { $0 === e })
+      }
     }
   }
 
@@ -539,9 +543,8 @@ public final class Computed<Value>: Node, Observable, CustomDebugStringConvertib
     // record dependency
     if let c = TaskLocals.currentNode {
       let edge = Edge(from: self, to: c)
-      // TODO: consider removing duplicated edges
       outgoingEdges.append(edge)
-      c.incomingEdges.append(edge)
+      c.incomingEdges.append(Weak(edge))
     }
     // record tracking
     if let registration = TrackingRegistration.registration {
@@ -550,32 +553,52 @@ public final class Computed<Value>: Node, Observable, CustomDebugStringConvertib
 
     if !_potentiallyDirty && _cachedValue != nil { return }
 
-    for edge in incomingEdges {
-      edge.from.recomputeIfNeeded()
+    for weakEdge in incomingEdges {
+      if let e = weakEdge.value {
+        e.from.recomputeIfNeeded()
+      }
     }
 
-    let hasPendingIncomingEdge = incomingEdges.contains(where: \.isPending)
+    let hasPendingIncomingEdge = incomingEdges.contains { $0.value?.isPending == true }
 
     if hasPendingIncomingEdge || _cachedValue == nil {
 
       TaskLocals.$currentNode.withValue(self) { () -> Void in
-        let previousValue = _cachedValue
-        removeIncomingEdges()
+        let storage = _cachedValue
+        let previousValue = _cachedValue?.value        
+        removeIncomingEdges(storage: storage)
         var context = Context(environment: .init())
 
         /**
         To prevent adding tracking registration to the incoming nodes.
         Only register the registration to the current node.
-        */        
-        _cachedValue = TrackingRegistration.$registration.withValue(nil) {
+        */
+        
+        let computedValue = TrackingRegistration.$registration.withValue(nil) {
           return descriptor.compute(context: &context)
         }
+        
+        // after depdendencies are captured
+        
+        if let cached = storage {
+          cached.value = computedValue
+          for e in incomingEdges {
+            e.value?.cachedValues.insert(_cachedValue!)
+          }
+        } else {
+          let newCached = Cached(value: computedValue)
+          _cachedValue = newCached        
+          for e in incomingEdges {
+            e.value?.cachedValues.insert(newCached)
+          }
+        }
+       
 
         // propagate changes to dependent nodes
         do {
 
           if let previousValue = previousValue,
-             descriptor.isEqual(lhs: previousValue, rhs: _cachedValue!) == false
+             descriptor.isEqual(lhs: previousValue, rhs: _cachedValue!.value) == false
           {
             for o in outgoingEdges {
               o.isPending = true
@@ -591,11 +614,16 @@ public final class Computed<Value>: Node, Observable, CustomDebugStringConvertib
 
   }
 
-  private func removeIncomingEdges() {
-    for e in incomingEdges {
-      e.from.lock.lock()
-      e.from.outgoingEdges.removeAll(where: { $0 === e })
-      e.from.lock.unlock()
+  private func removeIncomingEdges(storage: Cached?) {
+    for weakEdge in incomingEdges {
+      if let e = weakEdge.value {
+        if let storage {
+          e.cachedValues.remove(storage)
+        }
+        e.from.lock.lock()
+        e.from.outgoingEdges.removeAll(where: { $0 === e })
+        e.from.lock.unlock()
+      }
     }
     incomingEdges.removeAll()
   }
@@ -606,11 +634,38 @@ public final class Computed<Value>: Node, Observable, CustomDebugStringConvertib
   
 }
 
+extension Computed {
+  
+  final class Cached: HashableObject {
+          
+    var value: Value
+    
+    init(value: Value) {
+      self.value = value
+    }
+  }
+  
+}
+
+class HashableObject: Hashable {
+  
+  static func == (lhs: HashableObject, rhs: HashableObject) -> Bool {
+    lhs === rhs
+  }
+  
+  func hash(into hasher: inout Hasher) {
+    hasher.combine(ObjectIdentifier(self))
+  }
+  
+}
+
 @DebugDescription
 public final class Edge: CustomDebugStringConvertible {
 
   unowned let from: any TypeErasedNode
   unowned let to: any TypeErasedNode
+  
+  var cachedValues: Set<HashableObject> = []
   
   private let lock: NodeLock = sharedLock
   

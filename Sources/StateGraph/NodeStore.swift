@@ -44,7 +44,8 @@ public actor NodeStore {
     // edges
     let edges = nodes
       .compactMap { $0.value }
-      .flatMap(\.outgoingEdges).map {
+      .flatMap(\.outgoingEdges)
+      .map {
         "\(name($0.from)) -> \(name($0.to))\($0.isPending ? " [style=dashed]" : "")"
       }.joined(separator: "\n")
 

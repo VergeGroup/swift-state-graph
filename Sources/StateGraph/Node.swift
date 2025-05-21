@@ -7,7 +7,7 @@ public protocol TypeErasedNode: Hashable, AnyObject, Sendable, CustomDebugString
   var outgoingEdges: ContiguousArray<Edge> { get set }
   
   /// inverse edges that depending on nodes
-  var incomingEdges: ContiguousArray<Edge> { get set }
+  var incomingEdges: ContiguousArray<Weak<Edge>> { get set }
   
   @_spi(Internal)
   var trackingRegistrations: Set<TrackingRegistration> { get set }
