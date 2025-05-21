@@ -135,11 +135,12 @@ extension Node {
     let isCancelled = OSAllocatedUnfairLock(initialState: false)
     
     withContinuousStateGraphTracking(
-      apply: {
-        _ = self.wrappedValue
+      apply: { [weak self] in
+        _ = self?.wrappedValue
       },
-      didChange: {
-        guard !isCancelled.withLock({ $0 }) else { return .stop }
+      didChange: { [weak self] in
+        guard let self else { return .stop }
+        guard !isCancelled.withLock({ $0 }) else { return .stop }        
         _handler._value(filter.send(value: self.wrappedValue))
         return .next
       },
