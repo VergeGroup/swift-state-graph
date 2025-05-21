@@ -116,7 +116,7 @@ struct NodeObserveTests {
       }
     }
     
-    try await Task.sleep(nanoseconds: 100_000)
+    try await Task.sleep(for: .milliseconds(100))
     
     // Initial value is included
     #expect(results1 == [0])
@@ -124,19 +124,19 @@ struct NodeObserveTests {
     
     // Change value
     node.wrappedValue = 1
-    try await Task.sleep(nanoseconds: 100_000)
+    try await Task.sleep(for: .milliseconds(100))
     #expect(results1 == [0, 1])
     #expect(results2 == [0, 1])
     
     // Change value again
     node.wrappedValue = 2
-    try await Task.sleep(nanoseconds: 100_000)
+    try await Task.sleep(for: .milliseconds(100))
     #expect(results1 == [0, 1, 2])
     #expect(results2 == [0, 1, 2])
     
     // Even with the same value, change notification is sent
     node.wrappedValue = 2
-    try await Task.sleep(nanoseconds: 100_000)
+    try await Task.sleep(for: .milliseconds(100))
     #expect(results1 == [0, 1, 2, 2])
     #expect(results2 == [0, 1, 2, 2])
     
