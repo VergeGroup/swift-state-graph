@@ -30,6 +30,12 @@ struct ContentView: View {
         } label: { 
           Text("Posts") 
         }
+        
+        NavigationLink {
+          PostOneShotView()
+        } label: { 
+          Text("Database memory check") 
+        }
       }
     }
   }
