@@ -154,10 +154,11 @@ public final class Stored<Value>: Node, Observable, CustomDebugStringConvertible
   }
 
   deinit {
-    Log.generic.debug("Deinit Stored: id=\(self.info.id)")
+    Log.generic.debug("Deinit Stored: \(self.info.name ?? "noname")")
     for e in outgoingEdges {
       e.to.incomingEdges.removeAll(where: { $0 === e })
     }
+    outgoingEdges.removeAll()
   }
 
   public func recomputeIfNeeded() {
@@ -165,7 +166,7 @@ public final class Stored<Value>: Node, Observable, CustomDebugStringConvertible
   }
 
   public var debugDescription: String {
-    "Stored<\(Value.self)>(id=\(info.id), value=\(String(describing: _value)))"
+    "Stored<\(Value.self)>(id=\(info.id), name=\(info.name ?? "noname"), value=\(String(describing: _value)))"
   }
 }
 
@@ -291,6 +292,26 @@ public final class Computed<Value>: Node, Observable, CustomDebugStringConvertib
         }
       }
 
+    }
+    
+    /**
+     Use this method to perform actions without tracking dependencies.
+     
+     This case does not track `isRemoved` property.
+     ```swift
+     Computed { context in 
+       node.filter { 
+         context.withoutTracking {
+           $0.isRemoved == true
+         }
+       }
+     }
+     ```
+     */
+    public func withoutTracking<R>(_ block: () throws -> R) rethrows -> R{
+      try TaskLocals.$currentNode.withValue(nil) {
+        try block()
+      }
     }
     
     public let environment: Environment
@@ -603,7 +624,7 @@ public final class Computed<Value>: Node, Observable, CustomDebugStringConvertib
   }
    
   public var debugDescription: String {
-    "Computed<\(Value.self)>(id=\(info.id), value=\(String(describing: _cachedValue)))"
+    "Computed<\(Value.self)>(id=\(info.id), name=\(info.name ?? "noname"), value=\(String(describing: _cachedValue)))"
   }
   
 }

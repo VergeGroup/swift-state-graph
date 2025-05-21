@@ -30,6 +30,12 @@ struct ContentView: View {
         } label: { 
           Text("Posts") 
         }
+        
+        NavigationLink {
+          PostOneShotView()
+        } label: { 
+          Text("Database memory check") 
+        }
       }
     }
   }
@@ -136,7 +142,7 @@ final class MyViewModel {
   @GraphStored var count: Int = 0
 }
 
-#Preview {
+#Preview("StateView") {
   Book_StateView(
     entity: .init(
       name: "A",

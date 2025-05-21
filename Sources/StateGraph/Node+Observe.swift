@@ -151,6 +151,7 @@ extension Node {
     handler(filter.send(value: self.wrappedValue))
     
     let cancellabe = AnyCancellable {
+      withExtendedLifetime(self) {}
       isCancelled.withLock { $0 = true }     
     }
     
