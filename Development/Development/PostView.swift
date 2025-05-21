@@ -90,8 +90,8 @@ final class Post: TypedIdentifiable, Hashable, Sendable {
     self.author = author
     self.$allComments = .init(name: "allComments") { context in
       context.environment.normalizedStore.comments
-        .filter { $0.post.id.raw == id }
-        .sorted(by: { $0.createdAt < $1.createdAt })
+        .filter { v in context.withoutTracking { v.post.id.raw == id } }
+        .sorted(by: { a,b in context.withoutTracking { a.createdAt < b.createdAt } })
     }
     self.$activeComments = .init(name: "activeComments") { [allComments = $allComments] context in
       allComments
@@ -342,6 +342,76 @@ struct PostListView: View {
           PostCellView(post: post)
         }
       }
+    }
+  }
+}
+
+struct PostOneShotView: View {
+      
+  var body: some View {
+    Button("Run") {
+      
+      let store: NormalizedStore = .init()
+      
+      StateGraphGlobal.computedEnvironmentValues.withLock {
+        $0.normalizedStore = store
+      } 
+
+      // 初期データの生成
+      let users = [
+        User(
+          id: "user1",
+          name: "Alice",
+          age: 25
+        ),
+        User(
+          id: "user2",
+          name: "Bob",
+          age: 30
+        ),
+        User(
+          id: "user3",
+          name: "Charlie",
+          age: 28
+        )
+      ]
+      
+      for user in users {
+        store.users.add(user)
+      }
+            
+      // ランダムなユーザーを選択
+      let randomUser = store.users.getAll().randomElement()!        
+      
+      let post = Post(
+        id: UUID().uuidString,
+        title: "Post \(Int.random(in: 1...100))",
+        content: "Content for post \(Int.random(in: 1...100))",
+        author: randomUser
+      )
+      
+      store.posts.add(post)
+            
+      for _ in 0..<Int.random(in: 1...3) {
+        guard let commentUser = store.users.getAll().randomElement() else { continue }
+        let comment = Comment(
+          id: UUID().uuidString,
+          text: "Comment \(Int.random(in: 1...100)) on post: \(post.title)",
+          post: post,
+          author: commentUser
+        )
+        store.comments.add(comment)
+      }                  
+      
+      _ = post.activeComments
+      _ = post.allComments
+      
+      print("Post: \(post.title)")
+      
+      StateGraphGlobal.computedEnvironmentValues.withLock {
+        $0.normalizedStore = nil
+      } 
+      
     }
   }
 }
