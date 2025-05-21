@@ -87,6 +87,20 @@ extension VariableDeclSyntax {
 
     return self.with(\.bindings, .init(newBindings))
   }
+  
+  func addInitializer(_ initializer: InitializerClauseSyntax) -> VariableDeclSyntax {
+    let newBindings = self.bindings.map { binding -> PatternBindingSyntax in
+      if binding.initializer == nil {
+        return binding.with(\.initializer, initializer)
+      }
+      return binding
+    }
+        
+    return self.with(\.bindings, .init(self.bindings.map {
+      $0.with(\.initializer, initializer)
+    }))
+    
+  }
 
   func modifyingInit(_ modifier: (InitializerClauseSyntax) -> InitializerClauseSyntax)
     -> VariableDeclSyntax

@@ -21,6 +21,20 @@ public macro GraphIgnored() = #externalMacro(module: "StateGraphMacro", type: "I
 
 import os.lock
 
+final class ImplicitInitializers {
+  @GraphStored
+  var value: Int?
+  
+  @GraphStored
+  weak var weak_object: AnyObject?
+  
+  static func run() {
+    let obj = ImplicitInitializers()
+    
+
+  }
+}
+
 final class A {
   
   @GraphStored
@@ -32,10 +46,37 @@ final class A {
   unowned let unowned_constant: AnyObject
 
   init(weak_variable: AnyObject? = nil, unowned_variable: AnyObject, unowned_constant: AnyObject) {
-    self.weak_variable = weak_variable
     self.unowned_variable = unowned_variable
     self.unowned_constant = unowned_constant
+    self.weak_variable = weak_variable
   }  
+}
+
+final class Box<T> {
+  var value: T
+  init(_ value: T) {
+    self.value = value
+  }
+}
+
+class Ref {}
+
+final class Demo {
+  
+  weak var count: Ref? {
+    get {
+      box.value.value
+    }
+    set {
+      box.value.value = newValue
+    }
+  }
+  
+  let box: Box<Weak<Ref>> = .init(.init(nil))
+  
+  init() {
+    self.count = Ref()
+  }
 }
 
 final class StateViewModel {
@@ -48,7 +89,7 @@ final class StateViewModel {
   
   @GraphStored
   var optional_variable_init: Int? = 0
-  
+    
   let optional_constant: Int?
   
   @GraphStored
@@ -68,10 +109,11 @@ final class StateViewModel {
   
   init() {
     self.optional_constant = 0
-    self.optional_variable = 0
         
     unowned_constant = NSObject()
     self.unowned_variable = NSObject()
+    
+    self.optional_variable = 0
   }
   
 }

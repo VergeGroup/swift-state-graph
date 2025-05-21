@@ -10,7 +10,7 @@ public struct EntityStore<T: TypedIdentifiable & Sendable>: Sendable {
     self.entities = entities
   }
   
-  public func get(_ id: T.TypedID) -> T? {
+  public func get(by id: T.TypedID) -> T? {
     return entities[id]
   }
   

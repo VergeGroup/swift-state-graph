@@ -1,6 +1,7 @@
 import SwiftUI
 import StateGraph
 import StateGraphNormalization
+import Combine
 
 // MARK: Data
 
@@ -265,6 +266,11 @@ final class PostListViewModel: ObservableObject {
   
   let mockServer: MockServerService
   
+  @GraphStored
+  var isAutoAddEnabled: Bool = false
+  
+  private var cancellable: AnyCancellable?
+  
   init(store: NormalizedStore) {
     self.store = store
     self.mockServer = .init(store: store)
@@ -276,9 +282,21 @@ final class PostListViewModel: ObservableObject {
     self.$postsCount = store.$posts.map { _, value in
       value.count
     }
+    
+    // isAutoAddEnabledの変化を監視し、start/stopを呼ぶ
+    self.cancellable = withGraphTracking {
+      $isAutoAddEnabled.onChange { [weak self] value in
+        guard let self else { return }
+        if value {
+          self.mockServer.start()
+        } else {
+          self.mockServer.stop()
+        }
+      }
+    }
   }
   
-  deinit {   
+  deinit {
   }
 }
 
@@ -296,7 +314,6 @@ struct PostListContainerView: View {
           StateGraphGlobal.computedEnvironmentValues.withLock {
             $0.normalizedStore = store
           }   
-          viewModel.mockServer.start()
         }
       }
       .onDisappear {
@@ -317,6 +334,8 @@ struct PostListView: View {
   
   var body: some View {
     VStack {
+      Toggle("自動追加", isOn: viewModel.$isAutoAddEnabled.binding)
+        .padding()
       Text("\(viewModel.postsCount)")
       List {
         ForEach(viewModel.posts) { post in
