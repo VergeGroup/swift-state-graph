@@ -175,8 +175,18 @@ extension StoredMacro: AccessorMacro {
       fatalError()
     }
     
-    let hasImplicitInit = variableDecl.isOptional && variableDecl.hasInitializer == false
-        
+    let addsStorageRestrictions = { () -> Bool in
+      if variableDecl.isOptional {
+        return false
+      } else {
+        if variableDecl.hasInitializer {
+          return false
+        } else {
+          return true
+        }
+      }
+    }()
+            
     if variableDecl.isWeak || variableDecl.isUnowned {
       
       let initAccessor = AccessorDeclSyntax(
@@ -208,7 +218,7 @@ extension StoredMacro: AccessorMacro {
 
       var accessors: [AccessorDeclSyntax] = []
 
-      if hasImplicitInit == false {
+      if addsStorageRestrictions {
         accessors.append(initAccessor)
       }
 
@@ -248,7 +258,7 @@ extension StoredMacro: AccessorMacro {
 
       var accessors: [AccessorDeclSyntax] = []
 
-      if hasImplicitInit == false {
+      if addsStorageRestrictions {
         accessors.append(initAccessor)
       }
 

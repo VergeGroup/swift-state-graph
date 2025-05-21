@@ -16,8 +16,112 @@ final class MacroTests: XCTestCase {
       super.invokeTest()
     }
   }
+
+  func test_optional_stored_property_with_init() {
+    assertMacro {
+      """
+      final class Model {
+      
+        @GraphStored
+        var count: Int? = 0
+
+      }
+      """
+    } expansion: {
+      """
+      final class Model {
+        var count: Int? {
+          get {
+            return $count.wrappedValue
+          }
+          set {
+            $count.wrappedValue = newValue
+          }
+        }
+
+        @GraphIgnored let $count: Stored<Int?> = .init(group: "Model", name: "count", wrappedValue: 0)
+
+      }
+      """
+    }
+  }
+  
+  func test_optional_stored_property_with_implicit_init() {
+    assertMacro {
+      """
+      final class Model {
+      
+        @GraphStored
+        var count: Int?
+      
+        init() {
+        
+        }
+      
+      }
+      """
+    } expansion: {
+      """
+      final class Model {
+        var count: Int? {
+          get {
+            return $count.wrappedValue
+          }
+          set {
+            $count.wrappedValue = newValue
+          }
+        }
+
+        @GraphIgnored let $count: Stored<Int?> = .init(group: "Model", name: "count", wrappedValue: nil)
+
+        init() {
+        
+        }
+
+      }
+      """
+    }
+  }
+  
+  func test_weak_optional_stored_property_with_implicit_init() {
+    assertMacro {
+      """
+      final class Model {
+      
+        @GraphStored
+        weak var count: Ref?
+      
+        init() {
+        
+        }
+      
+      }
+      """
+    } expansion: {
+      """
+      final class Model {
+        weak var count: Ref? {
+          get {
+            return $count.wrappedValue.value
+          }
+          set {
+            $count.wrappedValue.value = newValue
+          }
+        }
+
+        @GraphIgnored let $count: Stored<Weak<Ref>> = .init(group: "Model", name: "count", wrappedValue: .init(nil))
+
+        init() {
+        
+        }
+
+      }
+      """
+    }
+  }
   
   func test_optional_init() {
+        
     assertMacro {
       """
       final class Model {
@@ -79,6 +183,12 @@ final class MacroTests: XCTestCase {
       """
       final class Model {
         var count: Int {
+          @storageRestrictions(
+            initializes: $count
+          )
+          init(initialValue) {
+            $count = .init(wrappedValue: initialValue)
+          }
           get {
             return $count.wrappedValue
           }
@@ -119,12 +229,6 @@ final class MacroTests: XCTestCase {
       """
       public final class A {
         public weak var weak_variable: AnyObject? {             
-          @storageRestrictions(
-            initializes: $weak_variable
-          )
-          init(initialValue) {
-            $weak_variable = .init(wrappedValue: .init(initialValue))
-          }
           get {
             return $weak_variable.wrappedValue.value
           }
@@ -134,7 +238,7 @@ final class MacroTests: XCTestCase {
         }
 
         @GraphIgnored
-          public let $weak_variable: Stored<Weak<AnyObject>>
+          public let $weak_variable: Stored<Weak<AnyObject>> = .init(group: "A", name: "weak_variable", wrappedValue: .init(nil))
 
         unowned var unowned_variable: AnyObject {
           @storageRestrictions(
