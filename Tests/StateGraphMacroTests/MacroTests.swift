@@ -17,6 +17,49 @@ final class MacroTests: XCTestCase {
     }
   }
   
+  func test_optional_init() {
+    assertMacro {
+      """
+      final class Model {
+      
+        @GraphStored
+        var count: Int?
+      
+        @GraphStored
+        weak var weak_object: AnyObject?
+              
+      }
+      """
+    } expansion: {
+      """
+      final class Model {
+        var count: Int? {
+          get {
+            return $count.wrappedValue
+          }
+          set {
+            $count.wrappedValue = newValue
+          }
+        }
+
+        @GraphIgnored let $count: Stored<Int?> = .init(group: "Model", name: "count", wrappedValue: nil)
+        weak var weak_object: AnyObject? {
+          get {
+            return $weak_object.wrappedValue.value
+          }
+          set {
+            $weak_object.wrappedValue.value = newValue
+          }
+        }
+
+        @GraphIgnored let $weak_object: Stored<Weak<AnyObject>> = .init(group: "Model", name: "weak_object", wrappedValue: .init(nil))
+              
+      }
+      """
+    }
+    
+  }
+  
   func test_primitive() {
     
     assertMacro {

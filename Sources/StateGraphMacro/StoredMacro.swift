@@ -92,6 +92,19 @@ extension StoredMacro: PeerMacro {
 
     if variableDecl.isOptional && variableDecl.hasInitializer == false {
 
+      _variableDecl = _variableDecl.addInitializer({ 
+        
+        if variableDecl.isWeak {
+          return .init(
+            value: #".init(group: "\#(raw: groupName)", name: "\#(raw: name)", wrappedValue: .init(nil))"# as ExprSyntax)
+        } else if variableDecl.isUnowned {
+          return .init(
+            value: #".init(group: "\#(raw: groupName)", name: "\#(raw: name)", wrappedValue: .init(nil))"# as ExprSyntax)
+        } else {
+          return .init(value: #".init(group: "\#(raw: groupName)", name: "\#(raw: name)", wrappedValue: nil)"# as ExprSyntax)
+        }
+        
+      }())
     } else {
       _variableDecl = _variableDecl.modifyingInit({ initializer in
 
@@ -161,9 +174,11 @@ extension StoredMacro: AccessorMacro {
     guard variableDecl.isConstant == false else {
       fatalError()
     }
-
+    
+    let hasImplicitInit = variableDecl.isOptional && variableDecl.hasInitializer == false
+        
     if variableDecl.isWeak || variableDecl.isUnowned {
-
+      
       let initAccessor = AccessorDeclSyntax(
         """
         @storageRestrictions(
@@ -193,7 +208,7 @@ extension StoredMacro: AccessorMacro {
 
       var accessors: [AccessorDeclSyntax] = []
 
-      if binding.initializer == nil {
+      if hasImplicitInit == false {
         accessors.append(initAccessor)
       }
 
@@ -233,7 +248,7 @@ extension StoredMacro: AccessorMacro {
 
       var accessors: [AccessorDeclSyntax] = []
 
-      if binding.initializer == nil {
+      if hasImplicitInit == false {
         accessors.append(initAccessor)
       }
 
