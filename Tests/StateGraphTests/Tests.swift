@@ -203,6 +203,38 @@ struct Tests {
 
   }
 
+  @Test func withGraphTracking_onChange() async {
+    final class Model {
+      @GraphStored var name: String = ""
+      @GraphStored var count1: Int = 0
+      @GraphStored var count2: Int = 0
+    }
+    let model = Model()
+    var computedValues: [Int] = []
+    var count1Values: [Int] = []
+    let exp = expectation(description: "onChange called")
+    exp.expectedFulfillmentCount = 2
+    let cancellable = withGraphTracking {
+      Computed { _ in
+        model.count1 + model.count2
+      }
+      .onChange { value in
+        computedValues.append(value)
+        exp.fulfill()
+      }
+      model.$count1.onChange { value in
+        count1Values.append(value)
+        exp.fulfill()
+      }
+    }
+    model.count1 = 10
+    model.count2 = 5
+    await fulfillment(of: [exp], timeout: 1.0)
+    #expect(computedValues.contains(10 + 0) || computedValues.contains(10 + 5))
+    #expect(count1Values.contains(10))
+    _ = cancellable // keep alive
+  }
+
 }
 
 @Suite

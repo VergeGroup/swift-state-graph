@@ -142,7 +142,7 @@ final class MyViewModel {
   @GraphStored var count: Int = 0
 }
 
-#Preview {
+#Preview("StateView") {
   Book_StateView(
     entity: .init(
       name: "A",
