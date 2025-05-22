@@ -13,12 +13,12 @@ struct ContentView: View {
   var body: some View {
     NavigationStack {
       Form {
-        NavigationLink { 
-          Text("Empty")
-        } label: { 
-          Text("Empty") 
+        NavigationLink {
+            TodoListView()
+        } label: {
+            Text("TODO App")
         }
-        
+
         NavigationLink {
           Book_StateView(entity: .init(name: "A", count: 1))
         } label: { 

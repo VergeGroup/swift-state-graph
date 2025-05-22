@@ -4,15 +4,30 @@ on:
   push:
     branches:
       - "**"
+  pull_request: # Also run on pull requests to main/master
+    branches:
+      - main # Or your primary branch name e.g. master
 
 jobs:
   package-test:
-    runs-on: macos-15
+    runs-on: macos-15 # Consider updating to macos-latest or macos-14 if 15 is too new or causes issues
 
     steps:
       - uses: maxim-lobanov/setup-xcode@v1.1
         with:
-          xcode-version: "16.2"
+          xcode-version: "16.2" # Ensure this Xcode version is appropriate
       - uses: actions/checkout@v4
       - name: Run Test
         run: swift test
+
+  build-app: # New job
+    runs-on: macos-15 # Match the runner or use macos-latest / macos-14
+    needs: package-test # Optional: run after tests pass
+    
+    steps:
+      - uses: maxim-lobanov/setup-xcode@v1.1
+        with:
+          xcode-version: "16.2" # Match Xcode version
+      - uses: actions/checkout@v4
+      - name: Build Application
+        run: xcodebuild build -scheme Development -project Development/Development.xcodeproj -sdk iphonesimulator CODE_SIGNING_ALLOWED=NO
