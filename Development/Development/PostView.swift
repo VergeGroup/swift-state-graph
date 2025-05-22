@@ -68,7 +68,7 @@ final class Post: TypedIdentifiable, Hashable, Sendable {
   @GraphStored  
   var content: String
   
-  let author: User
+  unowned let author: User
   
   let createdAt: Date = .init()
   
@@ -112,7 +112,7 @@ final class Comment: TypedIdentifiable, Sendable {
   @GraphStored
   var createdAt: Date = .init()
   
-  let post: Post
+  unowned let post: Post
   
   let author: User
   
