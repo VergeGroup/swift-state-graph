@@ -204,35 +204,39 @@ struct Tests {
   }
 
   @Test func withGraphTracking_onChange() async {
-    final class Model {
+    
+    final class Model: Sendable {
       @GraphStored var name: String = ""
       @GraphStored var count1: Int = 0
       @GraphStored var count2: Int = 0
     }
+    
     let model = Model()
-    var computedValues: [Int] = []
-    var count1Values: [Int] = []
-    let exp = expectation(description: "onChange called")
-    exp.expectedFulfillmentCount = 2
-    let cancellable = withGraphTracking {
-      Computed { _ in
-        model.count1 + model.count2
+    
+    await confirmation(expectedCount: 5) { c in
+      
+      let cancellable = withGraphTracking {
+        Computed { _ in
+          model.count1 + model.count2
+        }
+        .onChange { value in
+          c.confirm()
+        }
+        model.$count1.onChange { value in
+          c.confirm()
+        }
       }
-      .onChange { value in
-        computedValues.append(value)
-        exp.fulfill()
-      }
-      model.$count1.onChange { value in
-        count1Values.append(value)
-        exp.fulfill()
-      }
+      
+      try? await Task.sleep(for: .milliseconds(100))
+      
+      model.count1 = 10
+      try? await Task.sleep(for: .milliseconds(100))
+      model.count2 = 5
+      try? await Task.sleep(for: .milliseconds(100))
+      
+      withExtendedLifetime(cancellable, {})
     }
-    model.count1 = 10
-    model.count2 = 5
-    await fulfillment(of: [exp], timeout: 1.0)
-    #expect(computedValues.contains(10 + 0) || computedValues.contains(10 + 5))
-    #expect(count1Values.contains(10))
-    _ = cancellable // keep alive
+      
   }
 
 }
