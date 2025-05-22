@@ -1,5 +1,7 @@
 import XCTest
+#if canImport(os.lock)
 import os.lock
+#endif
 
 @testable import StateGraph
 

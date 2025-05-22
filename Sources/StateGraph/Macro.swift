@@ -15,11 +15,16 @@ public macro GraphComputed() = #externalMacro(module: "StateGraphMacro", type: "
 @attached(peer)
 public macro GraphIgnored() = #externalMacro(module: "StateGraphMacro", type: "IgnoredMacro")
 
+import Foundation
+
+#if canImport(os.lock)
 @_exported import os.lock
+#endif
 
 #if DEBUG
-
+#if canImport(os.lock)
 import os.lock
+#endif
 
 final class ImplicitInitializers {
   @GraphStored

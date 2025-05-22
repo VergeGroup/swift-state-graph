@@ -1,5 +1,7 @@
 import Synchronization
+#if canImport(os.lock)
 import os.lock
+#endif
 
 private let count_old: OSAllocatedUnfairLock<UInt64> = .init(
   uncheckedState: 0

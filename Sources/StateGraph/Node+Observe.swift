@@ -180,7 +180,29 @@ extension Node {
 
 // MARK: - Internals
 
+#if canImport(Combine)
 @_exported @preconcurrency import class Combine.AnyCancellable
+#else
+public final class AnyCancellable: @unchecked Sendable, Hashable {
+  private let onCancel: () -> Void
+
+  public init(_ onCancel: @escaping () -> Void = {}) {
+    self.onCancel = onCancel
+  }
+
+  public func cancel() {
+    onCancel()
+  }
+
+  public static func == (lhs: AnyCancellable, rhs: AnyCancellable) -> Bool {
+    return lhs === rhs
+  }
+
+  public func hash(into hasher: inout Hasher) {
+    hasher.combine(ObjectIdentifier(self))
+  }
+}
+#endif
 
 final class Subscriptions: Sendable, Hashable {
   
