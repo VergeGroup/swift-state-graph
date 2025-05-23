@@ -202,6 +202,72 @@ final class MacroTests: XCTestCase {
     }
     
   }
+  
+  func test_implicitly_unwrapped_optional() {
+    assertMacro {
+      """
+      final class Model {
+      
+        @GraphStored
+        var community: Community!
+      
+        init() {
+        
+        }
+      
+      }
+      """
+    } expansion: {
+      """
+      final class Model {
+        var community: Community! {
+          get {
+            return $community.wrappedValue!
+          }
+          set {
+            $community.wrappedValue = newValue
+          }
+        }
+
+        @GraphIgnored let $community: Stored<Community?> = .init(group: "Model", name: "community", wrappedValue: nil)
+
+        init() {
+        
+        }
+
+      }
+      """
+    }
+  }
+  
+  func test_implicitly_unwrapped_optional_with_initializer() {
+    assertMacro {
+      """
+      final class Model {
+      
+        @GraphStored
+        var community: Community! = Community()
+      
+      }
+      """
+    } expansion: {
+      """
+      final class Model {
+        var community: Community! {
+          get {
+            return $community.wrappedValue!
+          }
+          set {
+            $community.wrappedValue = newValue
+          }
+        }
+
+        @GraphIgnored let $community: Stored<Community?> = .init(group: "Model", name: "community", wrappedValue: Community())
+
+      }
+      """
+    }
+  }
  
   func test_weak_reference() {
     
