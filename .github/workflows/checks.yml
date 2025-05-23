@@ -15,4 +15,26 @@ jobs:
           xcode-version: "16.2"
       - uses: actions/checkout@v4
       - name: Run Test
-        run: swift test
+        env:
+          SWIFTPM_ENABLE_PLUGINS: 1
+        run: swift test --enable-all-traits
+
+  build-development:
+    runs-on: macos-15
+
+    steps:
+      - uses: maxim-lobanov/setup-xcode@v1.1
+        with:
+          xcode-version: "16.2"
+      - uses: actions/checkout@v4
+      - name: Build Development project
+        env:
+          SWIFTPM_ENABLE_PLUGINS: 1
+        run: |
+          xcodebuild \
+            -skipMacroValidation \
+            -skipPackagePluginValidation \
+            -project Development/Development.xcodeproj \
+            -scheme Development \
+            -destination 'generic/platform=iOS Simulator' \
+            CODE_SIGNING_ALLOWED=NO build
