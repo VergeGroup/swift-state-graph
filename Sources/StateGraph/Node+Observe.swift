@@ -1,6 +1,7 @@
 
 extension Node {
   
+  /// Returns an asynchronous stream emitting the current value followed by subsequent updates.
   public func observe() -> AsyncStartWithSequence<AsyncMapSequence<AsyncStream<Void>, Self.Value>> {
     
     let stream = withStateGraphTrackingStream {
@@ -17,19 +18,25 @@ extension Node {
 }
 
 extension AsyncSequence {
+  /// Prepends a value to the sequence before any asynchronous values are emitted.
   func startWith(_ value: Element) -> AsyncStartWithSequence<Self> {
     return AsyncStartWithSequence(self, startWith: value)
   }
 }
 
+/// A sequence that yields an initial value before forwarding to its base sequence.
 public struct AsyncStartWithSequence<Base: AsyncSequence>: AsyncSequence {
   
   public struct AsyncIterator: AsyncIteratorProtocol {
+    /// The sequence element type.
     public typealias Element = Base.Element
-    
+
+    /// Iterator of the underlying sequence.
     private var base: Base.AsyncIterator
+
+    /// The first element to yield.
     private var first: Base.Element?
-    
+
     init(_ value: Base.AsyncIterator, startWith: Base.Element) {
       self.base = value
       self.first = startWith
@@ -44,11 +51,15 @@ public struct AsyncStartWithSequence<Base: AsyncSequence>: AsyncSequence {
     }
   }
   
+  /// The sequence element type.
   public typealias Element = Base.Element
-  
+
+  /// The underlying sequence.
   let base: Base
+
+  /// The element to yield before any from ``base``.
   let startWith: Base.Element
-  
+
   init(_ base: Base, startWith: Base.Element) {
     self.base = base
     self.startWith = startWith
@@ -74,6 +85,7 @@ extension AsyncStartWithSequence: Sendable where Base.Element: Sendable, Base: S
   }
   ```
   */
+/// Executes ``scope`` while registering any node accesses and returns a cancellable token.
 public func withGraphTracking(_ scope: () -> Void) -> AnyCancellable {
   
   let subscriptions = Subscriptions.$subscriptions.withValue(.init()) {     
@@ -88,6 +100,7 @@ public func withGraphTracking(_ scope: () -> Void) -> AnyCancellable {
   
 }
 
+/// A filter that can transform or drop values before they are forwarded to a handler.
 public protocol Filter<Value> {
   
   associatedtype Value
@@ -95,6 +108,7 @@ public protocol Filter<Value> {
   mutating func send(value: Value) -> Value
 }
 
+/// A ``Filter`` that forwards values unchanged.
 public struct PassthroughFilter<Value>: Filter {
   
   public func send(value: Value) -> Value {
@@ -104,8 +118,10 @@ public struct PassthroughFilter<Value>: Filter {
   public init() {}
 }
 
+/// A ``Filter`` that only forwards values when they differ from the previous value.
 public struct DistinctFilter<Value: Equatable>: Filter {
   
+  /// Last forwarded value used to detect duplicates.
   private var lastValue: Value?
   
   public mutating func send(value: Value) -> Value {
@@ -119,6 +135,11 @@ public struct DistinctFilter<Value: Equatable>: Filter {
 
 extension Node {
   
+  /// Registers a handler that is called when the node's value changes.
+  /// - Parameters:
+  ///   - filter: Filter used to preprocess values before they are sent.
+  ///   - handler: Closure invoked with the (filtered) value.
+  ///   - isolation: Actor on which the handler should run.
   public func onChange(
     _ filter: consuming some Filter<Self.Value>,
     _ handler: @escaping (Self.Value) -> Void,
@@ -159,16 +180,15 @@ extension Node {
           
   }
   
+  /// Registers a handler called for every value change.
   public func onChange(
     _ handler: @escaping (Self.Value) -> Void,
     isolation: isolated (any Actor)? = #isolation
-  ) {    
+  ) {
     onChange(PassthroughFilter<Self.Value>(), handler, isolation: isolation)
   }
   
-  /**
-   Emits the value only when it changes.
-   */
+  /// Registers a handler that is only called when the value actually changes.
   public func onChange(
     _ handler: @escaping (Self.Value) -> Void,
     isolation: isolated (any Actor)? = #isolation
@@ -182,6 +202,7 @@ extension Node {
 
 @_exported @preconcurrency import class Combine.AnyCancellable
 
+/// A container for ``AnyCancellable`` instances used during tracking scopes.
 final class Subscriptions: Sendable, Hashable {
   
   static func == (lhs: Subscriptions, rhs: Subscriptions) -> Bool {
@@ -192,6 +213,7 @@ final class Subscriptions: Sendable, Hashable {
     hasher.combine(ObjectIdentifier(self))
   }
   
+  /// Stored cancellables protected by a lock.
   let cancellables = OSAllocatedUnfairLock<[AnyCancellable]>(initialState: [])
   
   init() {
@@ -204,6 +226,7 @@ final class Subscriptions: Sendable, Hashable {
     }
   }
   
+  /// Task-local storage for the current subscriptions container.
   @TaskLocal
   static var subscriptions: Subscriptions? = nil
 }

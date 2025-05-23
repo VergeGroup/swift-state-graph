@@ -1,8 +1,10 @@
-/// for debugging
+/// Actor used for inspecting nodes while debugging.
 public actor NodeStore {
 
+  /// Shared global instance.
   public static let shared = NodeStore()
 
+  /// Stored nodes held weakly so that they can be inspected.
   private var nodes: ContiguousArray<WeakNode> = []
 
   func register(node: any TypeErasedNode) {
@@ -16,6 +18,7 @@ public actor NodeStore {
     }
   }
   
+  /// Current list of active nodes.
   public var _nodes: [any TypeErasedNode] {
     nodes.compactMap { $0.value }
   }
@@ -62,14 +65,17 @@ public actor NodeStore {
 
 }
 
+/// Weak box for storing nodes without retaining them.
 private struct WeakNode: Equatable {
 
   static func == (lhs: WeakNode, rhs: WeakNode) -> Bool {
     return lhs.value === rhs.value
   }
 
+  /// Weak reference to the node.
   weak var value: (any TypeErasedNode)?
 
+  /// Creates a wrapper around ``value``.
   init(_ value: any TypeErasedNode) {
     self.value = value
   }

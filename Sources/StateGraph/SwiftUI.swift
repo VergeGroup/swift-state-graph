@@ -3,7 +3,7 @@
 import SwiftUI
 
 extension Stored {
-  
+
   /**
     Creates a SwiftUI binding from the stored property.
    */

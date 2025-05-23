@@ -3,7 +3,9 @@
 
 import TypedIdentifier
 
+/// A lightweight storage for entities keyed by ``TypedID``.
 public struct EntityStore<T: TypedIdentifiable & Sendable>: Sendable {
+  /// Underlying dictionary of entities.
   private var entities: [T.TypedID : T]
   
   public init(entities: [T.TypedID: T] = [:]) {

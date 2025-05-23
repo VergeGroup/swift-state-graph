@@ -22,8 +22,11 @@ private enum TaskLocals {
 ///
 /// - When value changes: Changes propagate to all dependent nodes, triggering recalculations
 /// - When value is accessed: Dependencies are recorded, automatically building the graph structure
+/// Node holding a mutable value that can be observed by other nodes.
 public final class Stored<Value>: Node, Observable, CustomDebugStringConvertible {
 
+  /// Lock protecting mutations on the node.
+  /// Lock protecting cached value and dependency lists.
   public let lock: NodeLock
 
   nonisolated(unsafe)
@@ -31,12 +34,15 @@ public final class Stored<Value>: Node, Observable, CustomDebugStringConvertible
 
   #if canImport(Observation)
   @available(macOS 14.0, iOS 17.0, watchOS 10.0, tvOS 17.0, *)
+  /// Registrar used for the Observation framework, if available.
   private var observationRegistrar: ObservationRegistrar {
     _observationRegistrar as! ObservationRegistrar
   }
+  /// Storage for the registrar allowing ``Stored`` to be ``Observable``.
   private let _observationRegistrar: (Any & Sendable)?
   #endif
 
+  /// Stored nodes are never dirty as they don't compute values.
   public var potentiallyDirty: Bool {
     get {
       return false
@@ -46,8 +52,10 @@ public final class Stored<Value>: Node, Observable, CustomDebugStringConvertible
     }
   }
 
+  /// Information describing this node for debugging.
   public let info: NodeInfo
 
+  /// The contained value.
   public var wrappedValue: Value {
     _read {
       
@@ -107,6 +115,7 @@ public final class Stored<Value>: Node, Observable, CustomDebugStringConvertible
     }
   }
 
+  /// Nodes that depend on this node.
   public var incomingEdges: ContiguousArray<Edge> {
     get {
       fatalError()
@@ -117,9 +126,11 @@ public final class Stored<Value>: Node, Observable, CustomDebugStringConvertible
   }
 
   nonisolated(unsafe)
+  /// Nodes that this node depends on.
   public var outgoingEdges: ContiguousArray<Edge> = []
   
   nonisolated(unsafe)
+  /// Tracking registrations attached to this node.
   public var trackingRegistrations: Set<TrackingRegistration> = []
 
   public init(
@@ -321,16 +332,20 @@ public final class Computed<Value>: Node, Observable, CustomDebugStringConvertib
   public let lock: NodeLock
 
   nonisolated(unsafe)
+    /// Cached result of the computation.
     private var _cachedValue: Value?
   
   #if canImport(Observation)
     @available(macOS 14.0, iOS 17.0, watchOS 10.0, tvOS 17.0, *)
+    /// Registrar used for Observation support, if available.
     private var observationRegistrar: ObservationRegistrar {
       _observationRegistrar as! ObservationRegistrar
     }
+    /// Storage for Observation registrar.
     private let _observationRegistrar: (Any & Sendable)?
   #endif
 
+  /// Indicates whether the cached value may be outdated.
   public var potentiallyDirty: Bool {
     get {
       lock.lock()
@@ -376,8 +391,10 @@ public final class Computed<Value>: Node, Observable, CustomDebugStringConvertib
   nonisolated(unsafe)
   private var _potentiallyDirty: Bool = false
 
+  /// Information describing this node for debugging.
   public let info: NodeInfo
 
+  /// Accesses the computed value, recomputing if needed.
   public var wrappedValue: Value {
     _read {
       #if canImport(Observation)
@@ -390,15 +407,19 @@ public final class Computed<Value>: Node, Observable, CustomDebugStringConvertib
     }
   }
 
+  /// Descriptor used to compute the value and compare equality.
   private let descriptor: any ComputedDescriptor<Value>
 
   nonisolated(unsafe)
+  /// Nodes this computed node depends on.
   public var incomingEdges: ContiguousArray<Edge> = []
   
   nonisolated(unsafe)
+  /// Nodes that depend on this computed node.
   public var outgoingEdges: ContiguousArray<Edge> = []
   
   nonisolated(unsafe)
+  /// Registrations to notify when the value changes.
   public var trackingRegistrations: Set<TrackingRegistration> = []
 
   /// Initializes a computed node.
@@ -607,13 +628,18 @@ public final class Computed<Value>: Node, Observable, CustomDebugStringConvertib
 }
 
 @DebugDescription
+/// Represents a dependency from one node to another.
 public final class Edge: CustomDebugStringConvertible {
 
+  /// Node from which the edge originates.
   unowned let from: any TypeErasedNode
+  /// Node the edge points to.
   unowned let to: any TypeErasedNode
   
+  /// Synchronization lock for pending state.
   private let lock: NodeLock = sharedLock
   
+  /// Indicates whether the edge is waiting to propagate changes.
   var isPending: Bool {
     _read {
       lock.lock()
@@ -629,6 +655,7 @@ public final class Edge: CustomDebugStringConvertible {
 
   private var _isPending: Bool = false
 
+  /// Creates an edge connecting ``from`` to ``to``.
   init(from: any TypeErasedNode, to: any TypeErasedNode) {
     self.from = from
     self.to = to
@@ -644,6 +671,8 @@ public final class Edge: CustomDebugStringConvertible {
   
 }
 
+/// Lock type used throughout the state graph.
 public typealias NodeLock = NSRecursiveLock
 
+/// Global lock instance used by nodes.
 let sharedLock: NodeLock = NodeLock()
