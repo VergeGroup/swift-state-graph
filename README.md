@@ -607,3 +607,10 @@ Using the normalization module provides several advantages:
 3. **Relationship Management**: Easily handle one-to-many and many-to-many relationships
 4. **Performance**: Optimized for fast lookups and updates through ID-based access
 5. **Reactivity**: Combined with State Graph's dependency tracking for automatic UI updates
+
+## Example: Spotify Client
+
+The `Development` directory includes a simple Spotify client example built with SwiftUI and StateGraph. The example demonstrates how to model artists, tracks, playlists, and users using `@GraphStored` and `@GraphComputed` properties. It also shows how to use `EntityStore` for normalized data management.
+
+To experiment with the sample, open `Development/Development/SpotifyClient.swift` and preview the `SpotifyListView` in Xcode. The view model loads some stub data and displays playlists stored in the graph.
+
