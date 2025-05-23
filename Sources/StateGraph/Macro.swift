@@ -26,6 +26,9 @@ final class ImplicitInitializers {
   var value: Int?
   
   @GraphStored
+  var value2: Int!
+  
+  @GraphStored
   weak var weak_object: AnyObject?
   
   static func run() {
@@ -34,6 +37,7 @@ final class ImplicitInitializers {
 
   }
 }
+
 
 final class A {
   

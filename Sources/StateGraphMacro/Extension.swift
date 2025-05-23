@@ -1,4 +1,3 @@
-
 import SwiftSyntax
 
 extension VariableDeclSyntax {
@@ -69,6 +68,12 @@ extension VariableDeclSyntax {
       $0.typeAnnotation?.type.is(OptionalTypeSyntax.self) ?? false
     })
 
+  }
+
+  var isImplicitlyUnwrappedOptional: Bool {
+    return self.bindings.contains(where: {
+      $0.typeAnnotation?.type.is(ImplicitlyUnwrappedOptionalTypeSyntax.self) ?? false
+    })
   }
 
   var typeSyntax: TypeSyntax? {
@@ -229,8 +234,12 @@ extension VariableDeclSyntax {
 
 extension TypeSyntax {
   func removingOptionality() -> Self {
-    self.as(OptionalTypeSyntax.self).map {
-      $0.wrappedType
-    } ?? self
+    if let optionalType = self.as(OptionalTypeSyntax.self) {
+      return optionalType.wrappedType
+    } else if let implicitlyUnwrappedOptionalType = self.as(ImplicitlyUnwrappedOptionalTypeSyntax.self) {
+      return implicitlyUnwrappedOptionalType.wrappedType
+    } else {
+      return self
+    }
   }
 }

@@ -82,6 +82,8 @@ extension StoredMacro: PeerMacro {
           return "Stored<Weak<\(type.removingOptionality().trimmed)>>"
         } else if variableDecl.isUnowned {
           return "Stored<Unowned<\(type.removingOptionality().trimmed)>>"
+        } else if variableDecl.isImplicitlyUnwrappedOptional {
+          return "Stored<\(type.removingOptionality().trimmed)?>"
         } else {
           return "Stored<\(type.trimmed)>"
         }
@@ -90,7 +92,7 @@ extension StoredMacro: PeerMacro {
     let name = variableDecl.name
     let groupName = context.lexicalContext.first?.as(ClassDeclSyntax.self)?.name.text ?? ""
 
-    if variableDecl.isOptional && variableDecl.hasInitializer == false {
+    if (variableDecl.isOptional || variableDecl.isImplicitlyUnwrappedOptional) && variableDecl.hasInitializer == false {
 
       _variableDecl = _variableDecl.addInitializer({ 
         
@@ -176,7 +178,7 @@ extension StoredMacro: AccessorMacro {
     }
     
     let addsStorageRestrictions = { () -> Bool in
-      if variableDecl.isOptional {
+      if variableDecl.isOptional || variableDecl.isImplicitlyUnwrappedOptional {
         return false
       } else {
         if variableDecl.hasInitializer {
@@ -203,7 +205,7 @@ extension StoredMacro: AccessorMacro {
       let readAccessor = AccessorDeclSyntax(
         """
         get {
-          return $\(raw: propertyName).wrappedValue.value
+          return $\(raw: propertyName).wrappedValue.value\(raw: variableDecl.isImplicitlyUnwrappedOptional ? "!" : "")
         }
         """
       )
@@ -243,7 +245,7 @@ extension StoredMacro: AccessorMacro {
       let readAccessor = AccessorDeclSyntax(
         """
         get {
-          return $\(raw: propertyName).wrappedValue
+          return $\(raw: propertyName).wrappedValue\(raw: variableDecl.isImplicitlyUnwrappedOptional ? "!" : "")
         }
         """
       )
