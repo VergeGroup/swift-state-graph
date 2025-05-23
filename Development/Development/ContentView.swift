@@ -38,9 +38,15 @@ struct ContentView: View {
         }
         
         NavigationLink {
+          SpotifyLoginView()
+        } label: {
+          Text("Spotify Login")
+        }
+        
+        NavigationLink {
           SpotifyListView()
         } label: {
-          Text("Spotify")
+          Text("Spotify (Sample Data)")
         }
       }
     }
