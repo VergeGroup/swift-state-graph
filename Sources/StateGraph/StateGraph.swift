@@ -61,11 +61,11 @@ public final class Stored<Value>: Node, Observable, CustomDebugStringConvertible
       defer { lock.unlock() }
                 
       // record dependency
-      if let c = TaskLocals.currentNode {
-        let edge = Edge(from: self, to: c)
-        outgoingEdges.append(edge)
-        c.incomingEdges.append(edge)
-      }
+        if let currentNode = TaskLocals.currentNode {
+          let edge = Edge(from: self, to: currentNode)
+          outgoingEdges.append(edge)
+          currentNode.incomingEdges.append(edge)
+        }
       // record tracking
       if let registration = TrackingRegistration.registration {
         self.trackingRegistrations.insert(registration)
@@ -96,14 +96,14 @@ public final class Stored<Value>: Node, Observable, CustomDebugStringConvertible
                            
       lock.unlock()
       
-      for r in _trackingRegistrations {
-        r.perform()
-      }
-      
-      for e in _outgoingEdges {
-        e.isPending = true
-        e.to.potentiallyDirty = true
-      }
+        for registration in _trackingRegistrations {
+          registration.perform()
+        }
+
+        for edge in _outgoingEdges {
+          edge.isPending = true
+          edge.to.potentiallyDirty = true
+        }
     }
   }
 
@@ -155,8 +155,8 @@ public final class Stored<Value>: Node, Observable, CustomDebugStringConvertible
 
   deinit {
     Log.generic.debug("Deinit Stored: \(self.info.name ?? "noname")")
-    for e in outgoingEdges {
-      e.to.incomingEdges.removeAll(where: { $0 === e })
+    for edge in outgoingEdges {
+      edge.to.incomingEdges.removeAll(where: { $0 === edge })
     }
     outgoingEdges.removeAll()
   }
@@ -362,13 +362,13 @@ public final class Computed<Value>: Node, Observable, CustomDebugStringConvertib
       
       lock.unlock()
       
-      for e in _outgoingEdges {
-        e.to.potentiallyDirty = true
-      }
-      
-      for r in _trackingRegistrations {
-        r.perform()
-      }
+        for edge in _outgoingEdges {
+          edge.to.potentiallyDirty = true
+        }
+
+        for registration in _trackingRegistrations {
+          registration.perform()
+        }
             
     }
   }
@@ -524,12 +524,12 @@ public final class Computed<Value>: Node, Observable, CustomDebugStringConvertib
 #endif
   }
   
-  deinit {
-    Log.generic.debug("Deinit Computed: id=\(self.info.id)")
-    for e in incomingEdges {
-      e.from.outgoingEdges.removeAll(where: { $0 === e })
+    deinit {
+      Log.generic.debug("Deinit Computed: id=\(self.info.id)")
+      for edge in incomingEdges {
+        edge.from.outgoingEdges.removeAll(where: { $0 === edge })
+      }
     }
-  }
 
   public func recomputeIfNeeded() {
 
@@ -537,11 +537,11 @@ public final class Computed<Value>: Node, Observable, CustomDebugStringConvertib
     defer { lock.unlock() }
 
     // record dependency
-    if let c = TaskLocals.currentNode {
-      let edge = Edge(from: self, to: c)
+    if let currentNode = TaskLocals.currentNode {
+      let edge = Edge(from: self, to: currentNode)
       // TODO: consider removing duplicated edges
       outgoingEdges.append(edge)
-      c.incomingEdges.append(edge)
+      currentNode.incomingEdges.append(edge)
     }
     // record tracking
     if let registration = TrackingRegistration.registration {
@@ -574,13 +574,13 @@ public final class Computed<Value>: Node, Observable, CustomDebugStringConvertib
         // propagate changes to dependent nodes
         do {
 
-          if let previousValue = previousValue,
-             descriptor.isEqual(lhs: previousValue, rhs: _cachedValue!) == false
-          {
-            for o in outgoingEdges {
-              o.isPending = true
+            if let previousValue = previousValue,
+               descriptor.isEqual(lhs: previousValue, rhs: _cachedValue!) == false
+            {
+              for edge in outgoingEdges {
+                edge.isPending = true
+              }
             }
-          }
 
         }
       }
@@ -592,10 +592,10 @@ public final class Computed<Value>: Node, Observable, CustomDebugStringConvertib
   }
 
   private func removeIncomingEdges() {
-    for e in incomingEdges {
-      e.from.lock.lock()
-      e.from.outgoingEdges.removeAll(where: { $0 === e })
-      e.from.lock.unlock()
+    for edge in incomingEdges {
+      edge.from.lock.lock()
+      edge.from.outgoingEdges.removeAll(where: { $0 === edge })
+      edge.from.lock.unlock()
     }
     incomingEdges.removeAll()
   }
