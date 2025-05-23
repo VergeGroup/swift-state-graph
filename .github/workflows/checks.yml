@@ -15,9 +15,7 @@ jobs:
           xcode-version: "16.2"
       - uses: actions/checkout@v4
       - name: Run Test
-        env:
-          SWIFTPM_ENABLE_PLUGINS: 1
-        run: swift test --enable-all-traits
+        run: swift test
 
   build-development:
     runs-on: macos-15
@@ -28,8 +26,6 @@ jobs:
           xcode-version: "16.2"
       - uses: actions/checkout@v4
       - name: Build Development project
-        env:
-          SWIFTPM_ENABLE_PLUGINS: 1
         run: |
           xcodebuild \
             -skipMacroValidation \
