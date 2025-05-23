@@ -42,8 +42,8 @@
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/VergeGroup/swift-typed-identifier.git",
       "state" : {
-        "revision" : "284340409ba47858a1b3c353dcef9c21303953db",
-        "version" : "2.0.3"
+        "revision" : "ea7afa2ce943c6bf3ef87d385c8a6e9f67fea4f3",
+        "version" : "2.0.4"
       }
     },
     {

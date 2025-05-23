@@ -1,4 +1,3 @@
-
 # Swift State Graph
 
 [![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/vergegroup/swift-state-graph)
@@ -607,3 +606,55 @@ Using the normalization module provides several advantages:
 3. **Relationship Management**: Easily handle one-to-many and many-to-many relationships
 4. **Performance**: Optimized for fast lookups and updates through ID-based access
 5. **Reactivity**: Combined with State Graph's dependency tracking for automatic UI updates
+
+### Sharing State Between Objects with @GraphStored Reference Assignment
+
+Swift State Graph allows you to share state between different objects by directly assigning `@GraphStored` property references. This pattern is particularly useful for creating clean architectures where ViewModels observe state from Services or other data sources.
+
+#### Simple Example: Direct @GraphStored Sharing
+
+```swift
+// Service
+final class DataService {
+  @GraphStored var items: [Item] = []
+  @GraphStored var isLoading: Bool = false
+}
+
+// ViewModel
+final class ViewModel: ObservableObject { // ObservableObject conformance only for @StateObject usage
+  @GraphStored var items: [Item]
+  @GraphStored var isLoading: Bool
+  
+  init(service: DataService) {
+    // Simply pass @GraphStored directly
+    self.$items = service.$items
+    self.$isLoading = service.$isLoading
+  }
+}
+```
+
+**Creating unnecessary instances:**
+```swift
+// ❌ No need to create new Stored instances
+self.$items = service.$items.map { _, value in value }
+```
+
+**Simple approach:**
+```swift
+// ✅ Direct assignment
+self.$items = service.$items
+```
+
+#### Benefits
+
+- **Simple**: Eliminates verbose mapping functions
+- **Performance**: Avoids unnecessary computation overhead
+- **Reactive**: Source changes automatically propagate
+
+#### Use Cases
+
+- Exposing service state to ViewModels
+- Simple sharing without state transformation
+- Loose coupling in MVVM architectures
+
+This reference sharing pattern is particularly powerful in MVVM architectures where you want view models to reactively observe service state without tight coupling.
