@@ -36,9 +36,19 @@ struct ContentView: View {
         } label: { 
           Text("Database memory check") 
         }
+        
+        NavigationLink {
+          SpotifyListView()
+        } label: {
+          Text("Spotify")
+        }
       }
     }
   }
+}
+
+#Preview {
+  ContentView()
 }
 
 #if DEBUG
