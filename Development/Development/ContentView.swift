@@ -36,9 +36,25 @@ struct ContentView: View {
         } label: { 
           Text("Database memory check") 
         }
+        
+        NavigationLink {
+          SpotifyLoginView()
+        } label: {
+          Text("Spotify Login")
+        }
+        
+        NavigationLink {
+          SpotifyListView()
+        } label: {
+          Text("Spotify (Sample Data)")
+        }
       }
     }
   }
+}
+
+#Preview {
+  ContentView()
 }
 
 #if DEBUG
