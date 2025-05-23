@@ -168,6 +168,16 @@ public final class Stored<Value>: Node, Observable, CustomDebugStringConvertible
   public var debugDescription: String {
     "Stored<\(Value.self)>(id=\(info.id), name=\(info.name ?? "noname"), value=\(String(describing: _value)))"
   }
+
+  borrowing public func withLock<Result, E>(
+    _ body: (inout sending Value) throws(E) -> sending Result
+  ) throws(E) -> sending Result where E : Error, Result : ~Copyable {
+    lock.lock()
+    defer {
+      lock.unlock()
+    }
+    return try body(&_value)
+  }
 }
 
 public protocol ComputedDescriptor<Value>: Sendable {

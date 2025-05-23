@@ -21,7 +21,13 @@ public struct EntityStore<T: TypedIdentifiable & Sendable>: Sendable {
   public mutating func add(_ entity: T) {
     entities[entity.id] = entity
   }
-  
+
+  public mutating func add(_ entities: some Sequence<T>) {
+    for entity in entities {
+      self.add(entity)
+    }
+  }
+
   public mutating func modify(_ id: T.TypedID, _ block: (inout T) -> Void) {
     if var entity = entities[id] {
       block(&entity)

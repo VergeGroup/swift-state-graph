@@ -35,7 +35,6 @@ extension Node {
   public func hash(into hasher: inout Hasher) {
     hasher.combine(ObjectIdentifier(self))
   }
-  
 }
 
 extension Node {
