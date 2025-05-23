@@ -101,9 +101,7 @@ extension VariableDeclSyntax {
       return binding
     }
         
-    return self.with(\.bindings, .init(self.bindings.map {
-      $0.with(\.initializer, initializer)
-    }))
+    return self.with(\.bindings, .init(newBindings))
     
   }
 
