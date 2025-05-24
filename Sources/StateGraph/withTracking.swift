@@ -1,6 +1,5 @@
-/// Tracks access to the properties of StoredNode or Computed.
-/// Similarly to Observation.withObservationTracking, didChange runs one time after property changes applied.
-/// To observe properties continuously, use ``withContinuousStateGraphTracking``.
+/// Tracks accesses to nodes within ``apply`` and notifies ``didChange`` once after changes occur.
+/// To observe continuously, use ``withContinuousStateGraphTracking``.
 func withStateGraphTracking(
   apply: () -> Void,
   didChange: @escaping @Sendable () -> Void
@@ -11,14 +10,14 @@ func withStateGraphTracking(
   }
 }
 
+/// Indicates whether continuous tracking should continue or stop.
 public enum StateGraphTrackingContinuation: Sendable {
   case stop
   case next
 }
 
-/// Tracks access to the properties of StoredNode or Computed.
-/// Continuously tracks until `didChange` returns `.stop`.
-/// It does not provides update of the properties granurarly. some frequency of updates may be aggregated into single event.
+/// Continuously tracks accesses to nodes while ``apply`` runs and invokes ``didChange`` after each batch of updates.
+/// Tracking stops when ``didChange`` returns ``StateGraphTrackingContinuation.stop``.
 func withContinuousStateGraphTracking(
   apply: @escaping () -> Void,
   didChange: @escaping () -> StateGraphTrackingContinuation,
@@ -71,6 +70,7 @@ func withStateGraphTrackingStream(
 
 // MARK: - Internals
 
+/// Internal helper storing a change handler for tracking scopes.
 public final class TrackingRegistration: Sendable, Hashable {
 
   public static func == (lhs: TrackingRegistration, rhs: TrackingRegistration) -> Bool {
@@ -81,22 +81,27 @@ public final class TrackingRegistration: Sendable, Hashable {
     hasher.combine(ObjectIdentifier(self))
   }
 
+  /// Handler executed when a tracked property changes.
   private let didChange: @Sendable () -> Void
 
   init(didChange: @escaping @Sendable () -> Void) {
     self.didChange = didChange
   }
 
+  /// Executes the stored change handler.
   func perform() {
     didChange()
   }
 
+  /// The currently active registration in task-local storage.
   @TaskLocal
   static var registration: TrackingRegistration?
 }
 
+/// A simple wrapper that marks a value as ``Sendable``.
 struct UnsafeSendable<V>: ~Copyable, @unchecked Sendable {
 
+  /// Wrapped value.
   let _value: V
 
   init(_ value: V) {
@@ -105,6 +110,7 @@ struct UnsafeSendable<V>: ~Copyable, @unchecked Sendable {
 
 }
 
+/// Executes ``closure`` on the specified ``isolation`` actor.
 func perform<Return>(_ closure: () -> Return, isolation: isolated (any Actor)? = #isolation)
   -> Return
 {

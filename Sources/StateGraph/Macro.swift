@@ -5,14 +5,17 @@
 
 @attached(accessor, names: named(init), named(get), named(set))
 @attached(peer, names: prefixed(`$`))
+/// Property wrapper macro generating a ``Stored`` node.
 public macro GraphStored() = #externalMacro(module: "StateGraphMacro", type: "StoredMacro")
 
 @attached(accessor, names: named(get), named(set))
 @attached(peer, names: prefixed(`$`))
+/// Property wrapper macro generating a ``Computed`` node.
 public macro GraphComputed() = #externalMacro(module: "StateGraphMacro", type: "ComputedMacro")
 
 
 @attached(peer)
+/// Marks a stored property to be ignored by graph macros.
 public macro GraphIgnored() = #externalMacro(module: "StateGraphMacro", type: "IgnoredMacro")
 
 @_exported import os.lock
