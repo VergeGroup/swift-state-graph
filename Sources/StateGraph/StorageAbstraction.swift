@@ -9,14 +9,27 @@ import Foundation
 public protocol Storage<Value>: Sendable {
   
   associatedtype Value
-  
-  mutating func loaded(host node: Weak<_StoredNode<Value, Self>>)
+      
+  mutating func loaded(context: StorageContext)
   
   func unloaded() 
   
-  func getValue() -> Value
+  var value: Value { get set }
   
-  mutating func setValue(_ value: Value)
+}
+
+public struct StorageContext: Sendable {
+  
+  private let onStorageUpdated: @Sendable () -> Void
+    
+  init(onStorageUpdated: @Sendable @escaping () -> Void) {
+    self.onStorageUpdated = onStorageUpdated
+  }
+  
+  public func notifyStorageUpdated() {
+    onStorageUpdated()
+  }
+  
 }
 
 // MARK: - Concrete Storage Implementations
@@ -24,21 +37,13 @@ public protocol Storage<Value>: Sendable {
 public struct InMemoryStorage<Value>: Storage {
   
   nonisolated(unsafe)
-  private var _value: Value
+  public var value: Value
   
-  public init(initialValue: Value) {
-    self._value = initialValue
+  public init(initialValue: consuming Value) {
+    self.value = initialValue
   }
-  
-  public func getValue() -> Value {
-    return _value
-  }
-  
-  public mutating func setValue(_ value: Value) {
-    _value = value
-  }
-  
-  public func loaded(host node: Weak<_StoredNode<Value, InMemoryStorage<Value>>>) {
+    
+  public func loaded(context: StorageContext) {
     
   }
   
@@ -58,6 +63,15 @@ public struct UserDefaultsStorage<Value: UserDefaultsStorable>: Storage, Sendabl
   nonisolated(unsafe)
   private var subscription: NSObjectProtocol?
   
+  public var value: Value {
+    get {
+      return Value.getValue(from: userDefaults, forKey: key, defaultValue: defaultValue)
+    }
+    set {
+      newValue.setValue(to: userDefaults, forKey: key)
+    }
+  }
+  
   public init(
     userDefaults: UserDefaults,
     key: String,
@@ -67,30 +81,18 @@ public struct UserDefaultsStorage<Value: UserDefaultsStorable>: Storage, Sendabl
     self.key = key
     self.defaultValue = defaultValue
   }
-  
-  public func getValue() -> Value {
-    return Value.getValue(from: userDefaults, forKey: key, defaultValue: defaultValue)
-  }
-  
-  public func setValue(_ value: Value) {
-    value.setValue(to: userDefaults, forKey: key)
-  }
-  
-  public mutating func loaded(
-    host node: Weak<_StoredNode<Value, UserDefaultsStorage<Value>>>
-  ) {
-      
+     
+  public mutating func loaded(context: StorageContext) {
     subscription = NotificationCenter.default
       .addObserver(
         forName: UserDefaults.didChangeNotification,
         object: userDefaults,
         queue: nil,
-        using: { [self] _ in              
-          node.value?.wrappedValue = getValue()
+        using: { _ in              
+          context.notifyStorageUpdated()
         }
-      )    
-    
-  }
+      )  
+  }  
   
   public func unloaded() {
     guard let subscription else { return }
@@ -100,7 +102,6 @@ public struct UserDefaultsStorage<Value: UserDefaultsStorable>: Storage, Sendabl
 
 // MARK: - Base Stored Node
 
-/// ストレージを抽象化した共通のStoredNodeベースクラス
 public final class _StoredNode<Value, S: Storage<Value>>: Node, Observable, CustomDebugStringConvertible {
   
   public let lock: NodeLock
@@ -150,8 +151,7 @@ public final class _StoredNode<Value, S: Storage<Value>>: Node, Observable, Cust
         self.trackingRegistrations.insert(registration)
       }
       
-      let value = storage.getValue()
-      yield value
+      yield storage.value
     }
     _modify {
       
@@ -168,13 +168,9 @@ public final class _StoredNode<Value, S: Storage<Value>>: Node, Observable, Cust
 #endif
       
       lock.lock()
-      
-      var value = storage.getValue()
-      yield &value
-      
-      // ストレージに値を保存
-      storage.setValue(value)
-      
+            
+      yield &storage.value
+                
       let _outgoingEdges = outgoingEdges
       let _trackingRegistrations = trackingRegistrations
       self.trackingRegistrations.removeAll()
@@ -189,6 +185,31 @@ public final class _StoredNode<Value, S: Storage<Value>>: Node, Observable, Cust
         edge.isPending = true
         edge.to.potentiallyDirty = true
       }
+    }
+  }
+  
+  private func notifyStorageUpdated() {
+#if canImport(Observation)
+    if #available(macOS 14.0, iOS 17.0, watchOS 10.0, tvOS 17.0, *) {
+      observationRegistrar.didSet(self, keyPath: \.self)
+    }
+#endif
+    
+    lock.lock()
+        
+    let _outgoingEdges = outgoingEdges
+    let _trackingRegistrations = trackingRegistrations
+    self.trackingRegistrations.removeAll()
+    
+    lock.unlock()
+    
+    for registration in _trackingRegistrations {
+      registration.perform()
+    }
+    
+    for edge in _outgoingEdges {
+      edge.isPending = true
+      edge.to.potentiallyDirty = true
     }
   }
   
@@ -231,7 +252,9 @@ public final class _StoredNode<Value, S: Storage<Value>>: Node, Observable, Cust
       self._observationRegistrar = nil
     }
     
-    self.storage.loaded(host: .init(self))
+    self.storage.loaded(context: .init(onStorageUpdated: { [weak self] in      
+      self?.notifyStorageUpdated()      
+    }))
     
 #if DEBUG
     Task {
@@ -254,7 +277,7 @@ public final class _StoredNode<Value, S: Storage<Value>>: Node, Observable, Cust
   }
   
   public var debugDescription: String {
-    let value = storage.getValue()
+    let value = storage.value
     return "StoredNode<\(Value.self)>(id=\(info.id), name=\(info.name ?? "noname"), value=\(String(describing: value)))"
   }
   
@@ -262,16 +285,14 @@ public final class _StoredNode<Value, S: Storage<Value>>: Node, Observable, Cust
   ///
   /// - Parameter body: A closure that takes an inout parameter of the value
   /// - Returns: The result of the closure
-  public func withLock<Result, E>(
+  public borrowing func withLock<Result, E>(
     _ body: (inout Value) throws(E) -> Result
   ) throws(E) -> Result where E : Error {
     lock.lock()
     defer {
       lock.unlock()
     }
-    var value = storage.getValue()
-    let result = try body(&value)
-    storage.setValue(value)
+    let result = try body(&storage.value)
     return result
   }
 } 
