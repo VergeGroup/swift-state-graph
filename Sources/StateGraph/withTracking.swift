@@ -99,7 +99,7 @@ struct UnsafeSendable<V>: ~Copyable, @unchecked Sendable {
 
   let _value: V
 
-  init(_ value: V) {
+  init(_ value: consuming V) {
     _value = value
   }
 
