@@ -611,6 +611,28 @@ public final class Computed<Value>: Node, Observable, CustomDebugStringConvertib
   
 }
 
+extension Computed {
+  
+  /**
+    Create a computed value node that depends on a stored node.
+   */
+  public convenience init(_ stored: Stored<Value>) {
+    self.init(name: "embedded", rule: { _ in 
+      stored.wrappedValue
+    })
+  }
+  
+  /**
+    Create a computed value node that depends on a computed node.    
+   */
+  public convenience init(_ computed: Computed<Value>) {
+    self.init(name: "embedded", rule: { _ in 
+      computed.wrappedValue
+    })
+  }
+  
+}
+
 @DebugDescription
 public final class Edge: CustomDebugStringConvertible {
 
