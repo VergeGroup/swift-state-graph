@@ -631,6 +631,31 @@ extension Computed {
     })
   }
   
+  /**
+    Create from a constant value.
+   */
+  public convenience init(constant: consuming sending Value) {    
+    let sendable = UnsafeSendable(constant)
+    self.init(
+      name: "constant",
+      rule: { _ in 
+        sendable._value
+      }
+    )
+  }
+  
+  /**
+   Create from a constant value.
+   */
+  public convenience init(constant: Value) where Value : Sendable {
+    self.init(
+      name: "constant",
+      rule: { _ in
+        constant
+      }
+    )
+  }
+  
 }
 
 @DebugDescription
