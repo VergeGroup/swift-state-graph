@@ -88,10 +88,11 @@ public struct UserDefaultsStorage<Value: UserDefaultsStorable>: Storage, Sendabl
         forName: UserDefaults.didChangeNotification,
         object: userDefaults,
         queue: nil,
-        using: { _ in              
+        using: { notification in
+          // TODO: filter
           context.notifyStorageUpdated()
         }
-      )  
+      )
   }  
   
   public func unloaded() {
