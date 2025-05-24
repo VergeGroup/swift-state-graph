@@ -9,11 +9,6 @@ import Foundation.NSLock
  https://talk.objc.io/episodes/S01E429-attribute-graph-part-1
  */
 
-private enum TaskLocals {
-  @TaskLocal
-  static var currentNode: (any TypeErasedNode)?
-}
-
 /// A node that functions as an endpoint in a Directed Acyclic Graph (DAG).
 ///
 /// `StoredNode` can have its value set directly from the outside, and changes to its value
