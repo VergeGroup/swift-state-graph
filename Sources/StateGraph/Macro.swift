@@ -11,6 +11,17 @@ public macro GraphStored() = #externalMacro(module: "StateGraphMacro", type: "St
 @attached(peer, names: prefixed(`$`))
 public macro GraphComputed() = #externalMacro(module: "StateGraphMacro", type: "ComputedMacro")
 
+@attached(accessor, names: named(get), named(set))
+@attached(peer, names: prefixed(`$`))
+public macro UserDefaultsStored(key: String) = #externalMacro(module: "StateGraphMacro", type: "UserDefaultsStoredMacro")
+
+@attached(accessor, names: named(get), named(set))
+@attached(peer, names: prefixed(`$`))
+public macro UserDefaultsStored(suite: String, key: String) = #externalMacro(module: "StateGraphMacro", type: "UserDefaultsStoredMacro")
+
+@attached(accessor, names: named(get), named(set))
+@attached(peer, names: prefixed(`$`))
+public macro UserDefaultsStored(suite: String, key: String, name: String) = #externalMacro(module: "StateGraphMacro", type: "UserDefaultsStoredMacro")
 
 @attached(peer)
 public macro GraphIgnored() = #externalMacro(module: "StateGraphMacro", type: "IgnoredMacro")
