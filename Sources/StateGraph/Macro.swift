@@ -11,6 +11,17 @@ public macro GraphStored() = #externalMacro(module: "StateGraphMacro", type: "St
 @attached(peer, names: prefixed(`$`))
 public macro GraphComputed() = #externalMacro(module: "StateGraphMacro", type: "ComputedMacro")
 
+@attached(accessor, names: named(get), named(set))
+@attached(peer, names: prefixed(`$`))
+public macro GraphUserDefaultsStored(key: String) = #externalMacro(module: "StateGraphMacro", type: "UserDefaultsStoredMacro")
+
+@attached(accessor, names: named(get), named(set))
+@attached(peer, names: prefixed(`$`))
+public macro GraphUserDefaultsStored(suite: String, key: String) = #externalMacro(module: "StateGraphMacro", type: "UserDefaultsStoredMacro")
+
+@attached(accessor, names: named(get), named(set))
+@attached(peer, names: prefixed(`$`))
+public macro GraphUserDefaultsStored(suite: String, key: String, name: String) = #externalMacro(module: "StateGraphMacro", type: "UserDefaultsStoredMacro")
 
 @attached(peer)
 public macro GraphIgnored() = #externalMacro(module: "StateGraphMacro", type: "IgnoredMacro")
@@ -20,6 +31,14 @@ public macro GraphIgnored() = #externalMacro(module: "StateGraphMacro", type: "I
 #if DEBUG
 
 import os.lock
+
+final class UserDefaultsModel {
+  
+  @GraphUserDefaultsStored(key: "value") var value: Int = 0
+  @GraphUserDefaultsStored(key: "value2") var value2: String? = nil
+  @GraphUserDefaultsStored(key: "maxRetries") var maxRetries: Int = 3
+  
+}
 
 final class ImplicitInitializers {
   @GraphStored
