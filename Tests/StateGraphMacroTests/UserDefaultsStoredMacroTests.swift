@@ -10,7 +10,7 @@ final class UserDefaultsStoredMacroTests: XCTestCase {
     withMacroTesting(
       record: false,
       macros: [
-        "UserDefaultsStored": UserDefaultsStoredMacro.self,
+        "GraphUserDefaultsStored": UserDefaultsStoredMacro.self,
       ]
     ) {
       super.invokeTest()
@@ -22,7 +22,7 @@ final class UserDefaultsStoredMacroTests: XCTestCase {
       """
       final class Settings {
       
-        @UserDefaultsStored(key: "username")
+        @GraphUserDefaultsStored(key: "username")
         var username: String = "anonymous"
 
       }
@@ -51,7 +51,7 @@ final class UserDefaultsStoredMacroTests: XCTestCase {
       """
       final class Settings {
       
-        @UserDefaultsStored(suite: "com.example.app", key: "theme")
+        @GraphUserDefaultsStored(suite: "com.example.app", key: "theme")
         var theme: String = "light"
 
       }
@@ -82,7 +82,7 @@ final class UserDefaultsStoredMacroTests: XCTestCase {
       """
       final class Settings {
       
-        @UserDefaultsStored(key: "maxRetries")
+        @GraphUserDefaultsStored(key: "maxRetries")
         var maxRetries: Int = 3
 
       }
@@ -100,6 +100,58 @@ final class UserDefaultsStoredMacroTests: XCTestCase {
         }
 
         @GraphIgnored let $maxRetries: UserDefaultsStored<Int> = .init(group: "Settings", name: "maxRetries", key: "maxRetries", defaultValue: 3)
+
+      }
+      """
+    }
+  }
+  
+  func test_userdefaults_stored_requires_default_value() {
+    assertMacro {
+      """
+      final class Settings {
+      
+        @GraphUserDefaultsStored(key: "value")
+        var value: Int
+
+      }
+      """
+    } diagnostics: {
+      """
+      final class Settings {
+      
+        @GraphUserDefaultsStored(key: "value")
+        ╰─ 🛑 @UserDefaultsStored requires a default value
+        var value: Int
+
+      }
+      """
+    }
+  }
+  
+  func test_userdefaults_stored_optional_with_nil_default() {
+    assertMacro {
+      """
+      final class Settings {
+      
+        @GraphUserDefaultsStored(key: "optionalValue")
+        var optionalValue: String? = nil
+
+      }
+      """
+    } expansion: {
+      """
+      final class Settings {
+        var optionalValue: String? {
+          get {
+            return $optionalValue.wrappedValue
+          }
+          set {
+            $optionalValue.wrappedValue = newValue
+          }
+        }
+
+        @GraphIgnored let $optionalValue: UserDefaultsStored<String?> = .init(group: "Settings", name: "optionalValue", key: "optionalValue", defaultValue: nil)
 
       }
       """

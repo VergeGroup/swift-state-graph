@@ -109,6 +109,30 @@ extension Date: UserDefaultsStorable {
   }
 }
 
+extension Optional: UserDefaultsStorable where Wrapped: UserDefaultsStorable {
+  @_spi(Internal)
+  public static func getValue(from userDefaults: UserDefaults, forKey key: String, defaultValue: Self) -> Self {
+    if userDefaults.object(forKey: key) == nil {
+      return defaultValue
+    }
+    // Try to get the wrapped value using a temporary dummy value
+    // This is a workaround since we can't easily create a default Wrapped value
+    let tempValue = userDefaults.object(forKey: key)
+    if tempValue == nil {
+      return nil
+    }
+    return tempValue as? Wrapped
+  }
+  @_spi(Internal)
+  public func setValue(to userDefaults: UserDefaults, forKey key: String) {
+    if let value = self {
+      value.setValue(to: userDefaults, forKey: key)
+    } else {
+      userDefaults.removeObject(forKey: key)
+    }
+  }
+}
+
 //extension Array: UserDefaultsStorable where Element: UserDefaultsStorable {
 //  public func setValue(to userDefaults: UserDefaults, forKey key: String) {
 //    userDefaults.set(self, forKey: key)
