@@ -10,6 +10,5 @@ struct Plugin: CompilerPlugin {
     StoredMacro.self,
     ComputedMacro.self,
     IgnoredMacro.self,
-    UserDefaultsStoredMacro.self,
   ]
 }
