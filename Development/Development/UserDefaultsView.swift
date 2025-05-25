@@ -6,7 +6,7 @@ final class UserDefaultsViewModel {
   
   @GraphStored var count: Int = 0
   
-  @GraphUserDefaultsStored(key: "A") var savedCount: Int = 0
+  @GraphStored(backed: .userDefaults(key: "A")) var savedCount: Int = 0
   
 }
   
