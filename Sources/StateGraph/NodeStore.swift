@@ -33,7 +33,7 @@ public actor NodeStore {
 
   public func graphViz() -> String {
     func name(_ node: any TypeErasedNode) -> String {
-      return #""\#(node.info.id)_\#(node.info.typeName)""#
+      return #""\#(node.info.id)_\#(node.info.name ?? "noname")""#
     }
 
     let grouped = Dictionary(grouping: nodes.compactMap { $0.value }) { $0.info.group }
