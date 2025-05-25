@@ -244,6 +244,8 @@ struct UserDefaultsStoredTests {
       print("")
     }
     
+    try? await Task.sleep(for: .milliseconds(100))
+    
     #expect(weakNode == nil)
     
 

@@ -530,7 +530,7 @@ public final class Edge: CustomDebugStringConvertible {
   unowned let from: any TypeErasedNode
   unowned let to: any TypeErasedNode
   
-  private let lock: NodeLock = .init()
+  private let lock: OSAllocatedUnfairLock<Void> = .init()
   
   var isPending: Bool {
     _read {
