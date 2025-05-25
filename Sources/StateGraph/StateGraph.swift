@@ -291,7 +291,6 @@ public final class Computed<Value>: Node, Observable, CustomDebugStringConvertib
     descriptor: some ComputedDescriptor<Value>
   ) {
     self.info = .init(
-      type: Value.self,
       group: nil,
       name: name,
       id: makeUniqueNumber(),
@@ -332,7 +331,6 @@ public final class Computed<Value>: Node, Observable, CustomDebugStringConvertib
     rule: @escaping @Sendable (inout Context) -> Value
   ) {
     self.info = .init(
-      type: Value.self,
       group: nil,
       name: name,
       id: makeUniqueNumber(),
@@ -373,7 +371,6 @@ public final class Computed<Value>: Node, Observable, CustomDebugStringConvertib
     rule: @escaping @Sendable (inout Context) -> Value
   ) where Value: Equatable {
     self.info = .init(
-      type: Value.self,
       group: nil,
       name: name,
       id: makeUniqueNumber(),

@@ -255,7 +255,6 @@ public final class _Stored<Value, S: Storage<Value>>: Node, Observable, CustomDe
     storage: consuming S
   ) {
     self.info = .init(
-      type: Value.self,
       group: group,
       name: name,
       id: makeUniqueNumber(),
