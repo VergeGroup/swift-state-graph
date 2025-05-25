@@ -4,8 +4,19 @@ public actor NodeStore {
   public static let shared = NodeStore()
 
   private var nodes: ContiguousArray<WeakNode> = []
+  private var isEnabled: Bool = false
+  
+  public func enable() {
+    isEnabled = true
+  }
+  
+  public func disable() {
+    isEnabled = false
+    nodes.removeAll()
+  }
 
   func register(node: any TypeErasedNode) {
+    guard isEnabled else { return }
     nodes.append(.init(node))
     compact()  
   }
