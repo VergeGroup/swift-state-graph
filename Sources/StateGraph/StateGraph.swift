@@ -11,113 +11,17 @@ import Foundation.NSLock
 
 /// A node that functions as an endpoint in a Directed Acyclic Graph (DAG).
 ///
-/// `StoredNode` can have its value set directly from the outside, and changes to its value
+/// `Stored` can have its value set directly from the outside, and changes to its value
 /// automatically propagate to dependent nodes. This node doesn't perform any computations
-/// and serves purely as a value container.
+/// and serves purely as a value container with in-memory storage.
 ///
 /// - When value changes: Changes propagate to all dependent nodes, triggering recalculations
 /// - When value is accessed: Dependencies are recorded, automatically building the graph structure
-public final class Stored<Value>: Node, Observable, CustomDebugStringConvertible {
+public typealias Stored<Value> = _Stored<Value, InMemoryStorage<Value>>
 
-  public let lock: NodeLock
-
-  nonisolated(unsafe)
-    private var _value: Value
-
-  #if canImport(Observation)
-  @available(macOS 14.0, iOS 17.0, watchOS 10.0, tvOS 17.0, *)
-  private var observationRegistrar: ObservationRegistrar {
-    _observationRegistrar as! ObservationRegistrar
-  }
-  private let _observationRegistrar: (Any & Sendable)?
-  #endif
-
-  public var potentiallyDirty: Bool {
-    get {
-      return false
-    }
-    set {
-      fatalError()
-    }
-  }
-
-  public let info: NodeInfo
-
-  public var wrappedValue: Value {
-    _read {
-      
-#if canImport(Observation)
-      if #available(macOS 14.0, iOS 17.0, watchOS 10.0, tvOS 17.0, *) {
-        observationRegistrar.access(self, keyPath: \.self)
-      }
-#endif
-      
-      lock.lock()
-      defer { lock.unlock() }
-                
-      // record dependency
-        if let currentNode = TaskLocals.currentNode {
-          let edge = Edge(from: self, to: currentNode)
-          outgoingEdges.append(edge)
-          currentNode.incomingEdges.append(edge)
-        }
-      // record tracking
-      if let registration = TrackingRegistration.registration {
-        self.trackingRegistrations.insert(registration)
-      }
-      yield _value
-    }
-    _modify {
-
-#if canImport(Observation)
-      if #available(macOS 14.0, iOS 17.0, watchOS 10.0, tvOS 17.0, *) { 
-        observationRegistrar.willSet(self, keyPath: \.self)
-      }
-      
-      defer {
-        if #available(macOS 14.0, iOS 17.0, watchOS 10.0, tvOS 17.0, *) {
-          observationRegistrar.didSet(self, keyPath: \.self)
-        }
-      }
-#endif
-      
-      lock.lock()
-
-      yield &_value
-          
-      let _outgoingEdges = outgoingEdges
-      let _trackingRegistrations = trackingRegistrations
-      self.trackingRegistrations.removeAll()
-                           
-      lock.unlock()
-      
-        for registration in _trackingRegistrations {
-          registration.perform()
-        }
-
-        for edge in _outgoingEdges {
-          edge.isPending = true
-          edge.to.potentiallyDirty = true
-        }
-    }
-  }
-
-  public var incomingEdges: ContiguousArray<Edge> {
-    get {
-      fatalError()
-    }
-    set {
-      fatalError()
-    }
-  }
-
-  nonisolated(unsafe)
-  public var outgoingEdges: ContiguousArray<Edge> = []
-  
-  nonisolated(unsafe)
-  public var trackingRegistrations: Set<TrackingRegistration> = []
-
-  public init(
+extension _Stored where S == InMemoryStorage<Value> {
+  /// 便利な初期化メソッド（wrappedValue指定）
+  public convenience init(
     _ file: StaticString = #fileID,
     _ line: UInt = #line,
     _ column: UInt = #column,
@@ -125,53 +29,15 @@ public final class Stored<Value>: Node, Observable, CustomDebugStringConvertible
     name: String? = nil,
     wrappedValue: Value
   ) {
-    self.info = .init(
-      type: Value.self,
+    let storage = InMemoryStorage(initialValue: wrappedValue)
+    self.init(
+      file,
+      line,
+      column,
       group: group,
       name: name,
-      id: makeUniqueNumber(),
-      sourceLocation: .init(file: file, line: line, column: column)
+      storage: storage
     )
-    self.lock = sharedLock
-    self._value = wrappedValue
-
-    if #available(macOS 14.0, iOS 17.0, watchOS 10.0, tvOS 17.0, *) {
-      self._observationRegistrar = ObservationRegistrar()
-    } else {
-      self._observationRegistrar = nil
-    }
-
-    #if DEBUG
-    Task {
-      await NodeStore.shared.register(node: self)
-    }
-    #endif
-  }
-
-  deinit {
-    Log.generic.debug("Deinit Stored: \(self.info.name ?? "noname")")
-    for edge in outgoingEdges {
-      edge.to.incomingEdges.removeAll(where: { $0 === edge })
-    }
-    outgoingEdges.removeAll()
-  }
-
-  public func recomputeIfNeeded() {
-    // no operation
-  }
-
-  public var debugDescription: String {
-    "Stored<\(Value.self)>(id=\(info.id), name=\(info.name ?? "noname"), value=\(String(describing: _value)))"
-  }
-
-  borrowing public func withLock<Result, E>(
-    _ body: (inout sending Value) throws(E) -> sending Result
-  ) throws(E) -> sending Result where E : Error, Result : ~Copyable {
-    lock.lock()
-    defer {
-      lock.unlock()
-    }
-    return try body(&_value)
   }
 }
 
@@ -473,7 +339,7 @@ public final class Computed<Value>: Node, Observable, CustomDebugStringConvertib
       sourceLocation: .init(file: file, line: line, column: column)
     )
     self.descriptor = AnyComputedDescriptor(compute: rule, isEqual: { _, _ in false })      
-    self.lock = sharedLock
+    self.lock = .init()
 
     if #available(macOS 14.0, iOS 17.0, watchOS 10.0, tvOS 17.0, *) {
       self._observationRegistrar = ObservationRegistrar()
@@ -514,7 +380,7 @@ public final class Computed<Value>: Node, Observable, CustomDebugStringConvertib
       sourceLocation: .init(file: file, line: line, column: column)
     )
     self.descriptor = AnyComputedDescriptor(compute: rule, isEqual: { $0 == $1 })
-    self.lock = sharedLock
+    self.lock = .init()
 
     if #available(macOS 14.0, iOS 17.0, watchOS 10.0, tvOS 17.0, *) {
       self._observationRegistrar = ObservationRegistrar()
@@ -664,7 +530,7 @@ public final class Edge: CustomDebugStringConvertible {
   unowned let from: any TypeErasedNode
   unowned let to: any TypeErasedNode
   
-  private let lock: NodeLock = sharedLock
+  private let lock: OSAllocatedUnfairLock<Void> = .init()
   
   var isPending: Bool {
     _read {
@@ -697,5 +563,3 @@ public final class Edge: CustomDebugStringConvertible {
 }
 
 public typealias NodeLock = NSRecursiveLock
-
-let sharedLock: NodeLock = NodeLock()

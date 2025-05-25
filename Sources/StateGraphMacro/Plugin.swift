@@ -7,8 +7,8 @@ import SwiftSyntaxMacros
 struct Plugin: CompilerPlugin {
   let providingMacros: [Macro.Type] = [
     GraphViewMacro.self,
-    StoredMacro.self,
     ComputedMacro.self,
     IgnoredMacro.self,
+    UnifiedStoredMacro.self,
   ]
 }

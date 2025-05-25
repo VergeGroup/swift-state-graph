@@ -50,6 +50,31 @@ profile.email = "john@example.com"
 profile.age = 30
 ```
 
+### Persistent Storage
+
+`@GraphStored` properties can also use persistent backing storage like UserDefaults:
+
+```swift
+final class AppSettings {
+  // This value persists across app launches
+  @GraphStored(backed: .userDefaults(key: "userName"))
+  var userName: String = ""
+  
+  // Computed properties work with persistent storage too
+  @GraphComputed
+  var welcomeMessage: String
+  
+  init() {
+    self.$welcomeMessage = .init { [$userName] _ in
+      let name = $userName.wrappedValue
+      return name.isEmpty ? "Welcome!" : "Welcome, \(name)!"
+    }
+  }
+}
+```
+
+See <doc:Backing-Storage> for comprehensive coverage of storage options.
+
 ### Characteristics of Stored Nodes
 
 - **Mutable**: Values can be changed from outside

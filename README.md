@@ -8,6 +8,7 @@
 - [Core Concepts](#core-concepts)
 - [Installation](#installation)
 - [Basic Usage](#basic-usage)
+- [Backing Storage](#backing-storage)
 - [Describing Models](#describing-models)
 - [SwiftUI Integration](#swiftui-integration)
 - [UIKit Integration](#uikit-integration)
@@ -127,6 +128,115 @@ final class CounterViewModel {
   func increment() {
     count += 1
   }
+}
+```
+
+## Backing Storage
+
+Swift State Graph provides flexible backing storage options for your stored properties, allowing you to persist data beyond in-memory storage.
+
+### In-Memory Storage (Default)
+
+By default, `@GraphStored` properties use in-memory storage:
+
+```swift
+final class ViewModel {
+  @GraphStored var count: Int = 0  // In-memory storage
+}
+```
+
+### UserDefaults Storage
+
+You can back your stored properties with UserDefaults for automatic persistence:
+
+```swift
+final class SettingsViewModel {
+  // Basic UserDefaults storage
+  @GraphStored(backed: .userDefaults(key: "theme")) 
+  var theme: String = "light"
+  
+  // UserDefaults with custom suite
+  @GraphStored(backed: .userDefaults(suite: "com.myapp.settings", key: "apiUrl"))
+  var apiUrl: String = "https://api.example.com"
+  
+  // All GraphStored features work with backing storage
+  @GraphComputed
+  var isDarkMode: Bool
+  
+  init() {
+    self.$isDarkMode = .init { [$theme] _ in
+      $theme.wrappedValue == "dark"
+    }
+  }
+}
+```
+
+### Reactive Persistence
+
+Backing storage integrates seamlessly with the reactive system:
+
+```swift
+final class UserPreferencesViewModel {
+  @GraphStored(backed: .userDefaults(key: "userName"))
+  var userName: String = ""
+  
+  @GraphStored(backed: .userDefaults(key: "notificationsEnabled"))
+  var notificationsEnabled: Bool = true
+  
+  @GraphComputed
+  var welcomeMessage: String
+  
+  init() {
+    self.$welcomeMessage = .init { [$userName] _ in
+      let name = $userName.wrappedValue
+      return name.isEmpty ? "Welcome!" : "Welcome, \(name)!"
+    }
+  }
+  
+  // Changes are automatically persisted to UserDefaults
+  func updateUserName(_ name: String) {
+    userName = name  // Automatically saved to UserDefaults
+  }
+}
+```
+
+### SwiftUI Integration with Backing Storage
+
+Backing storage works seamlessly with SwiftUI bindings:
+
+```swift
+struct SettingsView: View {
+  let viewModel: SettingsViewModel
+  
+  var body: some View {
+    Form {
+      Section("Appearance") {
+        Picker("Theme", selection: viewModel.$theme.binding) {
+          Text("Light").tag("light")
+          Text("Dark").tag("dark")
+        }
+        
+        Text("Dark mode: \(viewModel.isDarkMode ? "On" : "Off")")
+      }
+      
+      Section("Network") {
+        TextField("API URL", text: viewModel.$apiUrl.binding)
+      }
+    }
+    // Changes are automatically persisted!
+  }
+}
+```
+
+### Storage Types
+
+Swift State Graph supports multiple backing storage types through the `GraphStorageBacking` enum:
+
+```swift
+public enum GraphStorageBacking {
+  case memory                                          // In-memory (default)
+  case userDefaults(key: String)                      // UserDefaults with key
+  case userDefaults(suite: String, key: String)       // UserDefaults with suite
 }
 ```
 
@@ -268,7 +378,7 @@ Pass your GraphObject into the SwiftUI environment using the standard `.environm
 
 ```swift
 struct ParentView: View {
-  @State private var appState = AppState()
+  let appState: AppState
   
   var body: some View {
     VStack {
@@ -339,7 +449,7 @@ final class ShoppingCartModel: GraphObject {
 }
 
 struct ShoppingCartApp: View {
-  @State private var cartModel = ShoppingCartModel()
+  let cartModel: ShoppingCartModel
   
   var body: some View {
     NavigationView {
@@ -776,7 +886,7 @@ import SwiftUI
 import Observation
 
 struct ContentView: View {
-  @State private var viewModel = UserViewModel()
+  let viewModel: UserViewModel
   
   var body: some View {
     VStack {
@@ -805,7 +915,7 @@ import SwiftUI
 import StateGraph
 
 struct ContentView: View {
-  @State private var viewModel = UserViewModel()
+  let viewModel: UserViewModel
   
   var body: some View {
     VStack {

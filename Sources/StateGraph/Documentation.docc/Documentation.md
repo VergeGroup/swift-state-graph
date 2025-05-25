@@ -57,6 +57,11 @@ final class CounterViewModel {
 - ``GraphStored``
 - ``GraphComputed``
 
+### Persistence and Storage
+
+- <doc:Backing-Storage>
+- ``GraphStorageBacking``
+
 ### Building Reactive Models
 
 - <doc:Describing-Models>

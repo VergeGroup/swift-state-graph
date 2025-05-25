@@ -234,7 +234,7 @@ import SwiftUI
 import Observation
 
 struct ContentView: View {
-  @State private var viewModel = UserViewModel()
+  let viewModel: UserViewModel
   
   var body: some View {
     VStack {
@@ -268,7 +268,7 @@ import SwiftUI
 import StateGraph
 
 struct ContentView: View {
-  @State private var viewModel = UserViewModel()
+  let viewModel: UserViewModel
   
   var body: some View {
     VStack {
