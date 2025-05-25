@@ -4,8 +4,33 @@ import SwiftUI
 
 // MARK: - GraphObject Protocol
 
-/// A protocol that marks objects as compatible with StateGraph's Environment system.
-/// Objects conforming to this protocol can be used with @Environment in SwiftUI.
+/// A marker protocol that enables objects to be propagated through SwiftUI's Environment system.
+/// This protocol itself has no functional meaning and serves only as a marker to indicate
+/// compatibility with SwiftUI's @Environment property wrapper.
+///
+/// # How to use:
+/// ```swift
+/// class MyModel: GraphObject {
+///   @GraphStored var count: Int = 0
+/// }
+///
+/// struct ContentView: View {
+///   let model = MyModel()
+///   
+///   var body: some View {
+///     ChildView()
+///       .environment(model)
+///   }
+/// }
+///
+/// struct ChildView: View {
+///   @Environment(MyModel.self) var model
+///   
+///   var body: some View {
+///     Text("\(model.count)")
+///   }
+/// }
+/// ```
 @available(iOS 17.0, *)
 public protocol GraphObject: Observable {}
 
