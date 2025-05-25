@@ -2,6 +2,38 @@
 
 import SwiftUI
 
+// MARK: - GraphObject Protocol
+
+/// A marker protocol that enables objects to be propagated through SwiftUI's Environment system.
+/// This protocol itself has no functional meaning and serves only as a marker to indicate
+/// compatibility with SwiftUI's @Environment property wrapper.
+///
+/// # How to use:
+/// ```swift
+/// class MyModel: GraphObject {
+///   @GraphStored var count: Int = 0
+/// }
+///
+/// struct ContentView: View {
+///   let model = MyModel()
+///   
+///   var body: some View {
+///     ChildView()
+///       .environment(model)
+///   }
+/// }
+///
+/// struct ChildView: View {
+///   @Environment(MyModel.self) var model
+///   
+///   var body: some View {
+///     Text("\(model.count)")
+///   }
+/// }
+/// ```
+@available(iOS 17.0, *)
+public protocol GraphObject: Observable {}
+
 extension Stored {
   
   /**
@@ -121,4 +153,48 @@ private struct ObjectEdge<O>: DynamicProperty {
 }
 
 #endif
+
+@available(iOS 17, *)
+#Preview {
+  
+  class Model: GraphObject {
+    
+    @GraphStored var count: Int = 0
+        
+    init() {
+      
+    }
+  }
+  
+  struct ChildView: View {
+    
+    @Environment(Model.self) var model
+    
+    var body: some View {
+      let _ = Self._printChanges()
+      Text("\(model.count)")
+    }
+  }
+  
+  struct ParentView: View {
+    
+    @State var model: Model = .init()
+    
+    var body: some View {  
+      VStack {
+        ChildView()
+          .environment(model)
+        
+        Button("Increment") {
+          model.count += 1
+        }
+      }
+    }
+    
+  }
+  
+  return ParentView()
+  
+}
+
 #endif

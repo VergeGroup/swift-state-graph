@@ -235,6 +235,155 @@ struct CounterView: View {
 }
 ```
 
+### Environment Integration with GraphObject
+
+Swift State Graph provides seamless integration with SwiftUI's Environment system through the `GraphObject` protocol. This allows you to pass state objects through the SwiftUI view hierarchy just like native Observable objects.
+
+#### Defining a GraphObject
+
+To make your state object compatible with SwiftUI's Environment, conform to the `GraphObject` protocol:
+
+```swift
+import SwiftUI
+import StateGraph
+
+@available(iOS 17.0, *)
+final class AppState: GraphObject {
+  @GraphStored var count: Int = 0
+  @GraphStored var userName: String = ""
+  
+  @GraphComputed var displayName: String
+  
+  init() {
+    self.$displayName = .init { [$userName] _ in
+      $userName.wrappedValue.isEmpty ? "Anonymous" : $userName.wrappedValue
+    }
+  }
+}
+```
+
+#### Injecting State into the Environment
+
+Pass your GraphObject into the SwiftUI environment using the standard `.environment()` modifier:
+
+```swift
+struct ParentView: View {
+  @State private var appState = AppState()
+  
+  var body: some View {
+    VStack {
+      ChildView()
+      
+      Button("Increment") {
+        appState.count += 1
+      }
+    }
+    .environment(appState) // Inject the state object
+  }
+}
+```
+
+#### Accessing State from Child Views
+
+Child views can access the injected state using the standard `@Environment` property wrapper:
+
+```swift
+struct ChildView: View {
+  @Environment(AppState.self) private var appState
+  
+  var body: some View {
+    VStack {
+      Text("Count: \(appState.count)")
+      Text("User: \(appState.displayName)")
+      
+      TextField("Enter name", text: appState.$userName.binding)
+    }
+  }
+}
+```
+
+#### Key Benefits
+
+- **Standard SwiftUI patterns**: Works exactly like Observable objects
+- **Automatic reactivity**: Changes automatically update the UI
+- **Computed properties**: Derived state updates automatically when dependencies change
+- **Type safety**: Full type checking and autocomplete support
+- **Performance**: Efficient dependency tracking and minimal re-renders
+
+#### Complete Example
+
+```swift
+@available(iOS 17.0, *)
+@Observable
+final class ShoppingCartModel: GraphObject {
+  @GraphStored var items: [CartItem] = []
+  @GraphStored var taxRate: Double = 0.08
+  
+  @GraphComputed var subtotal: Double
+  @GraphComputed var tax: Double
+  @GraphComputed var total: Double
+  
+  init() {
+    self.$subtotal = .init { [$items] _ in
+      $items.wrappedValue.reduce(0) { $0 + $1.price }
+    }
+    
+    self.$tax = .init { [$subtotal, $taxRate] _ in
+      $subtotal.wrappedValue * $taxRate.wrappedValue
+    }
+    
+    self.$total = .init { [$subtotal, $tax] _ in
+      $subtotal.wrappedValue + $tax.wrappedValue
+    }
+  }
+}
+
+struct ShoppingCartApp: View {
+  @State private var cartModel = ShoppingCartModel()
+  
+  var body: some View {
+    NavigationView {
+      CartView()
+        .environment(cartModel)
+    }
+  }
+}
+
+struct CartView: View {
+  @Environment(ShoppingCartModel.self) private var cart
+  
+  var body: some View {
+    List {
+      ForEach(cart.items) { item in
+        Text(item.name)
+      }
+      
+      Section("Summary") {
+        HStack {
+          Text("Subtotal")
+          Spacer()
+          Text("$\(cart.subtotal, specifier: "%.2f")")
+        }
+        
+        HStack {
+          Text("Tax")
+          Spacer()
+          Text("$\(cart.tax, specifier: "%.2f")")
+        }
+        
+        HStack {
+          Text("Total")
+          Spacer()
+          Text("$\(cart.total, specifier: "%.2f")")
+        }
+      }
+    }
+  }
+}
+```
+
+**Note**: GraphObject requires iOS 17.0 or later as it builds on Swift's `Observable` protocol.
+
 ## UIKit Integration
 
 While Swift State Graph doesn't have direct UIKit-specific APIs, its reactive nature makes it easy to use with UIKit through the `withGraphTracking` function:
