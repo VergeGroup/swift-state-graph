@@ -114,11 +114,35 @@ struct CounterView: View {
 - **Performance**: Only recomputes what's necessary, when it's needed
 - **Declarative**: Your computed properties clearly express what they depend on
 
+## Bonus: Persistent Storage
+
+Want your state to persist across app launches? Use backing storage:
+
+```swift
+final class SettingsViewModel {
+  // This value persists to UserDefaults automatically
+  @GraphStored(backed: .userDefaults(key: "theme"))
+  var theme: String = "light"
+  
+  @GraphComputed
+  var isDarkMode: Bool
+  
+  init() {
+    self.$isDarkMode = .init { [$theme] _ in
+      $theme.wrappedValue == "dark"
+    }
+  }
+}
+```
+
+Changes to `theme` are automatically saved to UserDefaults and restored when your app launches!
+
 ## Next Steps
 
 Now that you've seen the basics, explore:
 
 - <doc:Core-Concepts> - Understand stored vs computed nodes in depth
+- <doc:Backing-Storage> - Learn about persistent storage options
 - <doc:Describing-Models> - Build more complex reactive models
 - <doc:SwiftUI-Integration> - Learn advanced SwiftUI patterns
 - <doc:Migration-from-Observable> - Migrate from `@Observable` if you're already using it

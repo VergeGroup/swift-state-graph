@@ -263,6 +263,168 @@ final class UnifiedStoredMacroTests: XCTestCase {
     }
   }
 
+  // MARK: - Additional UserDefaults Tests (Edge Cases)
+  
+  func test_userdefaults_storage_with_all_parameters() {
+    assertMacro {
+      """
+      final class Settings {
+      
+        @GraphStored(backed: .userDefaults(suite: "com.example.app", key: "api_url", name: "customApiUrl"))
+        var apiUrl: String = "https://default.com"
+
+      }
+      """
+    } expansion: {
+      """
+      final class Settings {
+        var apiUrl: String {
+          get {
+            return $apiUrl.wrappedValue
+          }
+          set {
+            $apiUrl.wrappedValue = newValue
+          }
+        }
+
+        @GraphIgnored let $apiUrl: UserDefaultsStored<String> = .init(group: "Settings", name: "customApiUrl", suite: "com.example.app", key: "api_url", defaultValue: "https://default.com")
+
+      }
+      """
+    }
+  }
+  
+  func test_userdefaults_storage_different_types() {
+    assertMacro {
+      """
+      final class Settings {
+      
+        @GraphStored(backed: .userDefaults(key: "count"))
+        var count: Int = 0
+        
+        @GraphStored(backed: .userDefaults(key: "isEnabled"))
+        var isEnabled: Bool = false
+        
+        @GraphStored(backed: .userDefaults(key: "temperature"))
+        var temperature: Double = 0.0
+
+      }
+      """
+    } expansion: {
+             """
+       final class Settings {
+         var count: Int {
+           get {
+             return $count.wrappedValue
+           }
+           set {
+             $count.wrappedValue = newValue
+           }
+         }
+
+         @GraphIgnored let $count: UserDefaultsStored<Int> = .init(group: "Settings", name: "count", key: "count", defaultValue: 0)
+
+         var isEnabled: Bool {
+           get {
+             return $isEnabled.wrappedValue
+           }
+           set {
+             $isEnabled.wrappedValue = newValue
+           }
+         }
+
+         @GraphIgnored let $isEnabled: UserDefaultsStored<Bool> = .init(group: "Settings", name: "isEnabled", key: "isEnabled", defaultValue: false)
+
+         var temperature: Double {
+           get {
+             return $temperature.wrappedValue
+           }
+           set {
+             $temperature.wrappedValue = newValue
+           }
+         }
+
+         @GraphIgnored let $temperature: UserDefaultsStored<Double> = .init(group: "Settings", name: "temperature", key: "temperature", defaultValue: 0.0)
+
+       }
+       """
+    }
+  }
+
+  func test_userdefaults_storage_access_control() {
+    assertMacro {
+      """
+      final class Settings {
+      
+        @GraphStored(backed: .userDefaults(key: "publicValue"))
+        public var publicValue: String = "default"
+        
+        @GraphStored(backed: .userDefaults(key: "privateValue"))
+        private var privateValue: String = "default"
+
+      }
+      """
+    } expansion: {
+             """
+       final class Settings {
+         public var publicValue: String {
+           get {
+             return $publicValue.wrappedValue
+           }
+           set {
+             $publicValue.wrappedValue = newValue
+           }
+         }
+
+         @GraphIgnored
+           public let $publicValue: UserDefaultsStored<String> = .init(group: "Settings", name: "publicValue", key: "publicValue", defaultValue: "default")
+
+         private var privateValue: String {
+           get {
+             return $privateValue.wrappedValue
+           }
+           set {
+             $privateValue.wrappedValue = newValue
+           }
+         }
+
+         @GraphIgnored
+           private let $privateValue: UserDefaultsStored<String> = .init(group: "Settings", name: "privateValue", key: "privateValue", defaultValue: "default")
+
+       }
+       """
+    }
+  }
+
+  func test_userdefaults_storage_in_struct() {
+    assertMacro {
+      """
+      struct Config {
+      
+        @GraphStored(backed: .userDefaults(key: "setting"))
+        var setting: String = "default"
+
+      }
+      """
+    } expansion: {
+      """
+      struct Config {
+        var setting: String {
+          get {
+            return $setting.wrappedValue
+          }
+          set {
+            $setting.wrappedValue = newValue
+          }
+        }
+
+        @GraphIgnored let $setting: UserDefaultsStored<String> = .init(group: "", name: "setting", key: "setting", defaultValue: "default")
+
+      }
+      """
+    }
+  }
+
   // MARK: - Legacy Tests (from MacroTests.swift)
   
   func test_optional_stored_property_with_init() {

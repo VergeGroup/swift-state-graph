@@ -41,7 +41,7 @@ final class CounterViewModel {
 }
 
 struct CounterView: View {
-  @State private var viewModel = CounterViewModel()
+  let viewModel: CounterViewModel
 
   var body: some View {
     VStack(spacing: 20) {
@@ -86,7 +86,7 @@ final class FormViewModel {
 }
 
 struct FormView: View {
-  @State private var viewModel = FormViewModel()
+  let viewModel: FormViewModel
 
   var body: some View {
     Form {
@@ -122,7 +122,7 @@ Swift State Graph nodes automatically conform to SwiftUI's `Observable` protocol
 ```swift
 // On iOS 17+ / macOS 14+, nodes are automatically observable
 struct UserProfileView: View {
-  @State private var viewModel = UserProfileViewModel()
+  let viewModel: UserProfileViewModel
 
   var body: some View {
     // SwiftUI automatically observes viewModel properties
@@ -182,7 +182,7 @@ final class BookLibraryViewModel {
 }
 
 struct LibraryView: View {
-  @State private var viewModel = BookLibraryViewModel()
+  let viewModel: BookLibraryViewModel
 
   var body: some View {
     NavigationSplitView {
@@ -256,7 +256,7 @@ final class TodoListViewModel {
 }
 
 struct TodoListView: View {
-  @State private var viewModel = TodoListViewModel()
+  let viewModel: TodoListViewModel
   @State private var newTodoText = ""
 
   var body: some View {
@@ -311,7 +311,7 @@ final class AppState {
 }
 
 struct ContentView: View {
-  @State private var appState = AppState()
+  let appState: AppState
 
   var body: some View {
     TabView(selection: appState.$selectedTab.binding) {
@@ -347,7 +347,7 @@ extension EnvironmentValues {
 
 // Root view
 struct MyApp: App {
-  @State private var appState = AppState()
+  let appState: AppState
 
   var body: some Scene {
     WindowGroup {
@@ -427,7 +427,7 @@ Swift State Graph works seamlessly with SwiftUI animations:
 
 ```swift
 struct AnimatedCounterView: View {
-  @State private var viewModel = CounterViewModel()
+  let viewModel: CounterViewModel
 
   var body: some View {
     VStack {
