@@ -220,6 +220,12 @@ public final class Computed<Value>: Node, Observable, CustomDebugStringConvertib
         lock.unlock()
         return 
       }
+            
+      let _outgoingEdges = outgoingEdges
+      let _trackingRegistrations = trackingRegistrations
+      trackingRegistrations.removeAll()
+      
+      lock.unlock()
       
 #if canImport(Observation)
       if #available(macOS 14.0, iOS 17.0, watchOS 10.0, tvOS 17.0, *) {
@@ -227,19 +233,13 @@ public final class Computed<Value>: Node, Observable, CustomDebugStringConvertib
       }
 #endif
       
-      let _outgoingEdges = outgoingEdges
-      let _trackingRegistrations = trackingRegistrations
-      trackingRegistrations.removeAll()
+      for edge in _outgoingEdges {
+        edge.to.potentiallyDirty = true
+      }
       
-      lock.unlock()
-      
-        for edge in _outgoingEdges {
-          edge.to.potentiallyDirty = true
-        }
-
-        for registration in _trackingRegistrations {
-          registration.perform()
-        }
+      for registration in _trackingRegistrations {
+        registration.perform()
+      }
             
     }
   }
