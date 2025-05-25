@@ -53,7 +53,7 @@ public struct InMemoryStorage<Value>: Storage {
     
 }
 
-public struct UserDefaultsStorage<Value: UserDefaultsStorable>: Storage, Sendable {
+public final class UserDefaultsStorage<Value: UserDefaultsStorable>: Storage, Sendable {
   
   nonisolated(unsafe)
   private let userDefaults: UserDefaults
@@ -72,6 +72,9 @@ public struct UserDefaultsStorage<Value: UserDefaultsStorable>: Storage, Sendabl
     }
   }
   
+  nonisolated(unsafe)
+  private var previousValue: Value?
+  
   public init(
     userDefaults: UserDefaults,
     key: String,
@@ -82,15 +85,29 @@ public struct UserDefaultsStorage<Value: UserDefaultsStorable>: Storage, Sendabl
     self.defaultValue = defaultValue
   }
      
-  public mutating func loaded(context: StorageContext) {
+  public func loaded(context: StorageContext) {
+    
+    previousValue = value
+    
     subscription = NotificationCenter.default
       .addObserver(
         forName: UserDefaults.didChangeNotification,
         object: userDefaults,
-        queue: nil,
-        using: { notification in
-          // TODO: filter
-          context.notifyStorageUpdated()
+        queue: .main,
+        using: { [weak self] _ in
+          
+          MainActor.assumeIsolated {
+            
+            guard let self else { return }
+            
+            guard self.previousValue != self.value else {
+              return
+            }
+            
+            self.previousValue = self.value
+            
+            context.notifyStorageUpdated()
+          }
         }
       )
   }  
@@ -103,7 +120,7 @@ public struct UserDefaultsStorage<Value: UserDefaultsStorable>: Storage, Sendabl
 
 // MARK: - Base Stored Node
 
-public final class _StoredNode<Value, S: Storage<Value>>: Node, Observable, CustomDebugStringConvertible {
+public final class _Stored<Value, S: Storage<Value>>: Node, Observable, CustomDebugStringConvertible {
   
   public let lock: NodeLock
   
@@ -192,6 +209,9 @@ public final class _StoredNode<Value, S: Storage<Value>>: Node, Observable, Cust
   private func notifyStorageUpdated() {
 #if canImport(Observation)
     if #available(macOS 14.0, iOS 17.0, watchOS 10.0, tvOS 17.0, *) {
+      // Workaround: SwiftUI will not trigger update if we call only didSet.
+      // as here is where the value already updated.
+      observationRegistrar.willSet(self, keyPath: \.self)
       observationRegistrar.didSet(self, keyPath: \.self)
     }
 #endif
@@ -279,7 +299,7 @@ public final class _StoredNode<Value, S: Storage<Value>>: Node, Observable, Cust
   
   public var debugDescription: String {
     let value = storage.value
-    return "StoredNode<\(Value.self)>(id=\(info.id), name=\(info.name ?? "noname"), value=\(String(describing: value)))"
+    return "Stored<\(Value.self)>(id=\(info.id), name=\(info.name ?? "noname"), value=\(String(describing: value)))"
   }
   
   /// Accesses the value with thread-safe locking.

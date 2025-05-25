@@ -36,6 +36,12 @@ struct ContentView: View {
         } label: { 
           Text("Database memory check") 
         }
+        
+        NavigationLink {
+          UserDefaultsView()
+        } label: { 
+          Text("UserDefaults") 
+        }
       }
     }
   }

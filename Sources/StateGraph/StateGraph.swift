@@ -17,9 +17,9 @@ import Foundation.NSLock
 ///
 /// - When value changes: Changes propagate to all dependent nodes, triggering recalculations
 /// - When value is accessed: Dependencies are recorded, automatically building the graph structure
-public typealias Stored<Value> = _StoredNode<Value, InMemoryStorage<Value>>
+public typealias Stored<Value> = _Stored<Value, InMemoryStorage<Value>>
 
-extension _StoredNode where S == InMemoryStorage<Value> {
+extension _Stored where S == InMemoryStorage<Value> {
   /// 便利な初期化メソッド（wrappedValue指定）
   public convenience init(
     _ file: StaticString = #fileID,

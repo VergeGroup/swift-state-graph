@@ -3,7 +3,7 @@ import Foundation
 // MARK: - UserDefaultsStored
 
 /// A protocol for types that can be stored in UserDefaults
-public protocol UserDefaultsStorable: Sendable {
+public protocol UserDefaultsStorable: Equatable, Sendable {
   @_spi(Internal)
   static func getValue(from userDefaults: UserDefaults, forKey key: String, defaultValue: Self) -> Self
   @_spi(Internal)
@@ -153,9 +153,9 @@ extension Optional: UserDefaultsStorable where Wrapped: UserDefaultsStorable {
 ///
 /// - When value changes: Changes propagate to all dependent nodes and are persisted to UserDefaults
 /// - When value is accessed: Dependencies are recorded and the value is loaded from UserDefaults if needed
-public typealias UserDefaultsStored<Value: UserDefaultsStorable> = _StoredNode<Value, UserDefaultsStorage<Value>>
+public typealias UserDefaultsStored<Value: UserDefaultsStorable> = _Stored<Value, UserDefaultsStorage<Value>>
   
-extension _StoredNode where S == UserDefaultsStorage<Value> {
+extension _Stored where S == UserDefaultsStorage<Value> {
   /// Initializes a UserDefaultsStored node with standard UserDefaults.
   ///
   /// - Parameters:

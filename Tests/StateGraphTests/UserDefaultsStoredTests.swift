@@ -28,7 +28,7 @@ struct UserDefaultsStoredTests {
       key: key,
       defaultValue: defaultValue
     )
-    return _StoredNode(
+    return _Stored(
       name: name,
       storage: storage
     )
