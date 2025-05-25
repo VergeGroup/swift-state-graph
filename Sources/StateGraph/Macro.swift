@@ -1,30 +1,43 @@
 
-//@attached(extension, conformances: GraphViewType)
-//@attached(memberAttribute)
-//public macro GraphView() = #externalMacro(module: "StateGraphMacro", type: "GraphViewMacro")
-
-@attached(accessor, names: named(init), named(get), named(set))
-@attached(peer, names: prefixed(`$`))
-public macro GraphStored() = #externalMacro(module: "StateGraphMacro", type: "StoredMacro")
 
 @attached(accessor, names: named(get), named(set))
 @attached(peer, names: prefixed(`$`))
 public macro GraphComputed() = #externalMacro(module: "StateGraphMacro", type: "ComputedMacro")
 
-@attached(accessor, names: named(get), named(set))
-@attached(peer, names: prefixed(`$`))
-public macro GraphUserDefaultsStored(key: String) = #externalMacro(module: "StateGraphMacro", type: "UserDefaultsStoredMacro")
 
-@attached(accessor, names: named(get), named(set))
-@attached(peer, names: prefixed(`$`))
-public macro GraphUserDefaultsStored(suite: String, key: String) = #externalMacro(module: "StateGraphMacro", type: "UserDefaultsStoredMacro")
-
-@attached(accessor, names: named(get), named(set))
-@attached(peer, names: prefixed(`$`))
-public macro GraphUserDefaultsStored(suite: String, key: String, name: String) = #externalMacro(module: "StateGraphMacro", type: "UserDefaultsStoredMacro")
 
 @attached(peer)
 public macro GraphIgnored() = #externalMacro(module: "StateGraphMacro", type: "IgnoredMacro")
+
+// MARK: - Backing Storage Types
+
+/// Represents different types of backing storage for GraphStored properties
+public enum GraphStorageBacking {
+  /// In-memory storage (default)
+  case memory
+  /// UserDefaults storage with a key
+  case userDefaults(key: String)
+  /// UserDefaults storage with suite and key
+  case userDefaults(suite: String, key: String)
+  /// UserDefaults storage with suite, key, and name
+  case userDefaults(suite: String, key: String, name: String)
+}
+
+// MARK: - Unified GraphStored Macro
+
+/// Unified macro that supports different backing storage types
+/// 
+/// Usage:
+/// ```swift
+/// @GraphStored var count: Int = 0  // Memory storage (default)
+/// @GraphStored(backed: .userDefaults(key: "count")) var storedCount: Int = 0
+/// @GraphStored(backed: .userDefaults(suite: "com.app", key: "theme")) var theme: String = "light"
+/// ```
+@attached(accessor, names: named(init), named(get), named(set))
+@attached(peer, names: prefixed(`$`))
+public macro GraphStored(backed: GraphStorageBacking = .memory) = #externalMacro(module: "StateGraphMacro", type: "UnifiedStoredMacro")
+
+
 
 @_exported import os.lock
 
@@ -34,9 +47,26 @@ import os.lock
 
 final class UserDefaultsModel {
   
-  @GraphUserDefaultsStored(key: "value") var value: Int = 0
-  @GraphUserDefaultsStored(key: "value2") var value2: String? = nil
-  @GraphUserDefaultsStored(key: "maxRetries") var maxRetries: Int = 3
+  @GraphStored(backed: .userDefaults(key: "value")) var value: Int = 0
+  @GraphStored(backed: .userDefaults(key: "value2")) var value2: String? = nil
+  @GraphStored(backed: .userDefaults(key: "maxRetries")) var maxRetries: Int = 3
+  
+}
+
+// MARK: - Unified Syntax Demo
+
+final class UnifiedSyntaxDemo {
+  
+  // Memory storage (default)
+  @GraphStored var count: Int = 0
+  @GraphStored var name: String?
+  
+  // UserDefaults storage
+  @GraphStored(backed: .userDefaults(key: "theme")) var theme: String = "light"
+  @GraphStored(backed: .userDefaults(key: "isEnabled")) var isEnabled: Bool = true
+  
+  // UserDefaults with suite
+  @GraphStored(backed: .userDefaults(suite: "com.example.app", key: "apiUrl")) var apiUrl: String = "https://api.example.com"
   
 }
 
@@ -51,9 +81,7 @@ final class ImplicitInitializers {
   weak var weak_object: AnyObject?
   
   static func run() {
-    let obj = ImplicitInitializers()
-    
-
+    _ = ImplicitInitializers()
   }
 }
 

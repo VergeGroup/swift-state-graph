@@ -339,7 +339,7 @@ public final class Computed<Value>: Node, Observable, CustomDebugStringConvertib
       sourceLocation: .init(file: file, line: line, column: column)
     )
     self.descriptor = AnyComputedDescriptor(compute: rule, isEqual: { _, _ in false })      
-    self.lock = sharedLock
+    self.lock = .init()
 
     if #available(macOS 14.0, iOS 17.0, watchOS 10.0, tvOS 17.0, *) {
       self._observationRegistrar = ObservationRegistrar()
@@ -380,7 +380,7 @@ public final class Computed<Value>: Node, Observable, CustomDebugStringConvertib
       sourceLocation: .init(file: file, line: line, column: column)
     )
     self.descriptor = AnyComputedDescriptor(compute: rule, isEqual: { $0 == $1 })
-    self.lock = sharedLock
+    self.lock = .init()
 
     if #available(macOS 14.0, iOS 17.0, watchOS 10.0, tvOS 17.0, *) {
       self._observationRegistrar = ObservationRegistrar()
@@ -530,7 +530,7 @@ public final class Edge: CustomDebugStringConvertible {
   unowned let from: any TypeErasedNode
   unowned let to: any TypeErasedNode
   
-  private let lock: NodeLock = sharedLock
+  private let lock: NodeLock = .init()
   
   var isPending: Bool {
     _read {
@@ -563,5 +563,3 @@ public final class Edge: CustomDebugStringConvertible {
 }
 
 public typealias NodeLock = NSRecursiveLock
-
-let sharedLock: NodeLock = NodeLock()

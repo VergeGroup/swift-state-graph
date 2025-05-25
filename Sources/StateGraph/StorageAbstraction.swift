@@ -93,21 +93,18 @@ public final class UserDefaultsStorage<Value: UserDefaultsStorable>: Storage, Se
       .addObserver(
         forName: UserDefaults.didChangeNotification,
         object: userDefaults,
-        queue: .main,
-        using: { [weak self] _ in
+        queue: nil,
+        using: { [weak self] _ in                      
+          guard let self else { return }
           
-          MainActor.assumeIsolated {
-            
-            guard let self else { return }
-            
-            guard self.previousValue != self.value else {
-              return
-            }
-            
-            self.previousValue = self.value
-            
-            context.notifyStorageUpdated()
+          let value = self.value
+          guard self.previousValue != value else {
+            return
           }
+          
+          self.previousValue = value
+          
+          context.notifyStorageUpdated()
         }
       )
   }  
@@ -264,7 +261,7 @@ public final class _Stored<Value, S: Storage<Value>>: Node, Observable, CustomDe
       id: makeUniqueNumber(),
       sourceLocation: .init(file: file, line: line, column: column)
     )
-    self.lock = sharedLock
+    self.lock = .init()
     self.storage = storage
     
     if #available(macOS 14.0, iOS 17.0, watchOS 10.0, tvOS 17.0, *) {
@@ -299,7 +296,8 @@ public final class _Stored<Value, S: Storage<Value>>: Node, Observable, CustomDe
   
   public var debugDescription: String {
     let value = storage.value
-    return "Stored<\(Value.self)>(id=\(info.id), name=\(info.name ?? "noname"), value=\(String(describing: value)))"
+    let typeName = _typeName(type(of: self))    
+    return "\(typeName)(id=\(info.id), name=\(info.name ?? "noname"), value=\(String(describing: value)))"
   }
   
   /// Accesses the value with thread-safe locking.

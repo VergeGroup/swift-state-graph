@@ -218,8 +218,10 @@ struct UserDefaultsStoredTests {
     #expect(userDefaults.double(forKey: "\(baseKey)_double") == 3.14)
   }
   
-  @Test
-  func userDefaultsStored_cleanup_on_deinit() {
+  @MainActor
+  @Test  
+  func userDefaultsStored_cleanup_on_deinit() async {
+    
     let key = makeTestKey()
     let userDefaults = makeTestUserDefaults()
     
@@ -236,6 +238,14 @@ struct UserDefaultsStoredTests {
     
     node = nil
     
+    await Task.yield()
+    
+    if weakNode != nil {
+      print("")
+    }
+    
     #expect(weakNode == nil)
+    
+
   }
 } 
