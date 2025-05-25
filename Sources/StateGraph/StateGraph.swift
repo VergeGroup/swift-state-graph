@@ -524,42 +524,177 @@ extension Computed {
   
 }
 
-@DebugDescription
-public final class Edge: CustomDebugStringConvertible {
-
-  unowned let from: any TypeErasedNode
-  unowned let to: any TypeErasedNode
+public struct Edge: CustomDebugStringConvertible, Equatable {
   
-  private let lock: OSAllocatedUnfairLock<Void> = .init()
-  
-  var isPending: Bool {
-    _read {
-      lock.lock()
-      defer { lock.unlock() }
-      yield _isPending
-    }
-    _modify {
-      lock.lock()
-      defer { lock.unlock() }
-      yield &_isPending
-    }
+  public static func == (lhs: Edge, rhs: Edge) -> Bool {
+    return lhs.state.pointer == rhs.state.pointer
   }
 
-  private var _isPending: Bool = false
+  struct State {
+    unowned let from: any TypeErasedNode
+    unowned let to: any TypeErasedNode
+    var isPending: Bool = false
+  }
+  
+  private let state: ManagedCriticalState<State>
+  
+  var isPending: Bool {
+    get {
+      state.withCriticalRegion { state in
+        state.isPending
+      }
+    }
+    set {
+      state.withCriticalRegion { state in
+        state.isPending = newValue        
+      }
+    }      
+  }
 
   init(from: any TypeErasedNode, to: any TypeErasedNode) {
-    self.from = from
-    self.to = to
+    self.state = .init(.init(from: from, to: to))
   }
 
   public var debugDescription: String {
-    "\(from.debugDescription) -> \(to.debugDescription)"
-  }
-
-  deinit {
-//    Log.generic.debug("Deinit Edge")
+    state.withCriticalRegion { state in
+      "\(state.from.debugDescription) -> \(state.to.debugDescription)"
+    }
   }
   
 }
 
 public typealias NodeLock = NSRecursiveLock
+
+struct ManagedCriticalState<State> {
+  private final class LockedBuffer: ManagedBuffer<State, Lock.Primitive> {
+    deinit {
+      withUnsafeMutablePointerToElements { Lock.deinitialize($0) }
+    }
+  }
+  
+  private let buffer: ManagedBuffer<State, Lock.Primitive>
+  
+  var pointer: UnsafeMutableRawPointer {
+    return Unmanaged.passUnretained(buffer).toOpaque()
+  }
+  
+  init(_ initial: State) {
+    buffer = LockedBuffer.create(minimumCapacity: 1) { buffer in
+      buffer.withUnsafeMutablePointerToElements { Lock.initialize($0) }
+      return initial
+    }
+  }
+  
+  func withCriticalRegion<R>(_ critical: (inout State) throws -> R) rethrows -> R {
+    try buffer.withUnsafeMutablePointers { header, lock in
+      Lock.lock(lock)
+      defer { Lock.unlock(lock) }
+      return try critical(&header.pointee)
+    }
+  }
+}
+
+internal struct Lock {
+#if canImport(Darwin)
+  typealias Primitive = os_unfair_lock
+#elseif canImport(Glibc) || canImport(Musl) || canImport(Bionic)
+  typealias Primitive = pthread_mutex_t
+#elseif canImport(WinSDK)
+  typealias Primitive = SRWLOCK
+#else
+#error("Unsupported platform")
+#endif
+  
+  typealias PlatformLock = UnsafeMutablePointer<Primitive>
+  let platformLock: PlatformLock
+  
+  private init(_ platformLock: PlatformLock) {
+    self.platformLock = platformLock
+  }
+  
+  fileprivate static func initialize(_ platformLock: PlatformLock) {
+#if canImport(Darwin)
+    platformLock.initialize(to: os_unfair_lock())
+#elseif canImport(Glibc) || canImport(Musl) || canImport(Bionic)
+    let result = pthread_mutex_init(platformLock, nil)
+    precondition(result == 0, "pthread_mutex_init failed")
+#elseif canImport(WinSDK)
+    InitializeSRWLock(platformLock)
+#else
+#error("Unsupported platform")
+#endif
+  }
+  
+  fileprivate static func deinitialize(_ platformLock: PlatformLock) {
+#if canImport(Glibc) || canImport(Musl) || canImport(Bionic)
+    let result = pthread_mutex_destroy(platformLock)
+    precondition(result == 0, "pthread_mutex_destroy failed")
+#endif
+    platformLock.deinitialize(count: 1)
+  }
+  
+  fileprivate static func lock(_ platformLock: PlatformLock) {
+#if canImport(Darwin)
+    os_unfair_lock_lock(platformLock)
+#elseif canImport(Glibc) || canImport(Musl) || canImport(Bionic)
+    pthread_mutex_lock(platformLock)
+#elseif canImport(WinSDK)
+    AcquireSRWLockExclusive(platformLock)
+#else
+#error("Unsupported platform")
+#endif
+  }
+  
+  fileprivate static func unlock(_ platformLock: PlatformLock) {
+#if canImport(Darwin)
+    os_unfair_lock_unlock(platformLock)
+#elseif canImport(Glibc) || canImport(Musl) || canImport(Bionic)
+    let result = pthread_mutex_unlock(platformLock)
+    precondition(result == 0, "pthread_mutex_unlock failed")
+#elseif canImport(WinSDK)
+    ReleaseSRWLockExclusive(platformLock)
+#else
+#error("Unsupported platform")
+#endif
+  }
+  
+  static func allocate() -> Lock {
+    let platformLock = PlatformLock.allocate(capacity: 1)
+    initialize(platformLock)
+    return Lock(platformLock)
+  }
+  
+  func deinitialize() {
+    Lock.deinitialize(platformLock)
+    platformLock.deallocate()
+  }
+  
+  func lock() {
+    Lock.lock(platformLock)
+  }
+  
+  func unlock() {
+    Lock.unlock(platformLock)
+  }
+  
+  /// Acquire the lock for the duration of the given block.
+  ///
+  /// This convenience method should be preferred to `lock` and `unlock` in
+  /// most situations, as it ensures that the lock will be released regardless
+  /// of how `body` exits.
+  ///
+  /// - Parameter body: The block to execute while holding the lock.
+  /// - Returns: The value returned by the block.
+  func withLock<T>(_ body: () throws -> T) rethrows -> T {
+    self.lock()
+    defer {
+      self.unlock()
+    }
+    return try body()
+  }
+  
+  // specialise Void return (for performance)
+  func withLockVoid(_ body: () throws -> Void) rethrows -> Void {
+    try self.withLock(body)
+  }
+}
