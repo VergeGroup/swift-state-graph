@@ -2,6 +2,10 @@
 
 [![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/vergegroup/swift-state-graph)
 
+## Introduction
+
+Swift State Graph is a framework designed for managing application state using a graph-based approach. It provides tools for creating and managing stored and computed properties, enabling efficient and reactive data flow within an application.
+
 ## Table of Contents
 
 - [Introduction](#introduction)
@@ -16,10 +20,6 @@
 - [Comparing with Swift's Observable Protocol](#comparing-with-swifts-observable-protocol)
 - [Migration from Observable](#migration-from-observable)
 - [Data Normalization](#data-normalization)
-
-## Introduction
-
-Swift State Graph is a framework designed for managing application state using a graph-based approach. It provides tools for creating and managing stored and computed properties, enabling efficient and reactive data flow within an application.
 
 ## Core Concepts
 
