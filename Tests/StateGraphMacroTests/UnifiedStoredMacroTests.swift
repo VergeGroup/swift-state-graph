@@ -41,7 +41,7 @@ final class UnifiedStoredMacroTests: XCTestCase {
           }
         }
 
-        @GraphIgnored let $count: Stored<Int> = .init(group: "Model", name: "count", wrappedValue: 0)
+        @GraphIgnored let $count: Stored<Int> = .init(name: "count", wrappedValue: 0)
 
       }
       """
@@ -70,7 +70,7 @@ final class UnifiedStoredMacroTests: XCTestCase {
           }
         }
 
-        @GraphIgnored let $count: Stored<Int> = .init(group: "Model", name: "count", wrappedValue: 0)
+        @GraphIgnored let $count: Stored<Int> = .init(name: "count", wrappedValue: 0)
 
       }
       """
@@ -99,7 +99,7 @@ final class UnifiedStoredMacroTests: XCTestCase {
           }
         }
 
-        @GraphIgnored let $count: Stored<Int?> = .init(group: "Model", name: "count", wrappedValue: nil)
+        @GraphIgnored let $count: Stored<Int?> = .init(name: "count", wrappedValue: nil)
 
       }
       """
@@ -130,7 +130,7 @@ final class UnifiedStoredMacroTests: XCTestCase {
           }
         }
 
-        @GraphIgnored let $username: UserDefaultsStored<String> = .init(group: "Settings", name: "username", key: "username", defaultValue: "anonymous")
+        @GraphIgnored let $username: UserDefaultsStored<String> = .init(name: "username", key: "username", defaultValue: "anonymous")
 
       }
       """
@@ -159,7 +159,7 @@ final class UnifiedStoredMacroTests: XCTestCase {
           }
         }
 
-        @GraphIgnored let $theme: UserDefaultsStored<String> = .init(group: "Settings", name: "theme", suite: "com.example.app", key: "theme", defaultValue: "light")
+        @GraphIgnored let $theme: UserDefaultsStored<String> = .init(name: "theme", suite: "com.example.app", key: "theme", defaultValue: "light")
 
       }
       """
@@ -211,7 +211,7 @@ final class UnifiedStoredMacroTests: XCTestCase {
           }
         }
 
-        @GraphIgnored let $optionalValue: UserDefaultsStored<String?> = .init(group: "Settings", name: "optionalValue", key: "optionalValue", defaultValue: nil)
+        @GraphIgnored let $optionalValue: UserDefaultsStored<String?> = .init(name: "optionalValue", key: "optionalValue", defaultValue: nil)
 
       }
       """
@@ -245,7 +245,7 @@ final class UnifiedStoredMacroTests: XCTestCase {
           }
         }
 
-        @GraphIgnored let $memoryValue: Stored<Int> = .init(group: "MixedModel", name: "memoryValue", wrappedValue: 0)
+        @GraphIgnored let $memoryValue: Stored<Int> = .init(name: "memoryValue", wrappedValue: 0)
 
         var persistedValue: String {
           get {
@@ -256,7 +256,7 @@ final class UnifiedStoredMacroTests: XCTestCase {
           }
         }
 
-        @GraphIgnored let $persistedValue: UserDefaultsStored<String> = .init(group: "MixedModel", name: "persistedValue", key: "persistedValue", defaultValue: "default")
+        @GraphIgnored let $persistedValue: UserDefaultsStored<String> = .init(name: "persistedValue", key: "persistedValue", defaultValue: "default")
 
       }
       """
@@ -287,7 +287,7 @@ final class UnifiedStoredMacroTests: XCTestCase {
           }
         }
 
-        @GraphIgnored let $apiUrl: UserDefaultsStored<String> = .init(group: "Settings", name: "customApiUrl", suite: "com.example.app", key: "api_url", defaultValue: "https://default.com")
+        @GraphIgnored let $apiUrl: UserDefaultsStored<String> = .init(name: "customApiUrl", suite: "com.example.app", key: "api_url", defaultValue: "https://default.com")
 
       }
       """
@@ -322,7 +322,7 @@ final class UnifiedStoredMacroTests: XCTestCase {
            }
          }
 
-         @GraphIgnored let $count: UserDefaultsStored<Int> = .init(group: "Settings", name: "count", key: "count", defaultValue: 0)
+         @GraphIgnored let $count: UserDefaultsStored<Int> = .init(name: "count", key: "count", defaultValue: 0)
 
          var isEnabled: Bool {
            get {
@@ -333,7 +333,7 @@ final class UnifiedStoredMacroTests: XCTestCase {
            }
          }
 
-         @GraphIgnored let $isEnabled: UserDefaultsStored<Bool> = .init(group: "Settings", name: "isEnabled", key: "isEnabled", defaultValue: false)
+         @GraphIgnored let $isEnabled: UserDefaultsStored<Bool> = .init(name: "isEnabled", key: "isEnabled", defaultValue: false)
 
          var temperature: Double {
            get {
@@ -344,7 +344,7 @@ final class UnifiedStoredMacroTests: XCTestCase {
            }
          }
 
-         @GraphIgnored let $temperature: UserDefaultsStored<Double> = .init(group: "Settings", name: "temperature", key: "temperature", defaultValue: 0.0)
+         @GraphIgnored let $temperature: UserDefaultsStored<Double> = .init(name: "temperature", key: "temperature", defaultValue: 0.0)
 
        }
        """
@@ -377,7 +377,7 @@ final class UnifiedStoredMacroTests: XCTestCase {
          }
 
          @GraphIgnored
-           public let $publicValue: UserDefaultsStored<String> = .init(group: "Settings", name: "publicValue", key: "publicValue", defaultValue: "default")
+           public let $publicValue: UserDefaultsStored<String> = .init(name: "publicValue", key: "publicValue", defaultValue: "default")
 
          private var privateValue: String {
            get {
@@ -389,7 +389,7 @@ final class UnifiedStoredMacroTests: XCTestCase {
          }
 
          @GraphIgnored
-           private let $privateValue: UserDefaultsStored<String> = .init(group: "Settings", name: "privateValue", key: "privateValue", defaultValue: "default")
+           private let $privateValue: UserDefaultsStored<String> = .init(name: "privateValue", key: "privateValue", defaultValue: "default")
 
        }
        """
@@ -418,7 +418,7 @@ final class UnifiedStoredMacroTests: XCTestCase {
           }
         }
 
-        @GraphIgnored let $setting: UserDefaultsStored<String> = .init(group: "", name: "setting", key: "setting", defaultValue: "default")
+        @GraphIgnored let $setting: UserDefaultsStored<String> = .init(name: "setting", key: "setting", defaultValue: "default")
 
       }
       """
@@ -449,7 +449,7 @@ final class UnifiedStoredMacroTests: XCTestCase {
           }
         }
 
-        @GraphIgnored let $count: Stored<Int?> = .init(group: "Model", name: "count", wrappedValue: 0)
+        @GraphIgnored let $count: Stored<Int?> = .init(name: "count", wrappedValue: 0)
 
       }
       """
@@ -482,7 +482,7 @@ final class UnifiedStoredMacroTests: XCTestCase {
           }
         }
 
-        @GraphIgnored let $count: Stored<Int?> = .init(group: "Model", name: "count", wrappedValue: nil)
+        @GraphIgnored let $count: Stored<Int?> = .init(name: "count", wrappedValue: nil)
 
         init() {
         
@@ -519,7 +519,7 @@ final class UnifiedStoredMacroTests: XCTestCase {
           }
         }
 
-        @GraphIgnored let $count: Stored<Weak<Ref>> = .init(group: "Model", name: "count", wrappedValue: .init(nil))
+        @GraphIgnored let $count: Stored<Weak<Ref>> = .init(name: "count", wrappedValue: .init(nil))
 
         init() {
         
@@ -555,7 +555,7 @@ final class UnifiedStoredMacroTests: XCTestCase {
           }
         }
 
-        @GraphIgnored let $count: Stored<Int?> = .init(group: "Model", name: "count", wrappedValue: nil)
+        @GraphIgnored let $count: Stored<Int?> = .init(name: "count", wrappedValue: nil)
         weak var weak_object: AnyObject? {
           get {
             return $weak_object.wrappedValue.value
@@ -565,7 +565,7 @@ final class UnifiedStoredMacroTests: XCTestCase {
           }
         }
 
-        @GraphIgnored let $weak_object: Stored<Weak<AnyObject>> = .init(group: "Model", name: "weak_object", wrappedValue: .init(nil))
+        @GraphIgnored let $weak_object: Stored<Weak<AnyObject>> = .init(name: "weak_object", wrappedValue: .init(nil))
               
       }
       """
@@ -598,7 +598,7 @@ final class UnifiedStoredMacroTests: XCTestCase {
           }
         }
 
-        @GraphIgnored let $count: Stored<Int> = .init(group: "Model", name: "count", wrappedValue: 0)
+        @GraphIgnored let $count: Stored<Int> = .init(name: "count", wrappedValue: 0)
 
         init() {
         
@@ -635,7 +635,7 @@ final class UnifiedStoredMacroTests: XCTestCase {
           }
         }
 
-        @GraphIgnored let $community: Stored<Community?> = .init(group: "Model", name: "community", wrappedValue: nil)
+        @GraphIgnored let $community: Stored<Community?> = .init(name: "community", wrappedValue: nil)
 
         init() {
         
@@ -668,7 +668,7 @@ final class UnifiedStoredMacroTests: XCTestCase {
           }
         }
 
-        @GraphIgnored let $community: Stored<Community?> = .init(group: "Model", name: "community", wrappedValue: Community())
+        @GraphIgnored let $community: Stored<Community?> = .init(name: "community", wrappedValue: Community())
 
       }
       """
@@ -703,7 +703,7 @@ final class UnifiedStoredMacroTests: XCTestCase {
         }
 
         @GraphIgnored
-          public let $weak_variable: Stored<Weak<AnyObject>> = .init(group: "A", name: "weak_variable", wrappedValue: .init(nil))
+          public let $weak_variable: Stored<Weak<AnyObject>> = .init(name: "weak_variable", wrappedValue: .init(nil))
 
         unowned var unowned_variable: AnyObject {
           @storageRestrictions(

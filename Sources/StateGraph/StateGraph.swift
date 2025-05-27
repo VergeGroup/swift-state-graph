@@ -25,8 +25,7 @@ extension _Stored where S == InMemoryStorage<Value> {
     _ file: StaticString = #fileID,
     _ line: UInt = #line,
     _ column: UInt = #column,
-    group: String? = nil,
-    name: String? = nil,
+    name: StaticString? = nil,
     wrappedValue: Value
   ) {
     let storage = InMemoryStorage(initialValue: wrappedValue)
@@ -34,7 +33,6 @@ extension _Stored where S == InMemoryStorage<Value> {
       file,
       line,
       column,
-      group: group,
       name: name,
       storage: storage
     )
@@ -287,13 +285,11 @@ public final class Computed<Value>: Node, Observable, CustomDebugStringConvertib
     _ file: StaticString = #fileID,
     _ line: UInt = #line,
     _ column: UInt = #column,
-    name: String? = nil,
+    name: StaticString? = nil,
     descriptor: some ComputedDescriptor<Value>
   ) {
     self.info = .init(
-      group: nil,
       name: name,
-      id: makeUniqueNumber(),
       sourceLocation: .init(file: file, line: line, column: column)
     )
     self.descriptor = descriptor
@@ -327,13 +323,11 @@ public final class Computed<Value>: Node, Observable, CustomDebugStringConvertib
     _ file: StaticString = #fileID,
     _ line: UInt = #line,
     _ column: UInt = #column,
-    name: String? = nil,
+    name: StaticString? = nil,
     rule: @escaping @Sendable (inout Context) -> Value
   ) {
     self.info = .init(
-      group: nil,
       name: name,
-      id: makeUniqueNumber(),
       sourceLocation: .init(file: file, line: line, column: column)
     )
     self.descriptor = AnyComputedDescriptor(compute: rule, isEqual: { _, _ in false })      
@@ -367,13 +361,11 @@ public final class Computed<Value>: Node, Observable, CustomDebugStringConvertib
     _ file: StaticString = #fileID,
     _ line: UInt = #line,
     _ column: UInt = #column,
-    name: String? = nil,
+    name: StaticString? = nil,
     rule: @escaping @Sendable (inout Context) -> Value
   ) where Value: Equatable {
     self.info = .init(
-      group: nil,
       name: name,
-      id: makeUniqueNumber(),
       sourceLocation: .init(file: file, line: line, column: column)
     )
     self.descriptor = AnyComputedDescriptor(compute: rule, isEqual: { $0 == $1 })
@@ -393,7 +385,7 @@ public final class Computed<Value>: Node, Observable, CustomDebugStringConvertib
   }
   
     deinit {
-      Log.generic.debug("Deinit Computed: id=\(self.info.id)")
+      Log.generic.debug("Deinit Computed: \(self.info.name.map(String.init) ?? "noname")")
       for edge in incomingEdges {
         edge.from.outgoingEdges.removeAll(where: { $0 === edge })
       }
@@ -469,7 +461,7 @@ public final class Computed<Value>: Node, Observable, CustomDebugStringConvertib
   }
    
   public var debugDescription: String {
-    "Computed<\(Value.self)>(id=\(info.id), name=\(info.name ?? "noname"), value=\(String(describing: _cachedValue)))"
+    "Computed<\(Value.self)>(name=\(info.name.map(String.init) ?? "noname"), value=\(String(describing: _cachedValue)))"
   }
   
 }

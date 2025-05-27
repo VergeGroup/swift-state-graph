@@ -118,7 +118,7 @@ final class ConcurrencyTests: XCTestCase {
 
   func testHighConcurrency() async throws {
     // Test with many nodes and high concurrency
-    let sources = (0..<10).map { Stored(name: "source\($0)", wrappedValue: $0) }
+    let sources = (0..<10).map { Stored(wrappedValue: $0) }
 
     let computed = Computed(name: "sum") { _ in
       sources.reduce(0) { $0 + $1.wrappedValue }

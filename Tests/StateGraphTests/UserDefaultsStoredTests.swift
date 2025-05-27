@@ -20,8 +20,7 @@ struct UserDefaultsStoredTests {
   private func makeUserDefaultsStoredNode<T: UserDefaultsStorable>(
     userDefaults: UserDefaults,
     key: String,
-    defaultValue: T,
-    name: String = "test_node"
+    defaultValue: T
   ) -> UserDefaultsStored<T> {
     let storage = UserDefaultsStorage(
       userDefaults: userDefaults,
@@ -29,7 +28,6 @@ struct UserDefaultsStoredTests {
       defaultValue: defaultValue
     )
     return _Stored(
-      name: name,
       storage: storage
     )
   }
@@ -42,8 +40,7 @@ struct UserDefaultsStoredTests {
     let node = makeUserDefaultsStoredNode(
       userDefaults: userDefaults,
       key: key,
-      defaultValue: "default",
-      name: "test_string"
+      defaultValue: "default"
     )
     
     // 初期値のテスト
@@ -63,8 +60,7 @@ struct UserDefaultsStoredTests {
     let node = makeUserDefaultsStoredNode(
       userDefaults: userDefaults,
       key: key,
-      defaultValue: 42,
-      name: "test_int"
+      defaultValue: 42
     )
     
     // 初期値のテスト
@@ -84,8 +80,7 @@ struct UserDefaultsStoredTests {
     let node = makeUserDefaultsStoredNode(
       userDefaults: userDefaults,
       key: key,
-      defaultValue: "initial",
-      name: "test_external"
+      defaultValue: "initial"
     )
     
     // 依存するComputedノードを作成
@@ -120,15 +115,13 @@ struct UserDefaultsStoredTests {
     let node1 = makeUserDefaultsStoredNode(
       userDefaults: userDefaults,
       key: key,
-      defaultValue: "default",
-      name: "node1"
+      defaultValue: "default"
     )
     
     let node2 = makeUserDefaultsStoredNode(
       userDefaults: userDefaults,
       key: key,
-      defaultValue: "default",
-      name: "node2"
+      defaultValue: "default"
     )
     
     // 初期値の確認
@@ -169,29 +162,25 @@ struct UserDefaultsStoredTests {
     let stringNode = makeUserDefaultsStoredNode(
       userDefaults: userDefaults,
       key: "\(baseKey)_string",
-      defaultValue: "default",
-      name: "string"
+      defaultValue: "default"
     )
     
     let intNode = makeUserDefaultsStoredNode(
       userDefaults: userDefaults,
       key: "\(baseKey)_int",
-      defaultValue: 0,
-      name: "int"
+      defaultValue: 0
     )
     
     let boolNode = makeUserDefaultsStoredNode(
       userDefaults: userDefaults,
       key: "\(baseKey)_bool",
-      defaultValue: false,
-      name: "bool"
+      defaultValue: false
     )
     
     let doubleNode = makeUserDefaultsStoredNode(
       userDefaults: userDefaults,
       key: "\(baseKey)_double",
-      defaultValue: 0.0,
-      name: "double"
+      defaultValue: 0.0
     )
     
     // 初期値のテスト
@@ -228,8 +217,7 @@ struct UserDefaultsStoredTests {
     var node: UserDefaultsStored<String>? = makeUserDefaultsStoredNode(
       userDefaults: userDefaults,
       key: key,
-      defaultValue: "test",
-      name: "cleanup_test"
+      defaultValue: "test"
     )
     
     weak var weakNode = node

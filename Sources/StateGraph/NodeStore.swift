@@ -33,28 +33,14 @@ public actor NodeStore {
 
   public func graphViz() -> String {
     func name(_ node: any TypeErasedNode) -> String {
-      return #""\#(node.info.id)_\#(node.info.name ?? "noname")""#
+      return #""\#(node.info.name.map(String.init) ?? "noname")_\#(node.info.sourceLocation.text)""#
     }
 
-    let grouped = Dictionary(grouping: nodes.compactMap { $0.value }) { $0.info.group }
-
-    let clusters = grouped.compactMap { (group, nodes) -> String? in
-      guard let group, !nodes.isEmpty else { return nil }
-      let nodesStr = nodes.map { name($0) }.joined(separator: "\n")
-      return """
-      subgraph cluster_\(group) {
-        label = \"\(group)\";
-        \(nodesStr)
-      }
-      """
-    }.joined(separator: "\n")
-
-    // group == nil
-    let ungrouped = (grouped[nil] ?? []).map { name($0) }.joined(separator: "\n")
+    let allNodes = nodes.compactMap { $0.value }
+    let nodesStr = allNodes.map { name($0) }.joined(separator: "\n")
 
     // edges
-    let edges = nodes
-      .compactMap { $0.value }
+    let edges = allNodes
       .flatMap(\.outgoingEdges).map {
         "\(name($0.from)) -> \(name($0.to))\($0.isPending ? " [style=dashed]" : "")"
       }.joined(separator: "\n")
@@ -62,9 +48,7 @@ public actor NodeStore {
     return """
       digraph StateGraph {
       
-      \(clusters)
-      
-      \(ungrouped)
+      \(nodesStr)
       
       \(edges)
       }

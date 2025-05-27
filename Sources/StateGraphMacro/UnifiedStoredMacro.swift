@@ -217,7 +217,6 @@ extension UnifiedStoredMacro {
     context: some MacroExpansionContext
   ) -> VariableDeclSyntax {
     let propertyName = variableDecl.name
-    let groupName = context.lexicalContext.first?.as(ClassDeclSyntax.self)?.name.text ?? ""
     
     var storageDecl = variableDecl
       .trimmed
@@ -239,8 +238,7 @@ extension UnifiedStoredMacro {
       for: storageDecl,
       variableDecl: variableDecl,
       backingType: backingType,
-      propertyName: propertyName,
-      groupName: groupName
+      propertyName: propertyName
     )
     
     // Remove accessors
@@ -283,24 +281,21 @@ extension UnifiedStoredMacro {
     for storageDecl: VariableDeclSyntax,
     variableDecl: VariableDeclSyntax,
     backingType: BackingStorageType,
-    propertyName: String,
-    groupName: String
+    propertyName: String
   ) -> VariableDeclSyntax {
     switch backingType {
     case .memory:
       return createMemoryInitializer(
         for: storageDecl,
         variableDecl: variableDecl,
-        propertyName: propertyName,
-        groupName: groupName
+        propertyName: propertyName
       )
     case .userDefaults(let config):
       return createUserDefaultsInitializer(
         for: storageDecl,
         variableDecl: variableDecl,
         configuration: config,
-        propertyName: propertyName,
-        groupName: groupName
+        propertyName: propertyName
       )
     }
   }
@@ -309,22 +304,21 @@ extension UnifiedStoredMacro {
   private static func createMemoryInitializer(
     for storageDecl: VariableDeclSyntax,
     variableDecl: VariableDeclSyntax,
-    propertyName: String,
-    groupName: String
+    propertyName: String
   ) -> VariableDeclSyntax {
     if (variableDecl.isOptional || variableDecl.isImplicitlyUnwrappedOptional) && !variableDecl.hasInitializer {
       let initializerClause: InitializerClauseSyntax
       if variableDecl.isWeak {
         initializerClause = .init(
-          value: #".init(group: "\#(raw: groupName)", name: "\#(raw: propertyName)", wrappedValue: .init(nil))"# as ExprSyntax
+          value: #".init(name: "\#(raw: propertyName)", wrappedValue: .init(nil))"# as ExprSyntax
         )
       } else if variableDecl.isUnowned {
         initializerClause = .init(
-          value: #".init(group: "\#(raw: groupName)", name: "\#(raw: propertyName)", wrappedValue: .init(nil))"# as ExprSyntax
+          value: #".init(name: "\#(raw: propertyName)", wrappedValue: .init(nil))"# as ExprSyntax
         )
       } else {
         initializerClause = .init(
-          value: #".init(group: "\#(raw: groupName)", name: "\#(raw: propertyName)", wrappedValue: nil)"# as ExprSyntax
+          value: #".init(name: "\#(raw: propertyName)", wrappedValue: nil)"# as ExprSyntax
         )
       }
       return storageDecl.addInitializer(initializerClause)
@@ -332,15 +326,15 @@ extension UnifiedStoredMacro {
       return storageDecl.modifyingInit { initializer in
         if variableDecl.isWeak {
           return .init(
-            value: #".init(group: "\#(raw: groupName)", name: "\#(raw: propertyName)", wrappedValue: .init(\#(initializer.trimmed.value)))"# as ExprSyntax
+            value: #".init(name: "\#(raw: propertyName)", wrappedValue: .init(\#(initializer.trimmed.value)))"# as ExprSyntax
           )
         } else if variableDecl.isUnowned {
           return .init(
-            value: #".init(group: "\#(raw: groupName)", name: "\#(raw: propertyName)", wrappedValue: .init(\#(initializer.trimmed.value)))"# as ExprSyntax
+            value: #".init(name: "\#(raw: propertyName)", wrappedValue: .init(\#(initializer.trimmed.value)))"# as ExprSyntax
           )
         } else {
           return .init(
-            value: #".init(group: "\#(raw: groupName)", name: "\#(raw: propertyName)", wrappedValue: \#(initializer.trimmed.value))"# as ExprSyntax
+            value: #".init(name: "\#(raw: propertyName)", wrappedValue: \#(initializer.trimmed.value))"# as ExprSyntax
           )
         }
       }
@@ -352,19 +346,18 @@ extension UnifiedStoredMacro {
     for storageDecl: VariableDeclSyntax,
     variableDecl: VariableDeclSyntax,
     configuration: BackingStorageType.Configuration,
-    propertyName: String,
-    groupName: String
+    propertyName: String
   ) -> VariableDeclSyntax {
     let finalNodeName = configuration.name ?? propertyName
     
     return storageDecl.modifyingInit { initializer in
       if let suite = configuration.suite {
         return .init(
-          value: #".init(group: "\#(raw: groupName)", name: "\#(raw: finalNodeName)", suite: "\#(raw: suite)", key: "\#(raw: configuration.key)", defaultValue: \#(initializer.trimmed.value))"# as ExprSyntax
+          value: #".init(name: "\#(raw: finalNodeName)", suite: "\#(raw: suite)", key: "\#(raw: configuration.key)", defaultValue: \#(initializer.trimmed.value))"# as ExprSyntax
         )
       } else {
         return .init(
-          value: #".init(group: "\#(raw: groupName)", name: "\#(raw: finalNodeName)", key: "\#(raw: configuration.key)", defaultValue: \#(initializer.trimmed.value))"# as ExprSyntax
+          value: #".init(name: "\#(raw: finalNodeName)", key: "\#(raw: configuration.key)", defaultValue: \#(initializer.trimmed.value))"# as ExprSyntax
         )
       }
     }

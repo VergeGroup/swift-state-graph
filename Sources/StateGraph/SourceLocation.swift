@@ -19,21 +19,14 @@ public struct SourceLocation: ~Copyable, Sendable {
 
 public struct NodeInfo: ~Copyable, Sendable {
   
-  public let group: String?
-  public let name: String?
-  public let id: UInt64
-  
+  public let name: StaticString?
   public let sourceLocation: SourceLocation
  
   init(    
-    group: String? = nil,
-    name: String? = nil,
-    id: UInt64,
+    name: StaticString? = nil,
     sourceLocation: consuming SourceLocation
   ) {
-    self.group = group
     self.name = name
-    self.id = id
     self.sourceLocation = sourceLocation    
   }
 }
