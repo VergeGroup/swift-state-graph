@@ -3,7 +3,7 @@ import Testing
 import StateGraph
 
 @Suite
-struct ModModelInitializationTests {
+struct ModelInitializationTests {
   
   @Test func basic() {
     
