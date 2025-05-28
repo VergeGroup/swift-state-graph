@@ -470,6 +470,8 @@ extension UnifiedStoredMacro: AccessorMacro {
     
     if needsInitAccessor {
       accessors.append(createMemoryInitAccessor(propertyName: propertyName, variableDecl: variableDecl))
+    } else {
+      accessors.append(createMemoryAccessor(propertyName: propertyName))
     }
     
     accessors.append(createMemoryGetAccessor(propertyName: propertyName, variableDecl: variableDecl))
@@ -561,6 +563,21 @@ extension UnifiedStoredMacro: AccessorMacro {
         """
       )
     }
+  }
+  
+  private static func createMemoryAccessor(
+    propertyName: String
+  ) -> AccessorDeclSyntax {
+    return AccessorDeclSyntax(
+      """
+      @storageRestrictions(
+        accesses: $\(raw: propertyName)
+      )
+      init(initialValue) {
+        
+      }
+      """
+    )
   }
   
   private static func createMemoryGetAccessor(

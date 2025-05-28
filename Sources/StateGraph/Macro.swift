@@ -157,12 +157,11 @@ final class StateViewModel {
   unowned let unowned_constant: AnyObject
   
   init() {
-    self.optional_constant = 0
-        
+    self.optional_constant = 0        
+    self.optional_variable = 0
     unowned_constant = NSObject()
     self.unowned_variable = NSObject()
     
-    self.optional_variable = 0
   }
   
 }
