@@ -170,8 +170,7 @@ extension _Stored where S == UserDefaultsStorage<Value> {
     _ file: StaticString = #fileID,
     _ line: UInt = #line,
     _ column: UInt = #column,
-    group: String? = nil,
-    name: String? = nil,
+    name: StaticString? = nil,
     key: String,
     defaultValue: Value
   ) {
@@ -184,7 +183,6 @@ extension _Stored where S == UserDefaultsStorage<Value> {
       file,
       line,
       column,
-      group: group,
       name: name,
       storage: storage
     )
@@ -205,8 +203,7 @@ extension _Stored where S == UserDefaultsStorage<Value> {
     _ file: StaticString = #fileID,
     _ line: UInt = #line,
     _ column: UInt = #column,
-    group: String? = nil,
-    name: String? = nil,
+    name: StaticString? = nil,
     suite: String,
     key: String,
     defaultValue: Value
@@ -220,7 +217,6 @@ extension _Stored where S == UserDefaultsStorage<Value> {
       file,
       line,
       column,
-      group: group,
       name: name,
       storage: storage
     )

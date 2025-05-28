@@ -250,14 +250,11 @@ public final class _Stored<Value, S: Storage<Value>>: Node, Observable, CustomDe
     _ file: StaticString = #fileID,
     _ line: UInt = #line,
     _ column: UInt = #column,
-    group: String? = nil,
-    name: String? = nil,
+    name: StaticString? = nil,
     storage: consuming S
   ) {
     self.info = .init(
-      group: group,
       name: name,
-      id: makeUniqueNumber(),
       sourceLocation: .init(file: file, line: line, column: column)
     )
     self.lock = .init()
@@ -281,7 +278,7 @@ public final class _Stored<Value, S: Storage<Value>>: Node, Observable, CustomDe
   }
   
   deinit {
-    Log.generic.debug("Deinit StoredNode: \(self.info.name ?? "noname")")
+    Log.generic.debug("Deinit StoredNode: \(self.info.name.map(String.init) ?? "noname")")
     for edge in outgoingEdges {
       edge.to.incomingEdges.removeAll(where: { $0 === edge })
     }
@@ -296,7 +293,7 @@ public final class _Stored<Value, S: Storage<Value>>: Node, Observable, CustomDe
   public var debugDescription: String {
     let value = storage.value
     let typeName = _typeName(type(of: self))    
-    return "\(typeName)(id=\(info.id), name=\(info.name ?? "noname"), value=\(String(describing: value)))"
+    return "\(typeName)(name=\(info.name.map(String.init) ?? "noname"), value=\(String(describing: value)))"
   }
   
   /// Accesses the value with thread-safe locking.

@@ -95,8 +95,8 @@ struct Tests {
   @Test
   func node_in_node() {
 
-    let bookNodes = (0..<10).map {
-      Stored(name: "book\($0)", wrappedValue: 0)
+    let bookNodes = (0..<10).map { _ in
+      Stored(name: "book", wrappedValue: 0)
     }
 
     let allBooks = Stored(name: "bookNodes", wrappedValue: bookNodes)
@@ -105,7 +105,7 @@ struct Tests {
       allBooks
         .wrappedValue
         .filter {
-          $0.info.name?.hasPrefix("book") == true
+          $0.info.name.map(String.init)?.hasPrefix("book") == true
         }
     }
 
