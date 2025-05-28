@@ -33,6 +33,12 @@ final class UnifiedStoredMacroTests: XCTestCase {
       """
       final class Model {
         var count: Int {
+          @storageRestrictions(
+            accesses: $count
+          )
+          init(initialValue) {
+
+          }
           get {
             return $count.wrappedValue
           }
@@ -62,6 +68,12 @@ final class UnifiedStoredMacroTests: XCTestCase {
       """
       final class Model {
         var count: Int {
+          @storageRestrictions(
+            accesses: $count
+          )
+          init(initialValue) {
+
+          }
           get {
             return $count.wrappedValue
           }
@@ -91,6 +103,12 @@ final class UnifiedStoredMacroTests: XCTestCase {
       """
       final class Model {
         var count: Int? {
+          @storageRestrictions(
+            accesses: $count
+          )
+          init(initialValue) {
+
+          }
           get {
             return $count.wrappedValue
           }
@@ -237,6 +255,12 @@ final class UnifiedStoredMacroTests: XCTestCase {
       """
       final class MixedModel {
         var memoryValue: Int {
+          @storageRestrictions(
+            accesses: $memoryValue
+          )
+          init(initialValue) {
+
+          }
           get {
             return $memoryValue.wrappedValue
           }
@@ -441,6 +465,12 @@ final class UnifiedStoredMacroTests: XCTestCase {
       """
       final class Model {
         var count: Int? {
+          @storageRestrictions(
+            accesses: $count
+          )
+          init(initialValue) {
+
+          }
           get {
             return $count.wrappedValue
           }
@@ -474,6 +504,12 @@ final class UnifiedStoredMacroTests: XCTestCase {
       """
       final class Model {
         var count: Int? {
+          @storageRestrictions(
+            accesses: $count
+          )
+          init(initialValue) {
+
+          }
           get {
             return $count.wrappedValue
           }
@@ -511,6 +547,12 @@ final class UnifiedStoredMacroTests: XCTestCase {
       """
       final class Model {
         weak var count: Ref? {
+          @storageRestrictions(
+            accesses: $count
+          )
+          init(initialValue) {
+
+          }
           get {
             return $count.wrappedValue.value
           }
@@ -547,6 +589,12 @@ final class UnifiedStoredMacroTests: XCTestCase {
       """
       final class Model {
         var count: Int? {
+          @storageRestrictions(
+            accesses: $count
+          )
+          init(initialValue) {
+
+          }
           get {
             return $count.wrappedValue
           }
@@ -557,6 +605,12 @@ final class UnifiedStoredMacroTests: XCTestCase {
 
         @GraphIgnored let $count: Stored<Int?> = .init(name: "count", wrappedValue: nil)
         weak var weak_object: AnyObject? {
+          @storageRestrictions(
+            accesses: $weak_object
+          )
+          init(initialValue) {
+
+          }
           get {
             return $weak_object.wrappedValue.value
           }
@@ -590,6 +644,12 @@ final class UnifiedStoredMacroTests: XCTestCase {
       """
       final class Model {
         var count: Int {
+          @storageRestrictions(
+            accesses: $count
+          )
+          init(initialValue) {
+
+          }
           get {
             return $count.wrappedValue
           }
@@ -627,6 +687,12 @@ final class UnifiedStoredMacroTests: XCTestCase {
       """
       final class Model {
         var community: Community! {
+          @storageRestrictions(
+            accesses: $community
+          )
+          init(initialValue) {
+
+          }
           get {
             return $community.wrappedValue!
           }
@@ -660,6 +726,12 @@ final class UnifiedStoredMacroTests: XCTestCase {
       """
       final class Model {
         var community: Community! {
+          @storageRestrictions(
+            accesses: $community
+          )
+          init(initialValue) {
+
+          }
           get {
             return $community.wrappedValue!
           }
@@ -694,6 +766,12 @@ final class UnifiedStoredMacroTests: XCTestCase {
       """
       public final class A {
         public weak var weak_variable: AnyObject? {             
+          @storageRestrictions(
+            accesses: $weak_variable
+          )
+          init(initialValue) {
+
+          }
           get {
             return $weak_variable.wrappedValue.value
           }
