@@ -6,6 +6,28 @@
 
 Swift State Graph is a framework designed for managing application state using a graph-based approach. It provides tools for creating and managing stored and computed properties, enabling efficient and reactive data flow within an application.
 
+### Universal Swift Application Support
+
+Swift State Graph is designed to work seamlessly across all types of Swift applications:
+
+- **SwiftUI Applications**: Native integration with SwiftUI's reactive system and excellent compatibility with Swift's `Observable` protocol
+- **UIKit Applications**: Reactive state management that simplifies complex UI updates and data binding
+- **Command Line Tools**: Efficient state management for CLI applications with complex data processing pipelines
+- **Server-Side Swift**: Robust state management for Vapor, Perfect, and other server-side frameworks
+- **macOS Applications**: Perfect for both AppKit and SwiftUI-based macOS applications
+- **Cross-Platform Libraries**: Framework-agnostic design that works in any Swift environment
+
+### SwiftUI Observable Compatibility
+
+Swift State Graph provides excellent compatibility with SwiftUI's `Observable` protocol:
+
+- **Seamless Integration**: Works alongside existing `@Observable` classes without conflicts
+- **Enhanced Reactivity**: Adds computed properties and automatic dependency tracking to Observable objects
+- **Migration Path**: Easy migration from `Observable` to Swift State Graph with minimal code changes
+- **Performance Benefits**: More efficient dependency tracking compared to manual observation patterns
+
+The framework's reactive nature and automatic dependency tracking make it particularly effective for applications that require complex state relationships and real-time data synchronization, regardless of the UI framework or platform being used.
+
 ## Table of Contents
 
 - [Introduction](#introduction)
