@@ -70,13 +70,17 @@ final class UnifiedSyntaxDemo {
 
 final class ImplicitInitializers {
   @GraphStored
-  var value: Int?
+  var value: Int? = nil
   
   @GraphStored
-  var value2: Int!
+  var value2: Int! = nil
   
   @GraphStored
-  weak var weak_object: AnyObject?
+  weak var weak_object: AnyObject? = nil
+  
+  init() {
+    
+  }
   
   static func run() {
     _ = ImplicitInitializers()
@@ -112,7 +116,16 @@ class Ref {}
 
 final class Demo {
   
+  @GraphStored
+  var optional_variable_init: Int? = nil
+  
   weak var count: Ref? {
+    @storageRestrictions(
+      accesses: box
+    )
+    init(initialValue) {
+      
+    }
     get {
       box.value.value
     }
@@ -121,10 +134,12 @@ final class Demo {
     }
   }
   
+  let v: Int
   let box: Box<Weak<Ref>> = .init(.init(nil))
   
   init() {
-    self.count = Ref()
+    /*self.count = Ref*/
+    self.v = 0
   }
 }
 
