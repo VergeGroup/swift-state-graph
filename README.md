@@ -12,10 +12,7 @@ Swift State Graph is designed to work seamlessly across all types of Swift appli
 
 - **SwiftUI Applications**: Native integration with SwiftUI's reactive system and excellent compatibility with Swift's `Observable` protocol
 - **UIKit Applications**: Reactive state management that simplifies complex UI updates and data binding
-- **Command Line Tools**: Efficient state management for CLI applications with complex data processing pipelines
-- **Server-Side Swift**: Robust state management for Vapor, Perfect, and other server-side frameworks
 - **macOS Applications**: Perfect for both AppKit and SwiftUI-based macOS applications
-- **Cross-Platform Libraries**: Framework-agnostic design that works in any Swift environment
 
 ### SwiftUI Observable Compatibility
 
