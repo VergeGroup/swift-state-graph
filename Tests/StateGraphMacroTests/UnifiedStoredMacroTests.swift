@@ -37,7 +37,7 @@ final class UnifiedStoredMacroTests: XCTestCase {
             accesses: $count
           )
           init(initialValue) {
-
+            $count.wrappedValue = initialValue
           }
           get {
             return $count.wrappedValue
@@ -72,7 +72,7 @@ final class UnifiedStoredMacroTests: XCTestCase {
             accesses: $count
           )
           init(initialValue) {
-
+            $count.wrappedValue = initialValue
           }
           get {
             return $count.wrappedValue
@@ -107,7 +107,7 @@ final class UnifiedStoredMacroTests: XCTestCase {
             accesses: $count
           )
           init(initialValue) {
-
+            $count.wrappedValue = initialValue
           }
           get {
             return $count.wrappedValue
@@ -259,7 +259,7 @@ final class UnifiedStoredMacroTests: XCTestCase {
             accesses: $memoryValue
           )
           init(initialValue) {
-
+            $memoryValue.wrappedValue = initialValue
           }
           get {
             return $memoryValue.wrappedValue
@@ -469,7 +469,7 @@ final class UnifiedStoredMacroTests: XCTestCase {
             accesses: $count
           )
           init(initialValue) {
-
+            $count.wrappedValue = initialValue
           }
           get {
             return $count.wrappedValue
@@ -508,7 +508,7 @@ final class UnifiedStoredMacroTests: XCTestCase {
             accesses: $count
           )
           init(initialValue) {
-
+            $count.wrappedValue = initialValue
           }
           get {
             return $count.wrappedValue
@@ -551,7 +551,7 @@ final class UnifiedStoredMacroTests: XCTestCase {
             accesses: $count
           )
           init(initialValue) {
-
+            $count.wrappedValue.value = initialValue
           }
           get {
             return $count.wrappedValue.value
@@ -593,7 +593,7 @@ final class UnifiedStoredMacroTests: XCTestCase {
             accesses: $count
           )
           init(initialValue) {
-
+            $count.wrappedValue = initialValue
           }
           get {
             return $count.wrappedValue
@@ -609,7 +609,7 @@ final class UnifiedStoredMacroTests: XCTestCase {
             accesses: $weak_object
           )
           init(initialValue) {
-
+            $weak_object.wrappedValue.value = initialValue
           }
           get {
             return $weak_object.wrappedValue.value
@@ -648,7 +648,7 @@ final class UnifiedStoredMacroTests: XCTestCase {
             accesses: $count
           )
           init(initialValue) {
-
+            $count.wrappedValue = initialValue
           }
           get {
             return $count.wrappedValue
@@ -691,7 +691,7 @@ final class UnifiedStoredMacroTests: XCTestCase {
             accesses: $community
           )
           init(initialValue) {
-
+            $community.wrappedValue = initialValue
           }
           get {
             return $community.wrappedValue!
@@ -730,7 +730,7 @@ final class UnifiedStoredMacroTests: XCTestCase {
             accesses: $community
           )
           init(initialValue) {
-
+            $community.wrappedValue = initialValue
           }
           get {
             return $community.wrappedValue!
@@ -770,7 +770,7 @@ final class UnifiedStoredMacroTests: XCTestCase {
             accesses: $weak_variable
           )
           init(initialValue) {
-
+            $weak_variable.wrappedValue.value = initialValue
           }
           get {
             return $weak_variable.wrappedValue.value
