@@ -4,33 +4,69 @@
 
 ## Introduction
 
-Swift State Graph is a framework designed for managing application state using a graph-based approach. It provides tools for creating and managing stored and computed properties, enabling efficient and reactive data flow within an application.
+Navigating the complexities of data and state in Swift applications can often feel like a maze, especially as your project grows. If you're seeking a more intuitive and robust way to approach **Swift state management**, you're in the right place. Traditional methods frequently lead to tangled dependencies, excessive boilerplate, and specific challenges when synchronizing **SwiftUI state** or managing **UIKit state**. This can make it difficult to **manage Swift app state** cohesively and effectively across your application.
+
+Swift State Graph emerges as a powerful **Swift reactive library**, offering a refreshing graph-based approach to **reactive programming Swift**. It's engineered to untangle these complexities, providing a clear and declarative path to managing your application's data flow.
+
+With Swift State Graph, you can:
+*   Achieve crystal-clear, declarative state logic thanks to automatic **Swift dependency tracking**.
+*   Effortlessly **manage Swift app state** and derive dynamic information with powerful **Swift computed properties**.
+*   Streamline development across Apple platforms with unified strategies for both **SwiftUI state management** and **UIKit state management**.
+
+Dive in to discover how Swift State Graph can transform your approach to state.
+
+## 🚀 Quick Start
+
+Here's a glimpse of how Swift State Graph simplifies state management:
+
+```swift
+import StateGraph
+
+final class CounterViewModel {
+  @GraphStored
+  var count: Int
+
+  @GraphComputed
+  var isEven: Bool
+
+  init(count: Int) {
+    self.count = count
+    self.$isEven = .init { [$count] _ in
+      $count.wrappedValue % 2 == 0
+    }
+  }
+
+  func increment() {
+    count += 1
+  }
+}
+```
 
 ### Universal Swift Application Support
 
-Swift State Graph is designed to work seamlessly across all types of Swift applications:
+Swift State Graph is designed to work seamlessly across all types of Swift applications, helping you **manage Swift app state** consistently:
 
-- **SwiftUI Applications**: Native integration with SwiftUI's reactive system and excellent compatibility with Swift's `Observable` protocol
-- **UIKit Applications**: Reactive state management that simplifies complex UI updates and data binding
-- **macOS Applications**: Perfect for both AppKit and SwiftUI-based macOS applications
+- **SwiftUI Applications**: Native integration with SwiftUI's reactive system, enhancing your **SwiftUI state** handling, and offering excellent **Swift Observable compatibility**.
+- **UIKit Applications**: Brings robust **reactive programming Swift** capabilities to simplify complex UI updates, data binding, and overall **UIKit state** management.
+- **macOS Applications**: Perfect for both AppKit and SwiftUI-based macOS applications, providing a unified approach to state.
 
 ### SwiftUI Observable Compatibility
 
-Swift State Graph provides excellent compatibility with SwiftUI's `Observable` protocol:
+Swift State Graph provides excellent **Swift Observable compatibility**, enhancing Apple's native tools:
 
 - **Seamless Integration**: Works alongside existing `@Observable` classes without conflicts
-- **Enhanced Reactivity**: Adds computed properties and automatic dependency tracking to Observable objects
-- **Migration Path**: Easy migration from `Observable` to Swift State Graph with minimal code changes
-- **Performance Benefits**: More efficient dependency tracking compared to manual observation patterns
+- **Enhanced Reactivity**: Adds powerful **Swift computed properties** and automatic **Swift dependency tracking** to Observable objects.
+- **Migration Path**: Easy migration from `Observable` to Swift State Graph with minimal code changes.
+- **Performance Benefits**: More efficient **Swift dependency tracking** compared to manual observation patterns.
 
-The framework's reactive nature and automatic dependency tracking make it particularly effective for applications that require complex state relationships and real-time data synchronization, regardless of the UI framework or platform being used.
+The framework's reactive nature and automatic **Swift dependency tracking** make it particularly effective for applications demanding complex state relationships and real-time data synchronization. This contributes to a more **declarative Swift state** approach, beneficial regardless of the UI framework or platform in use.
 
 ## Table of Contents
 
 - [Introduction](#introduction)
+- [🚀 Quick Start](#-quick-start)
 - [Core Concepts](#core-concepts)
 - [Installation](#installation)
-- [Basic Usage](#basic-usage)
 - [Backing Storage](#backing-storage)
 - [Describing Models](#describing-models)
 - [SwiftUI Integration](#swiftui-integration)
@@ -42,7 +78,7 @@ The framework's reactive nature and automatic dependency tracking make it partic
 
 ## Core Concepts
 
-The library is built around two primary types of nodes:
+At its heart, this **Swift reactive library** is built around two primary types of nodes, which promote a **declarative Swift state** approach:
 
 ### Stored Value Nodes
 
@@ -74,7 +110,7 @@ viewModel.count += 1
 
 ### Computed Value Nodes
 
-Computed nodes derive their values from other nodes and automatically update when dependencies change:
+**Swift computed properties** (or Computed nodes) derive their values from other nodes and automatically update when dependencies change:
 
 ```swift
 let a = Stored(wrappedValue: 10)
@@ -92,9 +128,9 @@ a.wrappedValue = 15
 print(sum.wrappedValue) // 35
 ```
 
-### Dependency Tracking
+### Automatic Swift Dependency Tracking
 
-The power of Swift State Graph lies in its automatic dependency tracking:
+The power of Swift State Graph lies in its automatic **Swift dependency tracking**:
 
 1. When a computed node accesses another node's value, a dependency is automatically recorded
 2. When a node's value changes, all dependent nodes are marked as "potentially dirty"
@@ -103,6 +139,8 @@ The power of Swift State Graph lies in its automatic dependency tracking:
 This creates a reactive system where changes propagate automatically through the dependency graph.
 
 ## Installation
+
+To integrate this **Swift reactive library** into your project, use the Swift Package Manager.
 
 ### Swift Package Manager
 
@@ -123,36 +161,9 @@ Then add the dependency to your target:
 )
 ```
 
-## Basic Usage
-
-Here's a simple example of how to use Swift State Graph:
-
-```swift
-import StateGraph
-
-final class CounterViewModel {
-  @GraphStored
-  var count: Int
-
-  @GraphComputed
-  var isEven: Bool
-
-  init(count: Int) {
-    self.count = count
-    self.$isEven = .init { [$count] _ in
-      $count.wrappedValue % 2 == 0
-    }
-  }
-
-  func increment() {
-    count += 1
-  }
-}
-```
-
 ## Backing Storage
 
-Swift State Graph provides flexible backing storage options for your stored properties, allowing you to persist data beyond in-memory storage.
+Effective **Swift state management** often requires persistence. Swift State Graph provides flexible backing storage options for your stored properties, allowing you to persist data beyond in-memory storage.
 
 ### In-Memory Storage (Default)
 
@@ -261,7 +272,7 @@ public enum GraphStorageBacking {
 
 ## Describing Models
 
-Swift State Graph makes it easy to define reactive data models. Here's an example of a library management system:
+Swift State Graph makes it easy to define reactive data models, helping you **manage Swift app state** effectively. It's particularly useful when dealing with complex object relationships, promoting a more **declarative Swift state** representation in your applications. Here's an example of a library management system:
 
 ```swift
 final class Author {
@@ -332,7 +343,7 @@ print(booksByJohn.wrappedValue.count) // 2
 
 ## SwiftUI Integration
 
-Swift State Graph integrates seamlessly with SwiftUI:
+Swift State Graph offers robust **SwiftUI state management** capabilities, integrating seamlessly with SwiftUI's reactive paradigm. This allows developers to manage **SwiftUI state** with more power and flexibility.
 
 ```swift
 import SwiftUI
@@ -366,7 +377,7 @@ struct CounterView: View {
 
 ### Environment Integration with GraphObject
 
-Swift State Graph provides seamless integration with SwiftUI's Environment system through the `GraphObject` protocol. This allows you to pass state objects through the SwiftUI view hierarchy just like native Observable objects.
+Swift State Graph provides seamless integration with SwiftUI's Environment system through the `GraphObject` protocol. This allows you to pass state objects through the SwiftUI view hierarchy, simplifying **SwiftUI state management** further, much like native Observable objects but with the added benefits of **Swift dependency tracking** and **Swift computed properties**.
 
 #### Defining a GraphObject
 
@@ -515,7 +526,7 @@ struct CartView: View {
 
 ## UIKit Integration
 
-While Swift State Graph doesn't have direct UIKit-specific APIs, its reactive nature makes it easy to use with UIKit through the `withGraphTracking` function:
+For **UIKit state management**, Swift State Graph brings the power of **reactive programming Swift** to your UIKit applications. While it doesn't have direct UIKit-specific APIs, its reactive nature and tools like `withGraphTracking` make it easy to manage **UIKit state** and simplify complex UI updates.
 
 ```swift
 import UIKit
@@ -589,9 +600,11 @@ class CounterViewController: UIViewController {
 
 ## Advanced Usage
 
+The advanced features of Swift State Graph further enhance your ability to handle sophisticated **Swift state management** scenarios, leveraging the full potential of **reactive programming Swift**.
+
 ### Subscribing to Multiple Nodes with `withGraphTracking`
 
-The `withGraphTracking` function allows you to create a subscription that observes multiple nodes at once:
+The `withGraphTracking` function allows you to create a subscription that observes multiple nodes at once, a core aspect of powerful **Swift state management**:
 
 ```swift
 // Example: Managing product availability in an e-commerce app
@@ -700,10 +713,11 @@ By storing the returned subscription object in a property, you ensure the tracki
 
 ## Comparing with Swift's Observable Protocol
 
-The key difference between Swift State Graph and Swift's standard `Observable` protocol is the presence of **Computed nodes** in Swift State Graph.
+Understanding **Swift Observable compatibility** is key when choosing a state management solution. The primary differentiator for Swift State Graph over Swift's standard `Observable` protocol is its sophisticated approach to **Swift computed properties** and automatic **Swift dependency tracking**.
 
-While the standard `Observable` protocol in Swift is designed for observing changes to stored properties, Swift State Graph introduces **Computed nodes** that can automatically derive their values from other nodes.
-These computed nodes track dependencies and update reactively when any of their source nodes change, enabling more powerful and declarative state relationships.
+While the standard `Observable` protocol in Swift provides a basic foundation for **reactive programming Swift** by observing changes to stored properties, Swift State Graph significantly enhances this.
+
+It introduces graph-based **Swift computed properties** (Computed nodes) that automatically derive their values from other nodes. These nodes meticulously track dependencies and update reactively when any source nodes change, enabling more powerful, granular, and **declarative Swift state** relationships. This advanced **Swift state management** capability simplifies complex data flows.
 
 **Example:**
 
@@ -723,7 +737,7 @@ With Swift State Graph, you can build complex, reactive data flows that are diff
 
 ## Migration from Observable
 
-If you're currently using Swift's `@Observable` protocol, migrating to Swift State Graph can provide enhanced reactivity and automatic dependency tracking. Here's a step-by-step guide to help you transition your existing code.
+If you're currently using Swift's `@Observable` protocol, migrating to Swift State Graph can significantly enhance your **Swift state management** capabilities, offering improved reactivity through automatic **Swift dependency tracking** and powerful **Swift computed properties**. This guide will help you transition your existing code to a more robust **reactive programming Swift** model.
 
 ### Basic Observable Class Migration
 
@@ -992,19 +1006,19 @@ self.$b = .init { [$a] _ in $a.wrappedValue + 1 }
 
 ### When to Consider Migration
 
-Consider migrating from Observable to Swift State Graph when you have:
+Consider migrating from Observable to Swift State Graph when you need more advanced **Swift state management** features, such as:
 
-- Complex computed properties with multiple dependencies
-- Need for automatic dependency tracking
-- Cascading updates across multiple properties  
-- Performance concerns with manual state management
-- Desire for more declarative reactive programming
+- Complex **Swift computed properties** with multiple dependencies.
+- Robust and automatic **Swift dependency tracking**.
+- Cascading updates across multiple properties for a truly reactive system.
+- Performance concerns with manual state management under `Observable`.
+- A more **declarative Swift state** approach to **reactive programming Swift**.
 
 The migration process is typically straightforward and results in cleaner, more maintainable code with automatic reactivity.
 
 ## Data Normalization
 
-Swift State Graph provides a normalization module for efficiently managing and accessing related data. The `StateGraphNormalization` module helps you organize your data in a normalized structure, making it easier to handle complex relationships between entities.
+Effectively managing relational data is a common challenge in **Swift state management**. Swift State Graph provides a normalization module to efficiently **manage Swift app state** when dealing with structured, related data. The `StateGraphNormalization` module helps you organize your data in a normalized structure, making it easier to handle complex relationships between entities.
 
 ### Core Concepts
 
@@ -1159,13 +1173,13 @@ print(post.comments.count) // 1
 
 ### Benefits of Normalization
 
-Using the normalization module provides several advantages:
+Using the normalization module provides several advantages for robust **Swift state management**:
 
-1. **Single Source of Truth**: Entities are stored once, preventing duplication and inconsistencies
-2. **Efficient Updates**: Changes to an entity are automatically reflected in all computed properties
-3. **Relationship Management**: Easily handle one-to-many and many-to-many relationships
-4. **Performance**: Optimized for fast lookups and updates through ID-based access
-5. **Reactivity**: Combined with State Graph's dependency tracking for automatic UI updates
+1. **Single Source of Truth**: Entities are stored once, preventing duplication and inconsistencies, which is crucial to **manage Swift app state** reliably.
+2. **Efficient Updates**: Changes to an entity are automatically reflected in all computed properties that depend on them.
+3. **Relationship Management**: Easily handle one-to-many and many-to-many relationships with clear definitions.
+4. **Performance**: Optimized for fast lookups and updates through ID-based access.
+5. **Reactivity**: Combined with Swift State Graph's automatic **Swift dependency tracking** for seamless UI updates and reactive data flows.
 
 ### Sharing State Between Objects with @GraphStored Reference Assignment
 
