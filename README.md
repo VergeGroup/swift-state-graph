@@ -69,6 +69,7 @@ The framework's reactive nature and automatic **Swift dependency tracking** make
 - [Installation](#installation)
 - [Backing Storage](#backing-storage)
 - [Describing Models](#describing-models)
+- [Basic SwiftUI Example](#basic-swiftui-example)
 - [SwiftUI Integration](#swiftui-integration)
 - [UIKit Integration](#uikit-integration)
 - [Advanced Usage](#advanced-usage)
@@ -344,36 +345,6 @@ print(booksByJohn.wrappedValue.count) // 2
 ## SwiftUI Integration
 
 Swift State Graph offers robust **SwiftUI state management** capabilities, integrating seamlessly with SwiftUI's reactive paradigm. This allows developers to manage **SwiftUI state** with more power and flexibility.
-
-```swift
-import SwiftUI
-import StateGraph
-
-final class CounterViewModel {
-  @GraphStored
-  var count: Int = 0
-}
-
-struct CounterView: View {
-  let viewModel: CounterViewModel
-
-  var body: some View {
-    VStack {
-      Text("Count: \(viewModel.count)")
-
-      // Using the viewModel directly
-      Button("Increment") {
-        viewModel.count += 1
-      }
-
-      // Using a SwiftUI binding
-      // The $count property accesses the underlying Stored node
-      // And the binding property converts it to a SwiftUI Binding
-      TextField("New Count", value: viewModel.$count.binding, format: .number)
-    }
-  }
-}
-```
 
 ### Environment Integration with GraphObject
 
