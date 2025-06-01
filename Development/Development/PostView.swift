@@ -439,13 +439,11 @@ struct PostCellView: View {
           Text("Comments")
             .font(.subheadline)
             .foregroundColor(.secondary)
-          
-          List {
-            ForEach(post.activeComments) { comment in
-              CommentView(comment: comment)
-            }
+                   
+          ForEach(post.activeComments) { comment in
+            CommentView(comment: comment)
           }
-          .listStyle(.plain)
+          
         }
       }
     }

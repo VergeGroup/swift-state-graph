@@ -13,6 +13,13 @@ struct ContentView: View {
   var body: some View {
     NavigationStack {
       Form {
+        
+        NavigationLink {
+          Observe_specific(model: .init(name: "A", count: 1))
+        } label: { 
+          Text("Observe specific") 
+        }
+        
         NavigationLink { 
           Text("Empty")
         } label: { 
@@ -95,6 +102,30 @@ final class Model: Sendable {
     self.count1 = count
   }
   
+}
+
+struct Observe_specific: View {
+  
+  let model: Model
+  
+  var body: some View {
+    let _ = Self._printChanges()    
+    Form {
+      Text("This view should be updated only when count1 changes.")
+      Text("\(model.count1)")
+      Button("Update count1") {
+        model.count1 += 1
+      }
+      Button("Update count2") {
+        model.count2 += 1
+      }
+    }
+  }
+  
+}
+
+#Preview("Observe_specific") {
+  Observe_specific(model: .init(name: "A", count: 1))
 }
 
 private struct Book_StateView: View {
