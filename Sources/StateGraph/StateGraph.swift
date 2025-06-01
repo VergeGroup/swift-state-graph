@@ -227,7 +227,7 @@ public final class Computed<Value>: Node, Observable, CustomDebugStringConvertib
       
 #if canImport(Observation)
       if #available(macOS 14.0, iOS 17.0, watchOS 10.0, tvOS 17.0, *) {
-        observationRegistrar.willSet(self, keyPath: \.self)
+        observationRegistrar.willSet(PointerKeyPathRoot.shared, keyPath: _keyPath(self))   
       }
 #endif
       
@@ -251,7 +251,7 @@ public final class Computed<Value>: Node, Observable, CustomDebugStringConvertib
     _read {
       #if canImport(Observation)
         if #available(macOS 14.0, iOS 17.0, watchOS 10.0, tvOS 17.0, *) {
-          observationRegistrar.access(self, keyPath: \.self)
+          observationRegistrar.access(PointerKeyPathRoot.shared, keyPath: _keyPath(self))   
         }
       #endif
       recomputeIfNeeded()
@@ -296,7 +296,7 @@ public final class Computed<Value>: Node, Observable, CustomDebugStringConvertib
     self.lock = .init()
 
     if #available(macOS 14.0, iOS 17.0, watchOS 10.0, tvOS 17.0, *) {
-      self._observationRegistrar = ObservationRegistrar()
+      self._observationRegistrar = ObservationRegistrar.shared
     } else {
       self._observationRegistrar = nil
     }
@@ -334,7 +334,7 @@ public final class Computed<Value>: Node, Observable, CustomDebugStringConvertib
     self.lock = .init()
 
     if #available(macOS 14.0, iOS 17.0, watchOS 10.0, tvOS 17.0, *) {
-      self._observationRegistrar = ObservationRegistrar()
+      self._observationRegistrar = ObservationRegistrar.shared
     } else {
       self._observationRegistrar = nil
     }
@@ -372,7 +372,7 @@ public final class Computed<Value>: Node, Observable, CustomDebugStringConvertib
     self.lock = .init()
 
     if #available(macOS 14.0, iOS 17.0, watchOS 10.0, tvOS 17.0, *) {
-      self._observationRegistrar = ObservationRegistrar()
+      self._observationRegistrar = ObservationRegistrar.shared
     } else {
       self._observationRegistrar = nil
     }

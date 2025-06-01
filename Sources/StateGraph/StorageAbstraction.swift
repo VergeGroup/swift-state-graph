@@ -148,7 +148,7 @@ public final class _Stored<Value, S: Storage<Value>>: Node, Observable, CustomDe
       
 #if canImport(Observation)
       if #available(macOS 14.0, iOS 17.0, watchOS 10.0, tvOS 17.0, *) {
-        observationRegistrar.access(self, keyPath: \.self)
+        observationRegistrar.access(PointerKeyPathRoot.shared, keyPath: _keyPath(self))        
       }
 #endif
       
@@ -172,12 +172,12 @@ public final class _Stored<Value, S: Storage<Value>>: Node, Observable, CustomDe
       
 #if canImport(Observation)
       if #available(macOS 14.0, iOS 17.0, watchOS 10.0, tvOS 17.0, *) { 
-        observationRegistrar.willSet(self, keyPath: \.self)
+        observationRegistrar.willSet(PointerKeyPathRoot.shared, keyPath: _keyPath(self))   
       }
       
       defer {
         if #available(macOS 14.0, iOS 17.0, watchOS 10.0, tvOS 17.0, *) {
-          observationRegistrar.didSet(self, keyPath: \.self)
+          observationRegistrar.didSet(PointerKeyPathRoot.shared, keyPath: _keyPath(self))
         }
       }
 #endif
@@ -208,8 +208,8 @@ public final class _Stored<Value, S: Storage<Value>>: Node, Observable, CustomDe
     if #available(macOS 14.0, iOS 17.0, watchOS 10.0, tvOS 17.0, *) {
       // Workaround: SwiftUI will not trigger update if we call only didSet.
       // as here is where the value already updated.
-      observationRegistrar.willSet(self, keyPath: \.self)
-      observationRegistrar.didSet(self, keyPath: \.self)
+      observationRegistrar.willSet(PointerKeyPathRoot.shared, keyPath: _keyPath(self))   
+      observationRegistrar.didSet(PointerKeyPathRoot.shared, keyPath: _keyPath(self))   
     }
 #endif
     
@@ -261,7 +261,7 @@ public final class _Stored<Value, S: Storage<Value>>: Node, Observable, CustomDe
     self.storage = storage
     
     if #available(macOS 14.0, iOS 17.0, watchOS 10.0, tvOS 17.0, *) {
-      self._observationRegistrar = ObservationRegistrar()
+      self._observationRegistrar = ObservationRegistrar.shared
     } else {
       self._observationRegistrar = nil
     }
