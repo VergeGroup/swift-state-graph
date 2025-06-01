@@ -195,9 +195,8 @@ public final class Computed<Value>: Node, Observable, CustomDebugStringConvertib
   #if canImport(Observation)
     @available(macOS 14.0, iOS 17.0, watchOS 10.0, tvOS 17.0, *)
     private var observationRegistrar: ObservationRegistrar {
-      _observationRegistrar as! ObservationRegistrar
+      return .shared
     }
-    private let _observationRegistrar: (Any & Sendable)?
   #endif
 
   public var potentiallyDirty: Bool {
@@ -295,12 +294,6 @@ public final class Computed<Value>: Node, Observable, CustomDebugStringConvertib
     self.descriptor = descriptor
     self.lock = .init()
 
-    if #available(macOS 14.0, iOS 17.0, watchOS 10.0, tvOS 17.0, *) {
-      self._observationRegistrar = ObservationRegistrar.shared
-    } else {
-      self._observationRegistrar = nil
-    }
-
 #if DEBUG
     Task {
       await NodeStore.shared.register(node: self)
@@ -333,12 +326,6 @@ public final class Computed<Value>: Node, Observable, CustomDebugStringConvertib
     self.descriptor = AnyComputedDescriptor(compute: rule, isEqual: { _, _ in false })      
     self.lock = .init()
 
-    if #available(macOS 14.0, iOS 17.0, watchOS 10.0, tvOS 17.0, *) {
-      self._observationRegistrar = ObservationRegistrar.shared
-    } else {
-      self._observationRegistrar = nil
-    }
-
 #if DEBUG
     Task {
       await NodeStore.shared.register(node: self)
@@ -370,13 +357,7 @@ public final class Computed<Value>: Node, Observable, CustomDebugStringConvertib
     )
     self.descriptor = AnyComputedDescriptor(compute: rule, isEqual: { $0 == $1 })
     self.lock = .init()
-
-    if #available(macOS 14.0, iOS 17.0, watchOS 10.0, tvOS 17.0, *) {
-      self._observationRegistrar = ObservationRegistrar.shared
-    } else {
-      self._observationRegistrar = nil
-    }
-
+   
 #if DEBUG
     Task {
       await NodeStore.shared.register(node: self)
