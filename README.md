@@ -34,12 +34,21 @@ final class CounterModel {
     self.$isEven = .init { [$count] _ in
       $count.wrappedValue % 2 == 0
     }
-  }
+  }  
+}
 
-  func increment() {
-    count += 1
+struct SettingsView: View {
+  let model: CounterModel
+  
+  var body: some View {
+    // 👨🏻 Only view updates when `model.count` changed.
+    Text("\(model.count)")
+    Button("Up") {
+      model.count += 1
+    }
   }
 }
+
 ```
 
 ### Universal Swift Application Support
