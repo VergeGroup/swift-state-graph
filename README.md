@@ -22,7 +22,7 @@ Here's a glimpse of how Swift State Graph simplifies state management:
 ```swift
 import StateGraph
 
-final class CounterViewModel {
+final class CounterModel {
   @GraphStored
   var count: Int
 
