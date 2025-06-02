@@ -127,9 +127,8 @@ public final class _Stored<Value, S: Storage<Value>>: Node, Observable, CustomDe
 #if canImport(Observation)
   @available(macOS 14.0, iOS 17.0, watchOS 10.0, tvOS 17.0, *)
   private var observationRegistrar: ObservationRegistrar {
-    _observationRegistrar as! ObservationRegistrar
+    return .shared
   }
-  private let _observationRegistrar: (Any & Sendable)?
 #endif
   
   public var potentiallyDirty: Bool {
@@ -259,13 +258,7 @@ public final class _Stored<Value, S: Storage<Value>>: Node, Observable, CustomDe
     )
     self.lock = .init()
     self.storage = storage
-    
-    if #available(macOS 14.0, iOS 17.0, watchOS 10.0, tvOS 17.0, *) {
-      self._observationRegistrar = ObservationRegistrar.shared
-    } else {
-      self._observationRegistrar = nil
-    }
-    
+           
     self.storage.loaded(context: .init(onStorageUpdated: { [weak self] in      
       self?.notifyStorageUpdated()      
     }))
