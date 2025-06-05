@@ -385,7 +385,7 @@ public final class Computed<Value>: Node, Observable, CustomDebugStringConvertib
   }
   
     deinit {
-      Log.generic.debug("Deinit Computed: \(self.info.name.map(String.init) ?? "noname")")
+//      Log.generic.debug("Deinit Computed: \(self.info.name.map(String.init) ?? "noname")")
       for edge in incomingEdges {
         edge.from.outgoingEdges.removeAll(where: { $0 === edge })
       }
