@@ -271,7 +271,7 @@ public final class _Stored<Value, S: Storage<Value>>: Node, Observable, CustomDe
   }
   
   deinit {
-    Log.generic.debug("Deinit StoredNode: \(self.info.name.map(String.init) ?? "noname")")
+//    Log.generic.debug("Deinit StoredNode: \(self.info.name.map(String.init) ?? "noname")")
     for edge in outgoingEdges {
       edge.to.incomingEdges.removeAll(where: { $0 === edge })
     }
