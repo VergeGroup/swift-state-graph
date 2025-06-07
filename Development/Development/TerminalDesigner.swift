@@ -8,7 +8,7 @@
 import SwiftUI
 import StateGraph
 
-struct ANSIColorScheme: Codable {
+struct ANSIColorScheme: Codable, UserDefaultsStorable {
   var black: Color = .black
   var red: Color = .red
   var green: Color = .green
@@ -78,7 +78,7 @@ private struct ColorPickerRow: View {
   }
 }
 
-private struct TerminalPreview: View {
+struct TerminalPreview: View {
   let colorScheme: ANSIColorScheme
   
   var body: some View {
@@ -170,7 +170,7 @@ extension View {
   }
 }
 
-private struct _Book: View {
+struct TerminalColorDesigner: View {
   let store = TerminalColorSchemeStore()
   
   var body: some View {
@@ -184,14 +184,14 @@ private struct _Book: View {
               .font(.headline)
             
             Group {
-              ColorPickerRow(title: "Black", color: store.$colorScheme.black.binding)
-              ColorPickerRow(title: "Red", color: store.$colorScheme.red.binding)
-              ColorPickerRow(title: "Green", color: store.$colorScheme.green.binding)
-              ColorPickerRow(title: "Yellow", color: store.$colorScheme.yellow.binding)
-              ColorPickerRow(title: "Blue", color: store.$colorScheme.blue.binding)
-              ColorPickerRow(title: "Magenta", color: store.$colorScheme.magenta.binding)
-              ColorPickerRow(title: "Cyan", color: store.$colorScheme.cyan.binding)
-              ColorPickerRow(title: "White", color: store.$colorScheme.white.binding)
+              ColorPickerRow(title: "Black", color: store.$colorScheme.binding.black)
+              ColorPickerRow(title: "Red", color: store.$colorScheme.binding.red)
+              ColorPickerRow(title: "Green", color: store.$colorScheme.binding.green)
+              ColorPickerRow(title: "Yellow", color: store.$colorScheme.binding.yellow)
+              ColorPickerRow(title: "Blue", color: store.$colorScheme.binding.blue)
+              ColorPickerRow(title: "Magenta", color: store.$colorScheme.binding.magenta)
+              ColorPickerRow(title: "Cyan", color: store.$colorScheme.binding.cyan)
+              ColorPickerRow(title: "White", color: store.$colorScheme.binding.white)
             }
           }
           
@@ -200,14 +200,14 @@ private struct _Book: View {
               .font(.headline)
             
             Group {
-              ColorPickerRow(title: "Bright Black", color: store.$colorScheme.brightBlack.binding)
-              ColorPickerRow(title: "Bright Red", color: store.$colorScheme.brightRed.binding)
-              ColorPickerRow(title: "Bright Green", color: store.$colorScheme.brightGreen.binding)
-              ColorPickerRow(title: "Bright Yellow", color: store.$colorScheme.brightYellow.binding)
-              ColorPickerRow(title: "Bright Blue", color: store.$colorScheme.brightBlue.binding)
-              ColorPickerRow(title: "Bright Magenta", color: store.$colorScheme.brightMagenta.binding)
-              ColorPickerRow(title: "Bright Cyan", color: store.$colorScheme.brightCyan.binding)
-              ColorPickerRow(title: "Bright White", color: store.$colorScheme.brightWhite.binding)
+              ColorPickerRow(title: "Bright Black", color: store.$colorScheme.binding.brightBlack)
+              ColorPickerRow(title: "Bright Red", color: store.$colorScheme.binding.brightRed)
+              ColorPickerRow(title: "Bright Green", color: store.$colorScheme.binding.brightGreen)
+              ColorPickerRow(title: "Bright Yellow", color: store.$colorScheme.binding.brightYellow)
+              ColorPickerRow(title: "Bright Blue", color: store.$colorScheme.binding.brightBlue)
+              ColorPickerRow(title: "Bright Magenta", color: store.$colorScheme.binding.brightMagenta)
+              ColorPickerRow(title: "Bright Cyan", color: store.$colorScheme.binding.brightCyan)
+              ColorPickerRow(title: "Bright White", color: store.$colorScheme.binding.brightWhite)
             }
           }
         }
@@ -217,8 +217,8 @@ private struct _Book: View {
             .font(.headline)
           
           HStack(spacing: 40) {
-            ColorPickerRow(title: "Background", color: store.$colorScheme.background.binding)
-            ColorPickerRow(title: "Foreground", color: store.$colorScheme.foreground.binding)
+            ColorPickerRow(title: "Background", color: store.$colorScheme.binding.background)
+            ColorPickerRow(title: "Foreground", color: store.$colorScheme.binding.foreground)
           }
         }
       }
@@ -229,5 +229,5 @@ private struct _Book: View {
 }
 
 #Preview("TerminalColorScheme") {
-  _Book()
+  TerminalColorDesigner()
 }
