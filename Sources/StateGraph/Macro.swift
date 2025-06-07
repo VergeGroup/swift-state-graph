@@ -43,6 +43,18 @@ public macro GraphStored(backed: GraphStorageBacking = .memory) = #externalMacro
 
 import os.lock
 
+// Test top-level property - this should not have init accessor but should have get/set
+@GraphStored
+var testTopLevel: Int = 123
+
+enum Static {
+  @GraphStored
+  static var staticValue: Int = 0
+  
+  @GraphStored
+  static var staticValue2: String? = nil
+}
+
 final class UserDefaultsModel {
   
   @GraphStored(backed: .userDefaults(key: "value")) var value: Int = 0
