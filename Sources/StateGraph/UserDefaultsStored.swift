@@ -5,14 +5,14 @@ import Foundation
 /// A protocol for types that can be stored in UserDefaults
 public protocol UserDefaultsStorable: Equatable, Sendable {
   @_spi(Internal)
-  static func getValue(from userDefaults: UserDefaults, forKey key: String, defaultValue: Self) -> Self
+  static func _getValue(from userDefaults: UserDefaults, forKey key: String, defaultValue: Self) -> Self
   @_spi(Internal)
-  func setValue(to userDefaults: UserDefaults, forKey key: String)
+  func _setValue(to userDefaults: UserDefaults, forKey key: String)
 }
 
 extension UserDefaultsStorable {
   @_spi(Internal)
-  public static func getValue(from userDefaults: UserDefaults, forKey key: String, defaultValue: Self) -> Self {
+  public static func _getValue(from userDefaults: UserDefaults, forKey key: String, defaultValue: Self) -> Self {
     if userDefaults.object(forKey: key) == nil {
       return defaultValue
     }
@@ -22,96 +22,126 @@ extension UserDefaultsStorable {
 
 extension Bool: UserDefaultsStorable {
   @_spi(Internal)
-  public static func getValue(from userDefaults: UserDefaults, forKey key: String, defaultValue: Bool) -> Bool {
+  public static func _getValue(from userDefaults: UserDefaults, forKey key: String, defaultValue: Bool) -> Bool {
     if userDefaults.object(forKey: key) == nil {
       return defaultValue
     }
     return userDefaults.bool(forKey: key)
   }
   @_spi(Internal)
-  public func setValue(to userDefaults: UserDefaults, forKey key: String) {
+  public func _setValue(to userDefaults: UserDefaults, forKey key: String) {
     userDefaults.set(self, forKey: key)
   }
 }
 
 extension Int: UserDefaultsStorable {
   @_spi(Internal)
-  public static func getValue(from userDefaults: UserDefaults, forKey key: String, defaultValue: Int) -> Int {
+  public static func _getValue(from userDefaults: UserDefaults, forKey key: String, defaultValue: Int) -> Int {
     if userDefaults.object(forKey: key) == nil {
       return defaultValue
     }
     return userDefaults.integer(forKey: key)
   }
   @_spi(Internal)
-  public func setValue(to userDefaults: UserDefaults, forKey key: String) {
+  public func _setValue(to userDefaults: UserDefaults, forKey key: String) {
     userDefaults.set(self, forKey: key)
   }
 }
 
 extension Float: UserDefaultsStorable {
   @_spi(Internal)
-  public static func getValue(from userDefaults: UserDefaults, forKey key: String, defaultValue: Float) -> Float {
+  public static func _getValue(from userDefaults: UserDefaults, forKey key: String, defaultValue: Float) -> Float {
     if userDefaults.object(forKey: key) == nil {
       return defaultValue
     }
     return userDefaults.float(forKey: key)
   }
   @_spi(Internal)
-  public func setValue(to userDefaults: UserDefaults, forKey key: String) {
+  public func _setValue(to userDefaults: UserDefaults, forKey key: String) {
     userDefaults.set(self, forKey: key)
   }
 }
 
 extension Double: UserDefaultsStorable {
   @_spi(Internal)
-  public static func getValue(from userDefaults: UserDefaults, forKey key: String, defaultValue: Double) -> Double {
+  public static func _getValue(from userDefaults: UserDefaults, forKey key: String, defaultValue: Double) -> Double {
     if userDefaults.object(forKey: key) == nil {
       return defaultValue
     }
     return userDefaults.double(forKey: key)
   }
   @_spi(Internal)
-  public func setValue(to userDefaults: UserDefaults, forKey key: String) {
+  public func _setValue(to userDefaults: UserDefaults, forKey key: String) {
     userDefaults.set(self, forKey: key)
   }
 }
 
 extension String: UserDefaultsStorable {
   @_spi(Internal)
-  public static func getValue(from userDefaults: UserDefaults, forKey key: String, defaultValue: String) -> String {
+  public static func _getValue(from userDefaults: UserDefaults, forKey key: String, defaultValue: String) -> String {
     return userDefaults.string(forKey: key) ?? defaultValue
   }
   @_spi(Internal)
-  public func setValue(to userDefaults: UserDefaults, forKey key: String) {
+  public func _setValue(to userDefaults: UserDefaults, forKey key: String) {
     userDefaults.set(self, forKey: key)
   }
 }
 
 extension Data: UserDefaultsStorable {
   @_spi(Internal)
-  public static func getValue(from userDefaults: UserDefaults, forKey key: String, defaultValue: Data) -> Data {
+  public static func _getValue(from userDefaults: UserDefaults, forKey key: String, defaultValue: Data) -> Data {
     return userDefaults.data(forKey: key) ?? defaultValue
   }
   @_spi(Internal)
-  public func setValue(to userDefaults: UserDefaults, forKey key: String) {
+  public func _setValue(to userDefaults: UserDefaults, forKey key: String) {
     userDefaults.set(self, forKey: key)
   }
 }
 
 extension Date: UserDefaultsStorable {
   @_spi(Internal)
-  public static func getValue(from userDefaults: UserDefaults, forKey key: String, defaultValue: Date) -> Date {
+  public static func _getValue(from userDefaults: UserDefaults, forKey key: String, defaultValue: Date) -> Date {
     return userDefaults.object(forKey: key) as? Date ?? defaultValue
   }
   @_spi(Internal)
-  public func setValue(to userDefaults: UserDefaults, forKey key: String) {
+  public func _setValue(to userDefaults: UserDefaults, forKey key: String) {
     userDefaults.set(self, forKey: key)
+  }
+}
+
+private enum Static {
+  static let decoder = JSONDecoder()
+  static let encoder = JSONEncoder()
+}
+
+extension UserDefaultsStorable where Self: Codable {
+  @_spi(Internal)
+  public static func _getValue(from userDefaults: UserDefaults, forKey key: String, defaultValue: Self) -> Self {
+    guard let data = userDefaults.data(forKey: key) else {
+      return defaultValue
+    }
+    do {
+      return try Static.decoder.decode(Self.self, from: data)
+    } catch {
+      return defaultValue
+    }
+  }
+  
+  @_spi(Internal)
+  public func _setValue(to userDefaults: UserDefaults, forKey key: String) {
+    do {
+      let data = try Static.encoder.encode(self)
+      userDefaults.set(data, forKey: key)
+    } catch {
+      // If encoding fails, remove the key to avoid inconsistent state
+      userDefaults.removeObject(forKey: key)
+    }
   }
 }
 
 extension Optional: UserDefaultsStorable where Wrapped: UserDefaultsStorable {
   @_spi(Internal)
-  public static func getValue(from userDefaults: UserDefaults, forKey key: String, defaultValue: Self) -> Self {
+  public static func _getValue(from userDefaults: UserDefaults, forKey key: String, defaultValue: Self) -> Self {
     if userDefaults.object(forKey: key) == nil {
       return defaultValue
     }
@@ -124,9 +154,9 @@ extension Optional: UserDefaultsStorable where Wrapped: UserDefaultsStorable {
     return tempValue as? Wrapped
   }
   @_spi(Internal)
-  public func setValue(to userDefaults: UserDefaults, forKey key: String) {
+  public func _setValue(to userDefaults: UserDefaults, forKey key: String) {
     if let value = self {
-      value.setValue(to: userDefaults, forKey: key)
+      value._setValue(to: userDefaults, forKey: key)
     } else {
       userDefaults.removeObject(forKey: key)
     }

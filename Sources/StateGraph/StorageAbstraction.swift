@@ -63,12 +63,25 @@ public final class UserDefaultsStorage<Value: UserDefaultsStorable>: Storage, Se
   nonisolated(unsafe)
   private var subscription: NSObjectProtocol?
   
+  nonisolated(unsafe)
+  private var cachedValue: Value?
+  
   public var value: Value {
     get {
-      return Value.getValue(from: userDefaults, forKey: key, defaultValue: defaultValue)
+      if let cachedValue {
+        return cachedValue
+      }
+      let loadedValue = Value._getValue(
+        from: userDefaults,
+        forKey: key,
+        defaultValue: defaultValue
+      )
+      cachedValue = loadedValue
+      return loadedValue
     }
     set {
-      newValue.setValue(to: userDefaults, forKey: key)
+      cachedValue = newValue
+      newValue._setValue(to: userDefaults, forKey: key)
     }
   }
   
@@ -97,6 +110,8 @@ public final class UserDefaultsStorage<Value: UserDefaultsStorable>: Storage, Se
         using: { [weak self] _ in                      
           guard let self else { return }
           
+          // Invalidate cache and reload value
+          self.cachedValue = nil
           let value = self.value
           guard self.previousValue != value else {
             return
