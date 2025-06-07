@@ -470,7 +470,8 @@ extension UnifiedStoredMacro: AccessorMacro {
     return createAccessors(
       propertyName: propertyName,
       variableDecl: variableDecl,
-      backingType: backingType
+      backingType: backingType,
+      context: context
     )
   }
 
@@ -478,11 +479,12 @@ extension UnifiedStoredMacro: AccessorMacro {
   private static func createAccessors(
     propertyName: String,
     variableDecl: VariableDeclSyntax,
-    backingType: BackingStorageType
+    backingType: BackingStorageType,
+    context: some MacroExpansionContext
   ) -> [AccessorDeclSyntax] {
     switch backingType {
     case .memory:
-      return createMemoryAccessors(propertyName: propertyName, variableDecl: variableDecl)
+      return createMemoryAccessors(propertyName: propertyName, variableDecl: variableDecl, context: context)
     case .userDefaults:
       return createUserDefaultsAccessors(propertyName: propertyName, variableDecl: variableDecl)
     }
@@ -491,16 +493,17 @@ extension UnifiedStoredMacro: AccessorMacro {
   /// Creates accessor declarations for memory storage
   private static func createMemoryAccessors(
     propertyName: String,
-    variableDecl: VariableDeclSyntax
+    variableDecl: VariableDeclSyntax,
+    context: some MacroExpansionContext
   ) -> [AccessorDeclSyntax] {
-    let needsInitAccessor = determineIfInitAccessorNeeded(for: variableDecl)
+    let needsInitAccessor = determineIfInitAccessorNeeded(for: variableDecl, context: context)
     var accessors: [AccessorDeclSyntax] = []
 
     if needsInitAccessor {
       accessors.append(
         createMemoryInitAccessor(propertyName: propertyName, variableDecl: variableDecl))
-    } else if !variableDecl.isStatic {
-      // Only add the access-based init accessor for non-static properties
+    } else if !variableDecl.isStatic && !isTopLevelProperty(context: context) {
+      // Only add the access-based init accessor for non-static and non-top-level properties
       accessors.append(createMemoryAccessor(propertyName: propertyName, variableDecl: variableDecl))
     }
 
@@ -560,9 +563,14 @@ extension UnifiedStoredMacro: AccessorMacro {
 
   // MARK: - Memory Accessor Helpers
 
-  private static func determineIfInitAccessorNeeded(for variableDecl: VariableDeclSyntax) -> Bool {
+  private static func determineIfInitAccessorNeeded(for variableDecl: VariableDeclSyntax, context: some MacroExpansionContext) -> Bool {
     // Static properties with initializers don't need init accessors
     if variableDecl.isStatic && variableDecl.hasInitializer {
+      return false
+    }
+    
+    // Top-level properties with initializers don't need init accessors
+    if isTopLevelProperty(context: context) && variableDecl.hasInitializer {
       return false
     }
     
@@ -571,6 +579,27 @@ extension UnifiedStoredMacro: AccessorMacro {
     } else {
       return !variableDecl.hasInitializer
     }
+  }
+
+  /// Checks if the property is declared at top level (not inside a type)
+  private static func isTopLevelProperty(context: some MacroExpansionContext) -> Bool {
+    // Check if we're inside a type declaration by looking at the lexical context
+    // If we can't find a parent type context, it's likely a top-level property
+    let lexicalContext = context.lexicalContext
+    
+    // Look through the lexical context to see if we're inside a class, struct, enum, etc.
+    for syntax in lexicalContext {
+      if syntax.is(ClassDeclSyntax.self) ||
+         syntax.is(StructDeclSyntax.self) ||
+         syntax.is(EnumDeclSyntax.self) ||
+         syntax.is(ActorDeclSyntax.self) ||
+         syntax.is(ProtocolDeclSyntax.self) ||
+         syntax.is(ExtensionDeclSyntax.self) {
+        return false // We're inside a type declaration
+      }
+    }
+    
+    return true // No parent type found, so it's top-level
   }
 
   private static func createMemoryInitAccessor(
