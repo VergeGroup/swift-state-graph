@@ -43,6 +43,17 @@ public macro GraphStored(backed: GraphStorageBacking = .memory) = #externalMacro
 
 import os.lock
 
+// @GraphStored
+// private var value: Int = 0
+
+enum Static {
+  @GraphStored
+  static var staticValue: Int = 0
+  
+  @GraphStored
+  static var staticValue2: String? = nil
+}
+
 final class UserDefaultsModel {
   
   @GraphStored(backed: .userDefaults(key: "value")) var value: Int = 0

@@ -227,6 +227,15 @@ extension UnifiedStoredMacro {
 
     // Add @GraphIgnored attribute
     storageDecl.attributes = [.init(.init(stringLiteral: "@GraphIgnored"))]
+    
+    // If it's a static property, ensure the storage is also static
+    if variableDecl.isStatic {
+      var modifiers = storageDecl.modifiers
+      if !modifiers.contains(where: { $0.name.tokenKind == .keyword(.static) }) {
+        modifiers.append(.init(name: .keyword(.static)))
+      }
+      storageDecl = storageDecl.with(\.modifiers, modifiers)
+    }
 
     // Rename with $ prefix and update type
     storageDecl =
@@ -490,7 +499,8 @@ extension UnifiedStoredMacro: AccessorMacro {
     if needsInitAccessor {
       accessors.append(
         createMemoryInitAccessor(propertyName: propertyName, variableDecl: variableDecl))
-    } else {
+    } else if !variableDecl.isStatic {
+      // Only add the access-based init accessor for non-static properties
       accessors.append(createMemoryAccessor(propertyName: propertyName, variableDecl: variableDecl))
     }
 
@@ -551,6 +561,11 @@ extension UnifiedStoredMacro: AccessorMacro {
   // MARK: - Memory Accessor Helpers
 
   private static func determineIfInitAccessorNeeded(for variableDecl: VariableDeclSyntax) -> Bool {
+    // Static properties with initializers don't need init accessors
+    if variableDecl.isStatic && variableDecl.hasInitializer {
+      return false
+    }
+    
     if variableDecl.isOptional || variableDecl.isImplicitlyUnwrappedOptional {
       return false
     } else {
