@@ -50,6 +50,12 @@ extension VariableDeclSyntax {
     }
   }
 
+  var isStatic: Bool {
+    self.modifiers.contains {
+      $0.name.tokenKind == .keyword(.static)
+    }
+  }
+
   consuming func useModifier(sameAs: VariableDeclSyntax) -> Self {
     self.with(\.modifiers, sameAs.modifiers)
   }
