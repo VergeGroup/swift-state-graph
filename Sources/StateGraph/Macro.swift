@@ -45,9 +45,9 @@ import os.lock
 
 // Test top-level property - this should not have init accessor but should have get/set
 @GraphStored
-var testTopLevel: Int = 123
+private var testTopLevel: Int = 123
 
-enum Static {
+private enum Static {
   @GraphStored
   static var staticValue: Int = 0
   

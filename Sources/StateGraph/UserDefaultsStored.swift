@@ -115,7 +115,6 @@ private enum Static {
 }
 
 extension UserDefaultsStorable where Self: Codable {
-  @_spi(Internal)
   public static func _getValue(from userDefaults: UserDefaults, forKey key: String, defaultValue: Self) -> Self {
     guard let data = userDefaults.data(forKey: key) else {
       return defaultValue
@@ -127,7 +126,6 @@ extension UserDefaultsStorable where Self: Codable {
     }
   }
   
-  @_spi(Internal)
   public func _setValue(to userDefaults: UserDefaults, forKey key: String) {
     do {
       let data = try Static.encoder.encode(self)

@@ -6,7 +6,11 @@
       "Bash(swift test:*)",
       "Bash(git checkout:*)",
       "Bash(git add:*)",
-      "Bash(git push:*)"
+      "Bash(git push:*)",
+      "Bash(swift test:*)",
+      "Bash(swift build)",
+      "Bash(git commit:*)",
+      "Bash(gh pr create:*)"
     ],
     "deny": []
   }
