@@ -2,154 +2,24 @@
 
 [![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/vergegroup/swift-state-graph)
 
-## Introduction
+A powerful reactive state management library for Swift applications that uses a Directed Acyclic Graph (DAG) to manage data flow and dependencies.
 
-Navigating the complexities of data and state in Swift applications can often feel like a maze, especially as your project grows. If you're seeking a more intuitive and robust way to approach **Swift state management**, you're in the right place. Traditional methods frequently lead to tangled dependencies, excessive boilerplate, and specific challenges when synchronizing **SwiftUI state** or managing **UIKit state**. This can make it difficult to **manage Swift app state** cohesively and effectively across your application.
+## Key Features
 
-Swift State Graph emerges as a powerful **Swift reactive library**, offering a refreshing graph-based approach to **reactive programming Swift**. It's engineered to untangle these complexities, providing a clear and declarative path to managing your application's data flow.
+- 🔄 **Automatic Dependency Tracking** - Nodes automatically track which other nodes they depend on
+- 🚀 **Lazy Evaluation** - Computed values only recalculate when accessed after dependencies change
+- 🛡️ **Thread Safe** - Built-in concurrency protection with NSRecursiveLock
+- 📱 **Platform Support** - Works seamlessly with SwiftUI, UIKit, and AppKit
+- 💾 **Persistent Storage** - Optional backing storage with UserDefaults
+- 🧩 **Swift Macros** - Clean syntax with @GraphStored and @GraphComputed
 
-With Swift State Graph, you can:
-*   Achieve crystal-clear, declarative state logic thanks to automatic **Swift dependency tracking**.
-*   Effortlessly **manage Swift app state** and derive dynamic information with powerful **Swift computed properties**.
-*   Streamline development across Apple platforms with unified strategies for both **SwiftUI state management** and **UIKit state management**.
+## Requirements
 
-Dive in to discover how Swift State Graph can transform your approach to state.
-
-## 🚀 Quick Start
-
-Here's a glimpse of how Swift State Graph simplifies state management:
-
-```swift
-import StateGraph
-
-final class CounterModel {
-  @GraphStored
-  var count: Int
-
-  @GraphComputed
-  var isEven: Bool
-
-  init(count: Int) {
-    self.count = count
-    self.$isEven = .init { [$count] _ in
-      $count.wrappedValue % 2 == 0
-    }
-  }  
-}
-
-struct SettingsView: View {
-  let model: CounterModel
-  
-  var body: some View {
-    // 👨🏻 Only view updates when `model.count` changed.
-    Text("\(model.count)")
-    Button("Up") {
-      model.count += 1
-    }
-  }
-}
-
-```
-
-### Universal Swift Application Support
-
-Swift State Graph is designed to work seamlessly across all types of Swift applications, helping you **manage Swift app state** consistently:
-
-- **SwiftUI Applications**: Native integration with SwiftUI's reactive system, enhancing your **SwiftUI state** handling, and offering excellent **Swift Observable compatibility**.
-- **UIKit Applications**: Brings robust **reactive programming Swift** capabilities to simplify complex UI updates, data binding, and overall **UIKit state** management.
-- **macOS Applications**: Perfect for both AppKit and SwiftUI-based macOS applications, providing a unified approach to state.
-
-### SwiftUI Observable Compatibility
-
-Swift State Graph provides excellent **Swift Observable compatibility**, enhancing Apple's native tools:
-
-- **Seamless Integration**: Works alongside existing `@Observable` classes without conflicts
-- **Enhanced Reactivity**: Adds powerful **Swift computed properties** and automatic **Swift dependency tracking** to Observable objects.
-- **Migration Path**: Easy migration from `Observable` to Swift State Graph with minimal code changes.
-- **Performance Benefits**: More efficient **Swift dependency tracking** compared to manual observation patterns.
-
-The framework's reactive nature and automatic **Swift dependency tracking** make it particularly effective for applications demanding complex state relationships and real-time data synchronization. This contributes to a more **declarative Swift state** approach, beneficial regardless of the UI framework or platform in use.
-
-## Table of Contents
-
-- [Introduction](#introduction)
-- [🚀 Quick Start](#-quick-start)
-- [Core Concepts](#core-concepts)
-- [Installation](#installation)
-- [Backing Storage](#backing-storage)
-- [Describing Models](#describing-models)
-- [SwiftUI Integration](#swiftui-integration)
-- [UIKit Integration](#uikit-integration)
-- [Advanced Usage](#advanced-usage)
-- [Comparing with Swift's Observable Protocol](#comparing-with-swifts-observable-protocol)
-- [Migration from Observable](#migration-from-observable)
-- [Data Normalization](#data-normalization)
-
-## Core Concepts
-
-At its heart, this **Swift reactive library** is built around two primary types of nodes, which promote a **declarative Swift state** approach:
-
-### Stored Value Nodes
-
-Stored nodes act as containers for values that can be set directly:
-
-```swift
-// Creating a stored node
-let counter = Stored(wrappedValue: 0)
-
-// Reading the value
-let currentCount = counter.wrappedValue // 0
-
-// Updating the value
-counter.wrappedValue = 1
-```
-
-Stored nodes can be wrapped with the `@GraphStored` macro for cleaner syntax:
-
-```swift
-final class CounterViewModel {
-  @GraphStored
-  var count: Int = 0
-}
-
-// Usage
-let viewModel = CounterViewModel()
-viewModel.count += 1
-```
-
-### Computed Value Nodes
-
-**Swift computed properties** (or Computed nodes) derive their values from other nodes and automatically update when dependencies change:
-
-```swift
-let a = Stored(wrappedValue: 10)
-let b = Stored(wrappedValue: 20)
-
-// This computed node depends on nodes a and b
-let sum = Computed { _ in
-    a.wrappedValue + b.wrappedValue
-}
-
-print(sum.wrappedValue) // 30
-
-// When a dependency changes, the computed value updates automatically
-a.wrappedValue = 15
-print(sum.wrappedValue) // 35
-```
-
-### Automatic Swift Dependency Tracking
-
-The power of Swift State Graph lies in its automatic **Swift dependency tracking**:
-
-1. When a computed node accesses another node's value, a dependency is automatically recorded
-2. When a node's value changes, all dependent nodes are marked as "potentially dirty"
-3. When a potentially dirty node's value is accessed, it recalculates its value first
-
-This creates a reactive system where changes propagate automatically through the dependency graph.
+- Swift 5.9+
+- iOS 13.0+ / macOS 10.15+ / tvOS 13.0+ / watchOS 6.0+
+- Xcode 15.0+
 
 ## Installation
-
-To integrate this **Swift reactive library** into your project, use the Swift Package Manager.
 
 ### Swift Package Manager
 
@@ -170,9 +40,155 @@ Then add the dependency to your target:
 )
 ```
 
+## 🚀 Quick Start
+
+Here's a glimpse of how Swift State Graph simplifies state management:
+
+```swift
+import StateGraph
+
+final class CounterModel {
+  // @GraphStored creates a mutable stored property
+  @GraphStored
+  var count: Int
+
+  // @GraphComputed creates a derived property that updates automatically
+  @GraphComputed
+  var isEven: Bool
+
+  init(count: Int) {
+    self.count = count
+    
+    // Define how isEven is computed from count
+    // The [$count] syntax captures the dependency
+    self.$isEven = .init { [$count] _ in
+      $count.wrappedValue % 2 == 0
+    }
+  }  
+}
+
+struct CounterView: View {
+  let model: CounterModel
+  
+  var body: some View {
+    VStack {
+      // The view automatically updates when count changes
+      Text("Count: \(model.count)")
+      Text("Is even: \(model.isEven ? "Yes" : "No")")
+      
+      Button("Increment") {
+        // Changing count automatically updates isEven
+        model.count += 1
+      }
+    }
+  }
+}
+
+```
+
+
+## Table of Contents
+
+- [Requirements](#requirements)
+- [Installation](#installation)
+- [🚀 Quick Start](#-quick-start)
+- [Core Concepts](#core-concepts)
+- [Backing Storage](#backing-storage)
+- [Describing Models](#describing-models)
+- [SwiftUI Integration](#swiftui-integration)
+  - [Environment Integration with GraphObject](#environment-integration-with-graphobject)
+- [UIKit Integration](#uikit-integration)
+- [Advanced Usage](#advanced-usage)
+- [Comparing with Observable Protocol](#comparing-with-observable-protocol)
+- [Migration from Observable](#migration-from-observable)
+- [Data Normalization](#data-normalization)
+- [Troubleshooting](#troubleshooting)
+- [FAQ](#faq)
+- [Contributing](#contributing)
+
+## Core Concepts
+
+Swift State Graph is built around two primary types of nodes:
+
+### Stored Value Nodes
+
+Stored nodes act as containers for values that can be set directly:
+
+```swift
+// Direct API usage
+let counter = Stored(wrappedValue: 0)
+print(counter.wrappedValue)  // 0
+counter.wrappedValue = 1
+print(counter.wrappedValue)  // 1
+
+// Property wrapper usage (recommended)
+final class Model {
+  @GraphStored var counter: Int = 0
+}
+
+let model = Model()
+model.counter = 1  // Clean syntax with property wrapper
+```
+
+Stored nodes can be wrapped with the `@GraphStored` macro for cleaner syntax:
+
+```swift
+final class CounterViewModel {
+  @GraphStored
+  var count: Int = 0
+}
+
+// Usage
+let viewModel = CounterViewModel()
+viewModel.count += 1
+```
+
+### Computed Value Nodes
+
+Computed nodes derive their values from other nodes and automatically update when dependencies change:
+
+```swift
+// Example: Shopping cart totals
+let price = Stored(wrappedValue: 10.0)
+let quantity = Stored(wrappedValue: 3)
+let taxRate = Stored(wrappedValue: 0.08)
+
+// Subtotal depends on price and quantity
+let subtotal = Computed { _ in
+    price.wrappedValue * Double(quantity.wrappedValue)
+}
+
+// Tax depends on subtotal and taxRate
+let tax = Computed { _ in
+    subtotal.wrappedValue * taxRate.wrappedValue
+}
+
+// Total depends on subtotal and tax
+let total = Computed { _ in
+    subtotal.wrappedValue + tax.wrappedValue
+}
+
+print("Initial total: $\(total.wrappedValue)")  // $32.40
+
+// Change quantity - all dependent values update
+quantity.wrappedValue = 5
+print("New total: $\(total.wrappedValue)")     // $54.00
+```
+
+### Automatic Dependency Tracking
+
+The power of Swift State Graph lies in its automatic dependency tracking:
+
+1. When a computed node accesses another node's value, a dependency is automatically recorded
+2. When a node's value changes, all dependent nodes are marked as "potentially dirty"
+3. When a potentially dirty node's value is accessed, it recalculates its value first
+
+This creates a reactive system where changes propagate automatically through the dependency graph.
+
+
 ## Backing Storage
 
-Effective **Swift state management** often requires persistence. Swift State Graph provides flexible backing storage options for your stored properties, allowing you to persist data beyond in-memory storage.
+Swift State Graph provides flexible backing storage options for your stored properties, allowing you to persist data beyond in-memory storage.
 
 ### In-Memory Storage (Default)
 
@@ -281,7 +297,7 @@ public enum GraphStorageBacking {
 
 ## Describing Models
 
-Swift State Graph makes it easy to define reactive data models, helping you **manage Swift app state** effectively. It's particularly useful when dealing with complex object relationships, promoting a more **declarative Swift state** representation in your applications. Here's an example of a library management system:
+Swift State Graph makes it easy to define reactive data models. Here's an example of a library management system:
 
 ```swift
 final class Author {
@@ -352,7 +368,7 @@ print(booksByJohn.wrappedValue.count) // 2
 
 ## SwiftUI Integration
 
-Swift State Graph offers robust **SwiftUI state management** capabilities, integrating seamlessly with SwiftUI's reactive paradigm. This allows developers to manage **SwiftUI state** with more power and flexibility.
+Swift State Graph integrates seamlessly with SwiftUI's reactive paradigm:
 
 ```swift
 import SwiftUI
@@ -386,7 +402,7 @@ struct CounterView: View {
 
 ### Environment Integration with GraphObject
 
-Swift State Graph provides seamless integration with SwiftUI's Environment system through the `GraphObject` protocol. This allows you to pass state objects through the SwiftUI view hierarchy, simplifying **SwiftUI state management** further, much like native Observable objects but with the added benefits of **Swift dependency tracking** and **Swift computed properties**.
+Swift State Graph provides seamless integration with SwiftUI's Environment system through the `GraphObject` protocol. This allows you to pass state objects through the SwiftUI view hierarchy, much like native Observable objects but with the added benefits of automatic dependency tracking.
 
 #### Defining a GraphObject
 
@@ -535,7 +551,7 @@ struct CartView: View {
 
 ## UIKit Integration
 
-For **UIKit state management**, Swift State Graph brings the power of **reactive programming Swift** to your UIKit applications. While it doesn't have direct UIKit-specific APIs, its reactive nature and tools like `withGraphTracking` make it easy to manage **UIKit state** and simplify complex UI updates.
+While Swift State Graph doesn't have direct UIKit-specific APIs, its reactive nature and tools like `withGraphTracking` make it easy to manage state in UIKit applications:
 
 ```swift
 import UIKit
@@ -609,68 +625,54 @@ class CounterViewController: UIViewController {
 
 ## Advanced Usage
 
-The advanced features of Swift State Graph further enhance your ability to handle sophisticated **Swift state management** scenarios, leveraging the full potential of **reactive programming Swift**.
 
 ### Subscribing to Multiple Nodes with `withGraphTracking`
 
-The `withGraphTracking` function allows you to create a subscription that observes multiple nodes at once, a core aspect of powerful **Swift state management**:
+The `withGraphTracking` function allows you to create a subscription that observes multiple nodes at once:
 
 ```swift
 // Example: Managing product availability in an e-commerce app
 
-// Model for product and cart
 final class StoreViewModel {
-  @GraphStored var stockLevel: Int = 10 // Available stock for a product
-  @GraphStored var itemsInCart: Int = 0  // Number of this product in the user's cart
+  @GraphStored var stockLevel: Int = 10  // Current stock
+  @GraphStored var itemsInCart: Int = 0  // Items in user's cart
 }
 
 let viewModel = StoreViewModel()
 
-// Subscription to track product availability
-// Keep this subscription instance to keep tracking active.
+// Create a subscription to track multiple nodes at once
 var availabilitySubscription: AnyCancellable?
 
 availabilitySubscription = withGraphTracking {
-  // Computed node to determine if the product can be added to cart
+  // 1. Create a computed value that depends on multiple nodes
   Computed { _ in
-    // This computation runs when `stockLevel` or `itemsInCart` changes.
     viewModel.stockLevel > viewModel.itemsInCart
   }
   .onChange { isAvailable in
-    // This block is called when the `isAvailable` value changes.
+    // Called whenever the computed value changes
     if isAvailable {
-      print("✅ Product is available to add to cart.")
+      print("✅ Product is available")
     } else {
-      print("⚠️ Product is out of stock or cart limit reached.")
+      print("⚠️ Product unavailable")
     }
   }
 
-  // Observe changes in stock level directly
+  // 2. Track individual property changes
   viewModel.$stockLevel.onChange { newStock in
-    print("📦 Stock level updated: \(newStock)")
+    print("📦 Stock updated: \(newStock)")
   }
 
-  // Observe changes in items in cart directly
   viewModel.$itemsInCart.onChange { items in
-    print("🛒 Items in cart updated: \(items)")
+    print("🛒 Cart updated: \(items) items")
   }
 }
 
-// --- Example of how this works ---
-// Simulate adding an item to the cart
-// viewModel.itemsInCart = 1
-// Output will be:
-// 🛒 Items in cart updated: 1
-// ✅ Product is available to add to cart.
+// Example usage:
+viewModel.itemsInCart = 5   // Triggers: "🛒 Cart updated: 5 items"
+viewModel.stockLevel = 3    // Triggers: "📦 Stock updated: 3" AND "⚠️ Product unavailable"
 
-// Simulate stock running out
-// viewModel.stockLevel = 0
-// Output will be:
-// 📦 Stock level updated: 0
-// ⚠️ Product is out of stock or cart limit reached.
-
-// To stop tracking, set the subscription to nil
-// availabilitySubscription = nil
+// Clean up when done
+availabilitySubscription = nil
 ```
 
 ### Key Features
@@ -720,33 +722,55 @@ availabilitySubscription = withGraphTracking {
 
 By storing the returned subscription object in a property, you ensure the tracking remains active for as long as needed.
 
-## Comparing with Swift's Observable Protocol
+## Comparing with Observable Protocol
 
-Understanding **Swift Observable compatibility** is key when choosing a state management solution. The primary differentiator for Swift State Graph over Swift's standard `Observable` protocol is its sophisticated approach to **Swift computed properties** and automatic **Swift dependency tracking**.
+The primary differentiator for Swift State Graph over Swift's standard `Observable` protocol is its sophisticated approach to computed properties and automatic dependency tracking.
 
-While the standard `Observable` protocol in Swift provides a basic foundation for **reactive programming Swift** by observing changes to stored properties, Swift State Graph significantly enhances this.
+While Observable provides basic observation of stored properties, Swift State Graph introduces graph-based computed nodes that automatically derive their values from other nodes, track dependencies, and update reactively when source nodes change.
 
-It introduces graph-based **Swift computed properties** (Computed nodes) that automatically derive their values from other nodes. These nodes meticulously track dependencies and update reactively when any source nodes change, enabling more powerful, granular, and **declarative Swift state** relationships. This advanced **Swift state management** capability simplifies complex data flows.
+### Feature Comparison
 
-**Example:**
+| Feature | Observable | Swift State Graph |
+|---------|------------|------------------|
+| Stored Properties | ✅ @Observable | ✅ @GraphStored |
+| Computed Properties | ❌ Manual updates | ✅ Automatic with @GraphComputed |
+| Dependency Tracking | ❌ Manual | ✅ Automatic |
+| Lazy Evaluation | ❌ | ✅ |
+| Backing Storage | ❌ | ✅ UserDefaults, etc. |
+| Thread Safety | ⚠️ Actor isolation | ✅ Built-in locks |
+
+### Example: Computed Properties
 
 ```swift
-let stored = Stored(wrappedValue: 10)
+// Observable approach - manual updates needed
+@Observable
+class PriceModel {
+  var basePrice: Double = 100
+  var taxRate: Double = 0.08
+  var total: Double = 108  // Must manually update
+  
+  func updateTotal() {
+    total = basePrice * (1 + taxRate)
+  }
+}
 
-let computed = Computed { _ in stored.wrappedValue * 2 }
-
-// computed.wrappedValue => 20
-
-stored.wrappedValue = 20
-
-// computed.wrappedValue => 40 (automatically updated)
+// Swift State Graph - automatic updates
+class PriceModel {
+  @GraphStored var basePrice: Double = 100
+  @GraphStored var taxRate: Double = 0.08
+  @GraphComputed var total: Double
+  
+  init() {
+    self.$total = .init { [$basePrice, $taxRate] _ in
+      $basePrice.wrappedValue * (1 + $taxRate.wrappedValue)
+    }
+  }
+}
 ```
-
-With Swift State Graph, you can build complex, reactive data flows that are difficult to achieve with just the `Observable` protocol.
 
 ## Migration from Observable
 
-If you're currently using Swift's `@Observable` protocol, migrating to Swift State Graph can significantly enhance your **Swift state management** capabilities, offering improved reactivity through automatic **Swift dependency tracking** and powerful **Swift computed properties**. This guide will help you transition your existing code to a more robust **reactive programming Swift** model.
+If you're currently using Swift's `@Observable` protocol, migrating to Swift State Graph can enhance your state management capabilities through automatic dependency tracking and powerful computed properties.
 
 ### Basic Observable Class Migration
 
@@ -1015,19 +1039,19 @@ self.$b = .init { [$a] _ in $a.wrappedValue + 1 }
 
 ### When to Consider Migration
 
-Consider migrating from Observable to Swift State Graph when you need more advanced **Swift state management** features, such as:
+Consider migrating from Observable to Swift State Graph when you need:
 
-- Complex **Swift computed properties** with multiple dependencies.
-- Robust and automatic **Swift dependency tracking**.
-- Cascading updates across multiple properties for a truly reactive system.
-- Performance concerns with manual state management under `Observable`.
-- A more **declarative Swift state** approach to **reactive programming Swift**.
+- Complex computed properties with multiple dependencies
+- Automatic dependency tracking
+- Cascading updates across multiple properties
+- Better performance than manual state management
+- More declarative state relationships
 
 The migration process is typically straightforward and results in cleaner, more maintainable code with automatic reactivity.
 
 ## Data Normalization
 
-Effectively managing relational data is a common challenge in **Swift state management**. Swift State Graph provides a normalization module to efficiently **manage Swift app state** when dealing with structured, related data. The `StateGraphNormalization` module helps you organize your data in a normalized structure, making it easier to handle complex relationships between entities.
+Swift State Graph provides a normalization module to efficiently manage relational data. The `StateGraphNormalization` module helps you organize your data in a normalized structure, making it easier to handle complex relationships between entities.
 
 ### Core Concepts
 
@@ -1182,13 +1206,13 @@ print(post.comments.count) // 1
 
 ### Benefits of Normalization
 
-Using the normalization module provides several advantages for robust **Swift state management**:
+Using the normalization module provides several advantages:
 
-1. **Single Source of Truth**: Entities are stored once, preventing duplication and inconsistencies, which is crucial to **manage Swift app state** reliably.
-2. **Efficient Updates**: Changes to an entity are automatically reflected in all computed properties that depend on them.
-3. **Relationship Management**: Easily handle one-to-many and many-to-many relationships with clear definitions.
-4. **Performance**: Optimized for fast lookups and updates through ID-based access.
-5. **Reactivity**: Combined with Swift State Graph's automatic **Swift dependency tracking** for seamless UI updates and reactive data flows.
+1. **Single Source of Truth**: Entities are stored once, preventing duplication and inconsistencies
+2. **Efficient Updates**: Changes to an entity are automatically reflected in all dependent computed properties
+3. **Relationship Management**: Easily handle one-to-many and many-to-many relationships
+4. **Performance**: Optimized for fast lookups and updates through ID-based access
+5. **Reactivity**: Combined with automatic dependency tracking for seamless UI updates
 
 ### Sharing State Between Objects with @GraphStored Reference Assignment
 
@@ -1241,3 +1265,96 @@ self.$items = service.$items
 - Loose coupling in MVVM architectures
 
 This reference sharing pattern is particularly powerful in MVVM architectures where you want view models to reactively observe service state without tight coupling.
+
+## Troubleshooting
+
+### Common Issues
+
+#### "Cannot find 'GraphStored' in scope"
+Make sure you've imported the StateGraph module:
+```swift
+import StateGraph
+```
+
+#### Circular dependency errors
+Swift State Graph detects circular dependencies. Restructure your computed properties to avoid cycles:
+```swift
+// ❌ Wrong: Circular dependency
+self.$a = .init { [$b] _ in $b.wrappedValue + 1 }
+self.$b = .init { [$a] _ in $a.wrappedValue + 1 }
+
+// ✅ Correct: Break circular dependencies
+self.$a = .init { [$source] _ in $source.wrappedValue + 1 }
+self.$b = .init { [$a] _ in $a.wrappedValue + 1 }
+```
+
+#### SwiftUI views not updating
+Ensure your model conforms to `GraphObject` for iOS 17+ or use proper observation patterns:
+```swift
+// iOS 17+
+final class MyModel: GraphObject {
+  @GraphStored var value: Int = 0
+}
+
+// iOS 16 and below
+final class MyModel: ObservableObject {
+  @GraphStored var value: Int = 0
+  // Manually trigger objectWillChange when needed
+}
+```
+
+#### Performance issues with large graphs
+- Use lazy evaluation by accessing computed properties only when needed
+- Consider breaking large models into smaller, focused components
+- Profile your app to identify bottlenecks in dependency chains
+
+## FAQ
+
+### Q: How does Swift State Graph differ from Combine?
+A: While Combine focuses on event streams and publishers, Swift State Graph specializes in state management with automatic dependency tracking. It's more like a reactive property system than a stream processing framework.
+
+### Q: Can I use Swift State Graph with existing Observable classes?
+A: Yes! Swift State Graph is designed to work alongside Observable. You can gradually migrate parts of your codebase while keeping existing Observable infrastructure.
+
+### Q: Is Swift State Graph thread-safe?
+A: Yes, all node operations are protected by NSRecursiveLock, making it safe to use from multiple threads.
+
+### Q: Does it work with SwiftUI previews?
+A: Absolutely. Swift State Graph works great in SwiftUI previews. Just create your models as you normally would in the preview provider.
+
+### Q: What's the performance overhead?
+A: Swift State Graph uses lazy evaluation and efficient dependency tracking. The overhead is minimal - computed values are only recalculated when their dependencies change AND when they're accessed.
+
+### Q: Can I persist computed values?
+A: Computed values are derived and cannot be persisted directly. However, you can persist their source stored values using backing storage like UserDefaults.
+
+## Contributing
+
+We welcome contributions to Swift State Graph! Here's how you can help:
+
+1. **Report Issues**: Found a bug? [Open an issue](https://github.com/VergeGroup/swift-state-graph/issues)
+2. **Suggest Features**: Have an idea? Start a discussion in issues
+3. **Submit PRs**: Fork the repo, make your changes, and submit a pull request
+
+### Development Setup
+
+1. Clone the repository
+2. Open `Package.swift` in Xcode
+3. Run tests with `cmd+U`
+
+### Code Style
+
+- Follow Swift API Design Guidelines
+- Ensure all public APIs have documentation comments
+- Add tests for new features
+- Keep PRs focused and atomic
+
+### Running Tests
+
+```bash
+swift test
+```
+
+## License
+
+Swift State Graph is released under the MIT license. See [LICENSE](LICENSE) for details.
