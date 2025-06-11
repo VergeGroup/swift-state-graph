@@ -50,11 +50,6 @@ struct ContentView: View {
           Text("UserDefaults") 
         }
         
-        NavigationLink {
-          TerminalColorDesigner()
-        } label: { 
-          Text("Terminal Designer") 
-        }
       }
     }
   }
