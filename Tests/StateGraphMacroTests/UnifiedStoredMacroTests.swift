@@ -5,6 +5,17 @@ import XCTest
 @testable import StateGraphMacro
 
 final class UnifiedStoredMacroTests: XCTestCase {
+    
+  override func invokeTest() {
+    withMacroTesting(
+      record: false,
+      macros: [
+        "GraphStored": UnifiedStoredMacro.self,
+      ]
+    ) {
+      super.invokeTest()
+    }
+  }
   
   func test_private_set_modifier() {
     assertMacro {
@@ -31,7 +42,9 @@ final class UnifiedStoredMacroTests: XCTestCase {
             $value.wrappedValue = newValue
           }
         }
-        @GraphIgnored private let $value: Stored<Int> = .init(name: "value", wrappedValue: 0)
+
+        @GraphIgnored
+          private let $value: Stored<Int> = .init(name: "value", wrappedValue: 0)
       }
       """
     }
@@ -62,20 +75,11 @@ final class UnifiedStoredMacroTests: XCTestCase {
             $value.wrappedValue = newValue
           }
         }
-        @GraphIgnored private let $value: Stored<Int> = .init(name: "value", wrappedValue: 0)
+
+        @GraphIgnored
+          private let $value: Stored<Int> = .init(name: "value", wrappedValue: 0)
       }
       """
-    }
-  }
-  
-  override func invokeTest() {
-    withMacroTesting(
-      record: false,
-      macros: [
-        "GraphStored": UnifiedStoredMacro.self,
-      ]
-    ) {
-      super.invokeTest()
     }
   }
 
