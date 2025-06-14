@@ -24,6 +24,16 @@ final class UserDefaultsModel {
   
 }
 
+final class PrivateExample {
+  
+  @GraphStored 
+  private var private_value: Int = 0
+  
+  @GraphStored 
+  private(set) var _private_set_value: Int = 0
+  
+}
+
 // MARK: - Unified Syntax Demo
 
 final class UnifiedSyntaxDemo {

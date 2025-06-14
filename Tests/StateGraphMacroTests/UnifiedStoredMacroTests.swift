@@ -6,6 +6,68 @@ import XCTest
 
 final class UnifiedStoredMacroTests: XCTestCase {
   
+  func test_private_set_modifier() {
+    assertMacro {
+      """
+      final class Model {
+        @GraphStored
+        private(set) var value: Int = 0
+      }
+      """
+    } expansion: {
+      """
+      final class Model {
+        private(set) var value: Int {
+          @storageRestrictions(
+            accesses: $value
+          )
+          init(initialValue) {
+            $value.wrappedValue = initialValue
+          }
+          get {
+            return $value.wrappedValue
+          }
+          set {
+            $value.wrappedValue = newValue
+          }
+        }
+        @GraphIgnored private let $value: Stored<Int> = .init(name: "value", wrappedValue: 0)
+      }
+      """
+    }
+  }
+  
+  func test_private_modifier() {
+    assertMacro {
+      """
+      final class Model {
+        @GraphStored
+        private var value: Int = 0
+      }
+      """
+    } expansion: {
+      """
+      final class Model {
+        private var value: Int {
+          @storageRestrictions(
+            accesses: $value
+          )
+          init(initialValue) {
+            $value.wrappedValue = initialValue
+          }
+          get {
+            return $value.wrappedValue
+          }
+          set {
+            $value.wrappedValue = newValue
+          }
+        }
+        @GraphIgnored private let $value: Stored<Int> = .init(name: "value", wrappedValue: 0)
+      }
+      """
+    }
+  }
+  
   override func invokeTest() {
     withMacroTesting(
       record: false,
