@@ -18,16 +18,38 @@ extension VariableDeclSyntax {
       .keyword(.open),
     ]
 
-    let accessControl = other.modifiers.filter {
-      accessControlKinds.contains($0.name.tokenKind)
+    var hasDetailModifier = false
+    var primaryAccessLevel: DeclModifierSyntax?
+    
+    // Find the primary access level (e.g., 'public' in 'public private(set)')
+    for modifier in other.modifiers {
+      if accessControlKinds.contains(modifier.name.tokenKind) {
+        if modifier.detail != nil {
+          // This is something like private(set)
+          hasDetailModifier = true
+          // Use the main access level without the detail
+          if primaryAccessLevel == nil {
+            primaryAccessLevel = DeclModifierSyntax(name: modifier.name)
+          }
+        } else {
+          // This is a regular access modifier like 'public' or 'internal'
+          if primaryAccessLevel == nil || hasDetailModifier {
+            primaryAccessLevel = modifier
+          }
+        }
+      }
     }
-    .map { $0 }
+    
+    // Build the final modifiers list
+    var finalModifiers = modifiers.filter {
+      !accessControlKinds.contains($0.name.tokenKind)
+    }
+    
+    if let primaryAccessLevel = primaryAccessLevel {
+      finalModifiers.append(primaryAccessLevel)
+    }
 
-    return self.with(
-      \.modifiers,
-      modifiers.filter {
-        !accessControlKinds.contains($0.name.tokenKind)
-      } + accessControl)
+    return self.with(\.modifiers, finalModifiers)
   }
 
   consuming func makePrivate() -> Self {
