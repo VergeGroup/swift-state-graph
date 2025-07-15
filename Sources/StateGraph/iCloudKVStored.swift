@@ -1,16 +1,16 @@
 import Foundation
 
-// MARK: - iCloudStored
+// MARK: - iCloudKVStored
 
-/// A protocol for types that can be stored in iCloud using NSUbiquitousKeyValueStore
-public protocol iCloudStorable: Equatable, Sendable {
+/// A protocol for types that can be stored in iCloudKV using NSUbiquitousKeyValueStore
+public protocol iCloudKVStorable: Equatable, Sendable {
   @_spi(Internal)
   static func _getValue(from store: NSUbiquitousKeyValueStore, forKey key: String, defaultValue: Self) -> Self
   @_spi(Internal)
   func _setValue(to store: NSUbiquitousKeyValueStore, forKey key: String)
 }
 
-extension iCloudStorable {
+extension iCloudKVStorable {
   @_spi(Internal)
   public static func _getValue(from store: NSUbiquitousKeyValueStore, forKey key: String, defaultValue: Self) -> Self {
     if store.object(forKey: key) == nil {
@@ -20,7 +20,7 @@ extension iCloudStorable {
   }
 }
 
-extension Bool: iCloudStorable {
+extension Bool: iCloudKVStorable {
   @_spi(Internal)
   public static func _getValue(from store: NSUbiquitousKeyValueStore, forKey key: String, defaultValue: Bool) -> Bool {
     if store.object(forKey: key) == nil {
@@ -35,7 +35,7 @@ extension Bool: iCloudStorable {
   }
 }
 
-extension Int: iCloudStorable {
+extension Int: iCloudKVStorable {
   @_spi(Internal)
   public static func _getValue(from store: NSUbiquitousKeyValueStore, forKey key: String, defaultValue: Int) -> Int {
     if store.object(forKey: key) == nil {
@@ -50,7 +50,7 @@ extension Int: iCloudStorable {
   }
 }
 
-extension Float: iCloudStorable {
+extension Float: iCloudKVStorable {
   @_spi(Internal)
   public static func _getValue(from store: NSUbiquitousKeyValueStore, forKey key: String, defaultValue: Float) -> Float {
     if store.object(forKey: key) == nil {
@@ -65,7 +65,7 @@ extension Float: iCloudStorable {
   }
 }
 
-extension Double: iCloudStorable {
+extension Double: iCloudKVStorable {
   @_spi(Internal)
   public static func _getValue(from store: NSUbiquitousKeyValueStore, forKey key: String, defaultValue: Double) -> Double {
     if store.object(forKey: key) == nil {
@@ -80,7 +80,7 @@ extension Double: iCloudStorable {
   }
 }
 
-extension String: iCloudStorable {
+extension String: iCloudKVStorable {
   @_spi(Internal)
   public static func _getValue(from store: NSUbiquitousKeyValueStore, forKey key: String, defaultValue: String) -> String {
     return store.string(forKey: key) ?? defaultValue
@@ -92,7 +92,7 @@ extension String: iCloudStorable {
   }
 }
 
-extension Data: iCloudStorable {
+extension Data: iCloudKVStorable {
   @_spi(Internal)
   public static func _getValue(from store: NSUbiquitousKeyValueStore, forKey key: String, defaultValue: Data) -> Data {
     return store.data(forKey: key) ?? defaultValue
@@ -104,7 +104,7 @@ extension Data: iCloudStorable {
   }
 }
 
-extension Date: iCloudStorable {
+extension Date: iCloudKVStorable {
   @_spi(Internal)
   public static func _getValue(from store: NSUbiquitousKeyValueStore, forKey key: String, defaultValue: Date) -> Date {
     return store.object(forKey: key) as? Date ?? defaultValue
@@ -121,7 +121,7 @@ private enum Static {
   static let encoder = JSONEncoder()
 }
 
-extension iCloudStorable where Self: Codable {
+extension iCloudKVStorable where Self: Codable {
   public static func _getValue(from store: NSUbiquitousKeyValueStore, forKey key: String, defaultValue: Self) -> Self {
     guard let data = store.data(forKey: key) else {
       return defaultValue
@@ -146,7 +146,7 @@ extension iCloudStorable where Self: Codable {
   }
 }
 
-extension Optional: iCloudStorable where Wrapped: iCloudStorable {
+extension Optional: iCloudKVStorable where Wrapped: iCloudKVStorable {
   @_spi(Internal)
   public static func _getValue(from store: NSUbiquitousKeyValueStore, forKey key: String, defaultValue: Self) -> Self {
     if store.object(forKey: key) == nil {
@@ -170,27 +170,27 @@ extension Optional: iCloudStorable where Wrapped: iCloudStorable {
   }
 }
 
-/// A node that functions as an endpoint in a Directed Acyclic Graph (DAG) and persists its value to iCloud.
+/// A node that functions as an endpoint in a Directed Acyclic Graph (DAG) and persists its value to iCloudKV.
 ///
-/// `iCloudStored` can have its value set directly from the outside, and changes to its value
-/// automatically propagate to dependent nodes. The value is automatically persisted to iCloud
+/// `iCloudKVStored` can have its value set directly from the outside, and changes to its value
+/// automatically propagate to dependent nodes. The value is automatically persisted to iCloudKV
 /// and restored when the node is recreated.
 ///
-/// - When value changes: Changes propagate to all dependent nodes and are persisted to iCloud
-/// - When value is accessed: Dependencies are recorded and the value is loaded from iCloud if needed
+/// - When value changes: Changes propagate to all dependent nodes and are persisted to iCloudKV
+/// - When value is accessed: Dependencies are recorded and the value is loaded from iCloudKV if needed
 /// - When other devices change the value: The local value is automatically updated
-public typealias iCloudStored<Value: iCloudStorable> = _Stored<Value, iCloudStorage<Value>>
+public typealias iCloudKVStored<Value: iCloudKVStorable> = _Stored<Value, iCloudKVStorage<Value>>
   
-extension _Stored where S == iCloudStorage<Value> {
-  /// Initializes an iCloudStored node.
+extension _Stored where S == iCloudKVStorage<Value> {
+  /// Initializes an iCloudKVStored node.
   ///
   /// - Parameters:
   ///   - file: The file where the node is created (defaults to current file)
   ///   - line: The line number where the node is created (defaults to current line)
   ///   - column: The column number where the node is created (defaults to current column)
   ///   - name: The name of the node (defaults to nil)
-  ///   - key: The iCloud key to store the value
-  ///   - defaultValue: The default value if no value exists in iCloud
+  ///   - key: The iCloudKV key to store the value
+  ///   - defaultValue: The default value if no value exists in iCloudKV
   public convenience init(
     _ file: StaticString = #fileID,
     _ line: UInt = #line,
@@ -199,7 +199,7 @@ extension _Stored where S == iCloudStorage<Value> {
     key: String,
     defaultValue: Value
   ) {
-    let storage = iCloudStorage(
+    let storage = iCloudKVStorage(
       store: NSUbiquitousKeyValueStore.default,
       key: key,
       defaultValue: defaultValue

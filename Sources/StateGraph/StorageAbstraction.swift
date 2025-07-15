@@ -130,9 +130,9 @@ public final class UserDefaultsStorage<Value: UserDefaultsStorable>: Storage, Se
   }
 }
 
-// MARK: - iCloudStorage
+// MARK: - iCloudKVStorage
 
-public final class iCloudStorage<Value: iCloudStorable>: Storage, Sendable {
+public final class iCloudKVStorage<Value: iCloudKVStorable>: Storage, Sendable {
   
   nonisolated(unsafe)
   private let store: NSUbiquitousKeyValueStore

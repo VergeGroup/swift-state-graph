@@ -12,7 +12,7 @@ public struct UnifiedStoredMacro {
     case didSetNotSupported
     case willSetNotSupported
     case userDefaultsRequiresDefaultValue
-    case iCloudRequiresDefaultValue
+    case iCloudKVRequiresDefaultValue
     case invalidBackingArgument
   }
 }
@@ -24,7 +24,7 @@ extension UnifiedStoredMacro {
   enum BackingStorageType {
     case memory
     case userDefaults(Configuration)
-    case iCloud(Configuration)
+    case iCloudKV(Configuration)
 
     struct Configuration {
       let key: String
@@ -57,8 +57,8 @@ extension UnifiedStoredMacro.Error: DiagnosticMessage {
       return "willSet is not supported with @GraphStored"
     case .userDefaultsRequiresDefaultValue:
       return "@GraphStored with UserDefaults backing requires a default value"
-    case .iCloudRequiresDefaultValue:
-      return "@GraphStored with iCloud backing requires a default value"
+    case .iCloudKVRequiresDefaultValue:
+      return "@GraphStored with iCloudKV backing requires a default value"
     case .invalidBackingArgument:
       return "Invalid backing argument for @GraphStored"
     }
@@ -109,10 +109,10 @@ extension UnifiedStoredMacro {
       }
     }
 
-    // iCloud specific validation
-    if case .iCloud = backingType {
+    // iCloudKV specific validation
+    if case .iCloudKV = backingType {
       if !variableDecl.hasInitializer {
-        context.addDiagnostics(from: Error.iCloudRequiresDefaultValue, node: node)
+        context.addDiagnostics(from: Error.iCloudKVRequiresDefaultValue, node: node)
         return false
       }
     }
@@ -173,12 +173,12 @@ extension UnifiedStoredMacro {
       return .userDefaults(config)
     }
     
-    // Handle function call like .iCloud(key: "key")
+    // Handle function call like .iCloudKV(key: "key")
     if let functionCall = expression.as(FunctionCallExprSyntax.self),
        let callee = functionCall.calledExpression.as(MemberAccessExprSyntax.self),
-       callee.declName.baseName.text == "iCloud" {
-      let config = parseiCloudArguments(from: functionCall.arguments)
-      return .iCloud(config)
+       callee.declName.baseName.text == "iCloudKV" {
+      let config = parseiCloudKVArguments(from: functionCall.arguments)
+      return .iCloudKV(config)
     }
     
     // Handle member access like .memory
@@ -224,8 +224,8 @@ extension UnifiedStoredMacro {
     )
   }
 
-  /// Parses iCloud arguments into Configuration
-  private static func parseiCloudArguments(
+  /// Parses iCloudKV arguments into Configuration
+  private static func parseiCloudKVArguments(
     from arguments: LabeledExprListSyntax
   ) -> BackingStorageType.Configuration {
     var key: String?
@@ -292,9 +292,9 @@ extension UnifiedStoredMacro {
       }
     }
     
-    func buildiCloudInitializer() -> ExprSyntax {
+    func buildiCloudKVInitializer() -> ExprSyntax {
       guard let key = key else {
-        fatalError("iCloud initializer requires a key")
+        fatalError("iCloudKV initializer requires a key")
       }
       
       return #".init(name: "\#(raw: propertyName)", key: "\#(raw: key)", defaultValue: \#(raw: wrappedValue))"# as ExprSyntax
@@ -371,8 +371,8 @@ extension UnifiedStoredMacro {
       return createMemoryTypeAnnotation(for: type, variableDecl: variableDecl)
     case .userDefaults:
       return "UserDefaultsStored<\(type.trimmed)>" as TypeSyntax
-    case .iCloud:
-      return "iCloudStored<\(type.trimmed)>" as TypeSyntax
+    case .iCloudKV:
+      return "iCloudKVStored<\(type.trimmed)>" as TypeSyntax
     }
   }
   
@@ -419,8 +419,8 @@ extension UnifiedStoredMacro {
         configuration: config,
         propertyName: propertyName
       )
-    case .iCloud(let config):
-      return createiCloudInitializer(
+    case .iCloudKV(let config):
+      return createiCloudKVInitializer(
         for: storageDecl,
         variableDecl: variableDecl,
         configuration: config,
@@ -488,8 +488,8 @@ extension UnifiedStoredMacro {
     }
   }
 
-  /// Creates iCloud storage initializer
-  private static func createiCloudInitializer(
+  /// Creates iCloudKV storage initializer
+  private static func createiCloudKVInitializer(
     for storageDecl: VariableDeclSyntax,
     variableDecl: VariableDeclSyntax,
     configuration: BackingStorageType.Configuration,
@@ -505,7 +505,7 @@ extension UnifiedStoredMacro {
         key: configuration.key
       )
       
-      return .init(value: builder.buildiCloudInitializer())
+      return .init(value: builder.buildiCloudKVInitializer())
     }
   }
 }
@@ -609,8 +609,8 @@ extension UnifiedStoredMacro: AccessorMacro {
       return createMemoryAccessors(propertyName: propertyName, variableDecl: variableDecl, context: context)
     case .userDefaults:
       return createUserDefaultsAccessors(propertyName: propertyName, variableDecl: variableDecl)
-    case .iCloud:
-      return createiCloudAccessors(propertyName: propertyName, variableDecl: variableDecl)
+    case .iCloudKV:
+      return createiCloudKVAccessors(propertyName: propertyName, variableDecl: variableDecl)
     }
   }
 
@@ -661,8 +661,8 @@ extension UnifiedStoredMacro: AccessorMacro {
     return accessors
   }
 
-  /// Creates accessor declarations for iCloud storage
-  private static func createiCloudAccessors(
+  /// Creates accessor declarations for iCloudKV storage
+  private static func createiCloudKVAccessors(
     propertyName: String,
     variableDecl: VariableDeclSyntax
   ) -> [AccessorDeclSyntax] {
@@ -672,7 +672,7 @@ extension UnifiedStoredMacro: AccessorMacro {
     if !variableDecl.hasInitializer {
       accessors.append(createStorageRestrictionsInitAccessor(
         propertyName: propertyName,
-        body: "// This should be handled by PeerMacro\nfatalError(\"iCloudStored requires default value\")"
+        body: "// This should be handled by PeerMacro\nfatalError(\"iCloudKVStored requires default value\")"
       ))
     }
 
