@@ -130,6 +130,91 @@ public final class UserDefaultsStorage<Value: UserDefaultsStorable>: Storage, Se
   }
 }
 
+// MARK: - iCloudStorage
+
+public final class iCloudStorage<Value: iCloudStorable>: Storage, Sendable {
+  
+  nonisolated(unsafe)
+  private let store: NSUbiquitousKeyValueStore
+  private let key: String
+  private let defaultValue: Value
+  
+  nonisolated(unsafe)
+  private var subscription: NSObjectProtocol?
+  
+  nonisolated(unsafe)
+  private var cachedValue: Value?
+  
+  public var value: Value {
+    get {
+      if let cachedValue {
+        return cachedValue
+      }
+      let loadedValue = Value._getValue(
+        from: store,
+        forKey: key,
+        defaultValue: defaultValue
+      )
+      cachedValue = loadedValue
+      return loadedValue
+    }
+    set {
+      cachedValue = newValue
+      newValue._setValue(to: store, forKey: key)
+    }
+  }
+  
+  nonisolated(unsafe)
+  private var previousValue: Value?
+  
+  public init(
+    store: NSUbiquitousKeyValueStore,
+    key: String,
+    defaultValue: Value
+  ) {
+    self.store = store
+    self.key = key
+    self.defaultValue = defaultValue
+  }
+     
+  public func loaded(context: StorageContext) {
+    
+    previousValue = value
+    
+    subscription = NotificationCenter.default
+      .addObserver(
+        forName: NSUbiquitousKeyValueStore.didChangeExternallyNotification,
+        object: store,
+        queue: nil,
+        using: { [weak self] notification in                      
+          guard let self else { return }
+          
+          // Check if this key was changed
+          if let userInfo = notification.userInfo,
+             let changedKeys = userInfo[NSUbiquitousKeyValueStoreChangedKeysKey] as? [String],
+             changedKeys.contains(self.key) {
+            
+            // Invalidate cache and reload value
+            self.cachedValue = nil
+            let value = self.value
+            guard self.previousValue != value else {
+              return
+            }
+            
+            self.previousValue = value
+            
+            context.notifyStorageUpdated()
+          }
+        }
+      )
+  }  
+  
+  public func unloaded() {
+    guard let subscription else { return }
+    NotificationCenter.default.removeObserver(subscription)
+  }
+}
+
 // MARK: - Base Stored Node
 
 public final class _Stored<Value, S: Storage<Value>>: Node, Observable, CustomDebugStringConvertible {

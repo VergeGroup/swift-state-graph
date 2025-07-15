@@ -12,6 +12,7 @@ public struct UnifiedStoredMacro {
     case didSetNotSupported
     case willSetNotSupported
     case userDefaultsRequiresDefaultValue
+    case iCloudRequiresDefaultValue
     case invalidBackingArgument
   }
 }
@@ -23,7 +24,7 @@ extension UnifiedStoredMacro {
   enum BackingStorageType {
     case memory
     case userDefaults(Configuration)
-    case swiftData(SwiftDataConfiguration)
+    case iCloud(Configuration)
 
     struct Configuration {
       let key: String
@@ -34,18 +35,6 @@ extension UnifiedStoredMacro {
         self.key = key
         self.suite = suite
         self.name = name
-      }
-    }
-    
-    struct SwiftDataConfiguration {
-      let key: String
-      let name: String?
-      let hasContext: Bool
-      
-      init(key: String, name: String? = nil, hasContext: Bool = false) {
-        self.key = key
-        self.name = name
-        self.hasContext = hasContext
       }
     }
   }
@@ -68,6 +57,8 @@ extension UnifiedStoredMacro.Error: DiagnosticMessage {
       return "willSet is not supported with @GraphStored"
     case .userDefaultsRequiresDefaultValue:
       return "@GraphStored with UserDefaults backing requires a default value"
+    case .iCloudRequiresDefaultValue:
+      return "@GraphStored with iCloud backing requires a default value"
     case .invalidBackingArgument:
       return "Invalid backing argument for @GraphStored"
     }
@@ -118,10 +109,10 @@ extension UnifiedStoredMacro {
       }
     }
 
-    // SwiftData specific validation
-    if case .swiftData = backingType {
+    // iCloud specific validation
+    if case .iCloud = backingType {
       if !variableDecl.hasInitializer {
-        context.addDiagnostics(from: Error.userDefaultsRequiresDefaultValue, node: node)
+        context.addDiagnostics(from: Error.iCloudRequiresDefaultValue, node: node)
         return false
       }
     }
@@ -176,18 +167,18 @@ extension UnifiedStoredMacro {
   ) -> BackingStorageType {
     // Handle function call like .userDefaults(key: "key")
     if let functionCall = expression.as(FunctionCallExprSyntax.self),
-       let callee = functionCall.calledExpression.as(MemberAccessExprSyntax.self) {
-      
-      switch callee.declName.baseName.text {
-      case "userDefaults":
-        let config = parseUserDefaultsArguments(from: functionCall.arguments)
-        return .userDefaults(config)
-      case "swiftData":
-        let config = parseSwiftDataArguments(from: functionCall.arguments)
-        return .swiftData(config)
-      default:
-        break
-      }
+       let callee = functionCall.calledExpression.as(MemberAccessExprSyntax.self),
+       callee.declName.baseName.text == "userDefaults" {
+      let config = parseUserDefaultsArguments(from: functionCall.arguments)
+      return .userDefaults(config)
+    }
+    
+    // Handle function call like .iCloud(key: "key")
+    if let functionCall = expression.as(FunctionCallExprSyntax.self),
+       let callee = functionCall.calledExpression.as(MemberAccessExprSyntax.self),
+       callee.declName.baseName.text == "iCloud" {
+      let config = parseiCloudArguments(from: functionCall.arguments)
+      return .iCloud(config)
     }
     
     // Handle member access like .memory
@@ -233,34 +224,33 @@ extension UnifiedStoredMacro {
     )
   }
 
-  /// Parses SwiftData arguments into SwiftDataConfiguration
-  private static func parseSwiftDataArguments(
+  /// Parses iCloud arguments into Configuration
+  private static func parseiCloudArguments(
     from arguments: LabeledExprListSyntax
-  ) -> BackingStorageType.SwiftDataConfiguration {
+  ) -> BackingStorageType.Configuration {
     var key: String?
     var name: String?
-    var hasContext = false
 
     for argument in arguments {
       guard let label = argument.label?.text else { continue }
 
+      let stringValue = extractStringLiteral(from: argument.expression)
+
       switch label {
       case "key":
-        key = extractStringLiteral(from: argument.expression)
+        key = stringValue
       case "name":
-        name = extractStringLiteral(from: argument.expression)
-      case "context":
-        hasContext = true
+        name = stringValue
       default:
         break
       }
     }
 
     // Use key or empty string as fallback (validation will catch missing key)
-    return BackingStorageType.SwiftDataConfiguration(
+    return BackingStorageType.Configuration(
       key: key ?? "",
-      name: name,
-      hasContext: hasContext
+      suite: nil,
+      name: name
     )
   }
 
@@ -285,15 +275,6 @@ extension UnifiedStoredMacro {
     let wrappedValue: String
     let suite: String?
     let key: String?
-    let hasContext: Bool
-    
-    init(propertyName: String, wrappedValue: String, suite: String? = nil, key: String? = nil, hasContext: Bool = false) {
-      self.propertyName = propertyName
-      self.wrappedValue = wrappedValue
-      self.suite = suite
-      self.key = key
-      self.hasContext = hasContext
-    }
     
     func buildMemoryInitializer() -> ExprSyntax {
       return #".init(name: "\#(raw: propertyName)", wrappedValue: \#(raw: wrappedValue))"# as ExprSyntax
@@ -311,14 +292,12 @@ extension UnifiedStoredMacro {
       }
     }
     
-    func buildSwiftDataInitializer() -> ExprSyntax {
+    func buildiCloudInitializer() -> ExprSyntax {
       guard let key = key else {
-        fatalError("SwiftData initializer requires a key")
+        fatalError("iCloud initializer requires a key")
       }
       
-      // For now, assume modelContext is globally available
-      // In a real implementation, this would need to be injected
-      return #".init(name: "\#(raw: propertyName)", key: "\#(raw: key)", defaultValue: \#(raw: wrappedValue), modelContext: globalModelContext)"# as ExprSyntax
+      return #".init(name: "\#(raw: propertyName)", key: "\#(raw: key)", defaultValue: \#(raw: wrappedValue))"# as ExprSyntax
     }
   }
 }
@@ -392,8 +371,8 @@ extension UnifiedStoredMacro {
       return createMemoryTypeAnnotation(for: type, variableDecl: variableDecl)
     case .userDefaults:
       return "UserDefaultsStored<\(type.trimmed)>" as TypeSyntax
-    case .swiftData:
-      return "SwiftDataStored<\(type.trimmed)>" as TypeSyntax
+    case .iCloud:
+      return "iCloudStored<\(type.trimmed)>" as TypeSyntax
     }
   }
   
@@ -440,8 +419,8 @@ extension UnifiedStoredMacro {
         configuration: config,
         propertyName: propertyName
       )
-    case .swiftData(let config):
-      return createSwiftDataInitializer(
+    case .iCloud(let config):
+      return createiCloudInitializer(
         for: storageDecl,
         variableDecl: variableDecl,
         configuration: config,
@@ -466,8 +445,7 @@ extension UnifiedStoredMacro {
         propertyName: propertyName,
         wrappedValue: wrappedValue,
         suite: nil,
-        key: nil,
-        hasContext: false
+        key: nil
       )
       return storageDecl.addInitializer(
         InitializerClauseSyntax(value: builder.buildMemoryInitializer())
@@ -482,8 +460,7 @@ extension UnifiedStoredMacro {
           propertyName: propertyName,
           wrappedValue: wrappedValue,
           suite: nil,
-          key: nil,
-          hasContext: false
+          key: nil
         )
         return .init(value: builder.buildMemoryInitializer())
       }
@@ -504,19 +481,18 @@ extension UnifiedStoredMacro {
         propertyName: finalNodeName,
         wrappedValue: "\(initializer.trimmed.value)",
         suite: configuration.suite,
-        key: configuration.key,
-        hasContext: false
+        key: configuration.key
       )
       
       return .init(value: builder.buildUserDefaultsInitializer())
     }
   }
 
-  /// Creates SwiftData storage initializer
-  private static func createSwiftDataInitializer(
+  /// Creates iCloud storage initializer
+  private static func createiCloudInitializer(
     for storageDecl: VariableDeclSyntax,
     variableDecl: VariableDeclSyntax,
-    configuration: BackingStorageType.SwiftDataConfiguration,
+    configuration: BackingStorageType.Configuration,
     propertyName: String
   ) -> VariableDeclSyntax {
     let finalNodeName = configuration.name ?? propertyName
@@ -526,11 +502,10 @@ extension UnifiedStoredMacro {
         propertyName: finalNodeName,
         wrappedValue: "\(initializer.trimmed.value)",
         suite: nil,
-        key: configuration.key,
-        hasContext: configuration.hasContext
+        key: configuration.key
       )
       
-      return .init(value: builder.buildSwiftDataInitializer())
+      return .init(value: builder.buildiCloudInitializer())
     }
   }
 }
@@ -634,8 +609,8 @@ extension UnifiedStoredMacro: AccessorMacro {
       return createMemoryAccessors(propertyName: propertyName, variableDecl: variableDecl, context: context)
     case .userDefaults:
       return createUserDefaultsAccessors(propertyName: propertyName, variableDecl: variableDecl)
-    case .swiftData:
-      return createSwiftDataAccessors(propertyName: propertyName, variableDecl: variableDecl)
+    case .iCloud:
+      return createiCloudAccessors(propertyName: propertyName, variableDecl: variableDecl)
     }
   }
 
@@ -686,8 +661,8 @@ extension UnifiedStoredMacro: AccessorMacro {
     return accessors
   }
 
-  /// Creates accessor declarations for SwiftData storage
-  private static func createSwiftDataAccessors(
+  /// Creates accessor declarations for iCloud storage
+  private static func createiCloudAccessors(
     propertyName: String,
     variableDecl: VariableDeclSyntax
   ) -> [AccessorDeclSyntax] {
@@ -697,7 +672,7 @@ extension UnifiedStoredMacro: AccessorMacro {
     if !variableDecl.hasInitializer {
       accessors.append(createStorageRestrictionsInitAccessor(
         propertyName: propertyName,
-        body: "// This should be handled by PeerMacro\nfatalError(\"SwiftDataStored requires default value\")"
+        body: "// This should be handled by PeerMacro\nfatalError(\"iCloudStored requires default value\")"
       ))
     }
 

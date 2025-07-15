@@ -21,10 +21,8 @@ public enum GraphStorageBacking {
   case userDefaults(suite: String, key: String)
   /// UserDefaults storage with suite, key, and name
   case userDefaults(suite: String, key: String, name: String)
-  /// SwiftData storage with CloudKit sync
-  case swiftData(key: String)
-  /// SwiftData storage with CloudKit sync and custom model context
-  case swiftData(key: String, context: Any)
+  /// iCloud storage with a key
+  case iCloud(key: String)
 }
 
 // MARK: - Unified GraphStored Macro
@@ -36,7 +34,7 @@ public enum GraphStorageBacking {
 /// @GraphStored var count: Int = 0  // Memory storage (default)
 /// @GraphStored(backed: .userDefaults(key: "count")) var storedCount: Int = 0
 /// @GraphStored(backed: .userDefaults(suite: "com.app", key: "theme")) var theme: String = "light"
-/// @GraphStored(backed: .swiftData(key: "settings")) var settings: MySettings = MySettings()
+/// @GraphStored(backed: .iCloud(key: "syncedCount")) var syncedCount: Int = 0
 /// ```
 @attached(accessor, names: named(init), named(get), named(set))
 @attached(peer, names: prefixed(`$`))

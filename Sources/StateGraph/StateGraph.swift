@@ -4,10 +4,6 @@ import Foundation.NSLock
   import Observation
 #endif
 
-#if canImport(SwiftData)
-  import SwiftData
-#endif
-
 /**
  based on
  https://talk.objc.io/episodes/S01E429-attribute-graph-part-1
