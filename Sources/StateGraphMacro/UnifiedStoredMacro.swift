@@ -23,6 +23,7 @@ extension UnifiedStoredMacro {
   enum BackingStorageType {
     case memory
     case userDefaults(Configuration)
+    case swiftData(SwiftDataConfiguration)
 
     struct Configuration {
       let key: String
@@ -33,6 +34,18 @@ extension UnifiedStoredMacro {
         self.key = key
         self.suite = suite
         self.name = name
+      }
+    }
+    
+    struct SwiftDataConfiguration {
+      let key: String
+      let name: String?
+      let hasContext: Bool
+      
+      init(key: String, name: String? = nil, hasContext: Bool = false) {
+        self.key = key
+        self.name = name
+        self.hasContext = hasContext
       }
     }
   }
@@ -105,6 +118,14 @@ extension UnifiedStoredMacro {
       }
     }
 
+    // SwiftData specific validation
+    if case .swiftData = backingType {
+      if !variableDecl.hasInitializer {
+        context.addDiagnostics(from: Error.userDefaultsRequiresDefaultValue, node: node)
+        return false
+      }
+    }
+
     return true
   }
 
@@ -155,10 +176,18 @@ extension UnifiedStoredMacro {
   ) -> BackingStorageType {
     // Handle function call like .userDefaults(key: "key")
     if let functionCall = expression.as(FunctionCallExprSyntax.self),
-       let callee = functionCall.calledExpression.as(MemberAccessExprSyntax.self),
-       callee.declName.baseName.text == "userDefaults" {
-      let config = parseUserDefaultsArguments(from: functionCall.arguments)
-      return .userDefaults(config)
+       let callee = functionCall.calledExpression.as(MemberAccessExprSyntax.self) {
+      
+      switch callee.declName.baseName.text {
+      case "userDefaults":
+        let config = parseUserDefaultsArguments(from: functionCall.arguments)
+        return .userDefaults(config)
+      case "swiftData":
+        let config = parseSwiftDataArguments(from: functionCall.arguments)
+        return .swiftData(config)
+      default:
+        break
+      }
     }
     
     // Handle member access like .memory
@@ -204,6 +233,37 @@ extension UnifiedStoredMacro {
     )
   }
 
+  /// Parses SwiftData arguments into SwiftDataConfiguration
+  private static func parseSwiftDataArguments(
+    from arguments: LabeledExprListSyntax
+  ) -> BackingStorageType.SwiftDataConfiguration {
+    var key: String?
+    var name: String?
+    var hasContext = false
+
+    for argument in arguments {
+      guard let label = argument.label?.text else { continue }
+
+      switch label {
+      case "key":
+        key = extractStringLiteral(from: argument.expression)
+      case "name":
+        name = extractStringLiteral(from: argument.expression)
+      case "context":
+        hasContext = true
+      default:
+        break
+      }
+    }
+
+    // Use key or empty string as fallback (validation will catch missing key)
+    return BackingStorageType.SwiftDataConfiguration(
+      key: key ?? "",
+      name: name,
+      hasContext: hasContext
+    )
+  }
+
   /// Extracts string literal value from expression
   private static func extractStringLiteral(from expression: ExprSyntax) -> String? {
     guard let stringLiteral = expression.as(StringLiteralExprSyntax.self),
@@ -225,6 +285,15 @@ extension UnifiedStoredMacro {
     let wrappedValue: String
     let suite: String?
     let key: String?
+    let hasContext: Bool
+    
+    init(propertyName: String, wrappedValue: String, suite: String? = nil, key: String? = nil, hasContext: Bool = false) {
+      self.propertyName = propertyName
+      self.wrappedValue = wrappedValue
+      self.suite = suite
+      self.key = key
+      self.hasContext = hasContext
+    }
     
     func buildMemoryInitializer() -> ExprSyntax {
       return #".init(name: "\#(raw: propertyName)", wrappedValue: \#(raw: wrappedValue))"# as ExprSyntax
@@ -240,6 +309,16 @@ extension UnifiedStoredMacro {
       } else {
         return #".init(name: "\#(raw: propertyName)", key: "\#(raw: key)", defaultValue: \#(raw: wrappedValue))"# as ExprSyntax
       }
+    }
+    
+    func buildSwiftDataInitializer() -> ExprSyntax {
+      guard let key = key else {
+        fatalError("SwiftData initializer requires a key")
+      }
+      
+      // For now, assume modelContext is globally available
+      // In a real implementation, this would need to be injected
+      return #".init(name: "\#(raw: propertyName)", key: "\#(raw: key)", defaultValue: \#(raw: wrappedValue), modelContext: globalModelContext)"# as ExprSyntax
     }
   }
 }
@@ -313,6 +392,8 @@ extension UnifiedStoredMacro {
       return createMemoryTypeAnnotation(for: type, variableDecl: variableDecl)
     case .userDefaults:
       return "UserDefaultsStored<\(type.trimmed)>" as TypeSyntax
+    case .swiftData:
+      return "SwiftDataStored<\(type.trimmed)>" as TypeSyntax
     }
   }
   
@@ -359,6 +440,13 @@ extension UnifiedStoredMacro {
         configuration: config,
         propertyName: propertyName
       )
+    case .swiftData(let config):
+      return createSwiftDataInitializer(
+        for: storageDecl,
+        variableDecl: variableDecl,
+        configuration: config,
+        propertyName: propertyName
+      )
     }
   }
 
@@ -378,7 +466,8 @@ extension UnifiedStoredMacro {
         propertyName: propertyName,
         wrappedValue: wrappedValue,
         suite: nil,
-        key: nil
+        key: nil,
+        hasContext: false
       )
       return storageDecl.addInitializer(
         InitializerClauseSyntax(value: builder.buildMemoryInitializer())
@@ -393,7 +482,8 @@ extension UnifiedStoredMacro {
           propertyName: propertyName,
           wrappedValue: wrappedValue,
           suite: nil,
-          key: nil
+          key: nil,
+          hasContext: false
         )
         return .init(value: builder.buildMemoryInitializer())
       }
@@ -414,10 +504,33 @@ extension UnifiedStoredMacro {
         propertyName: finalNodeName,
         wrappedValue: "\(initializer.trimmed.value)",
         suite: configuration.suite,
-        key: configuration.key
+        key: configuration.key,
+        hasContext: false
       )
       
       return .init(value: builder.buildUserDefaultsInitializer())
+    }
+  }
+
+  /// Creates SwiftData storage initializer
+  private static func createSwiftDataInitializer(
+    for storageDecl: VariableDeclSyntax,
+    variableDecl: VariableDeclSyntax,
+    configuration: BackingStorageType.SwiftDataConfiguration,
+    propertyName: String
+  ) -> VariableDeclSyntax {
+    let finalNodeName = configuration.name ?? propertyName
+
+    return storageDecl.modifyingInit { initializer in
+      let builder = InitializerBuilder(
+        propertyName: finalNodeName,
+        wrappedValue: "\(initializer.trimmed.value)",
+        suite: nil,
+        key: configuration.key,
+        hasContext: configuration.hasContext
+      )
+      
+      return .init(value: builder.buildSwiftDataInitializer())
     }
   }
 }
@@ -521,6 +634,8 @@ extension UnifiedStoredMacro: AccessorMacro {
       return createMemoryAccessors(propertyName: propertyName, variableDecl: variableDecl, context: context)
     case .userDefaults:
       return createUserDefaultsAccessors(propertyName: propertyName, variableDecl: variableDecl)
+    case .swiftData:
+      return createSwiftDataAccessors(propertyName: propertyName, variableDecl: variableDecl)
     }
   }
 
@@ -561,6 +676,28 @@ extension UnifiedStoredMacro: AccessorMacro {
       accessors.append(createStorageRestrictionsInitAccessor(
         propertyName: propertyName,
         body: "// This should be handled by PeerMacro\nfatalError(\"UserDefaultsStored requires default value\")"
+      ))
+    }
+
+    // Add getter and setter
+    accessors.append(createSimpleGetAccessor(propertyName: propertyName))
+    accessors.append(createSimpleSetAccessor(propertyName: propertyName))
+
+    return accessors
+  }
+
+  /// Creates accessor declarations for SwiftData storage
+  private static func createSwiftDataAccessors(
+    propertyName: String,
+    variableDecl: VariableDeclSyntax
+  ) -> [AccessorDeclSyntax] {
+    var accessors: [AccessorDeclSyntax] = []
+
+    // Add init accessor if no initializer
+    if !variableDecl.hasInitializer {
+      accessors.append(createStorageRestrictionsInitAccessor(
+        propertyName: propertyName,
+        body: "// This should be handled by PeerMacro\nfatalError(\"SwiftDataStored requires default value\")"
       ))
     }
 
