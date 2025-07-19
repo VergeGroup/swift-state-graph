@@ -720,6 +720,55 @@ availabilitySubscription = withGraphTracking {
 
 By storing the returned subscription object in a property, you ensure the tracking remains active for as long as needed.
 
+### Reactive Processing with `withGraphTrackingGroup`
+
+The `withGraphTrackingGroup` function enables **Computed-like reactive processing** where code is executed immediately and re-executed whenever any accessed nodes change. Unlike Computed nodes which return values, this executes side effects and operations based on node values, dynamically tracking only the nodes that are actually accessed during execution.
+
+```swift
+// Example: Conditional data processing based on feature flags and user state
+
+final class DataProcessingService {
+  @GraphStored var rawData: [DataItem] = []
+  @GraphStored var isProcessingEnabled: Bool = false
+  @GraphStored var currentUser: User?
+}
+
+let service = DataProcessingService()
+
+// Reactive processing that adapts to runtime conditions
+let subscription = withGraphTracking {
+  withGraphTrackingGroup {
+    // Only process data when feature is enabled
+    if service.isProcessingEnabled {
+      let data = service.rawData
+      print("Processing \(data.count) items...")
+      
+      // Only perform expensive analytics for premium users
+      if service.currentUser?.isPremium == true {
+        performAdvancedAnalytics(data)
+      } else {
+        performBasicAnalytics(data)
+      }
+    }
+    
+    // Always update UI regardless of processing state
+    updateDataCountDisplay(service.rawData.count)
+  }
+}
+```
+
+**Key Benefits:**
+- **Dynamic Dependency Tracking**: Only nodes accessed during execution are tracked
+- **Conditional Processing**: Different code paths create different dependency graphs
+- **Actor Isolation**: Preserves the actor context where tracking was initiated
+- **Efficient Resource Usage**: Avoids unnecessary subscriptions and computations
+
+**Use Cases:**
+- Feature flag-based conditional logic
+- User permission-dependent operations  
+- Dynamic UI updates based on complex state combinations
+- Performance-sensitive reactive processing
+
 ## Comparing with Swift's Observable Protocol
 
 Understanding **Swift Observable compatibility** is key when choosing a state management solution. The primary differentiator for Swift State Graph over Swift's standard `Observable` protocol is its sophisticated approach to **Swift computed properties** and automatic **Swift dependency tracking**.
