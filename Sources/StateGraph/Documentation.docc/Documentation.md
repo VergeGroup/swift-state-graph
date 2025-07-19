@@ -94,6 +94,7 @@ final class CounterViewModel {
 ### Observation and Tracking
 
 - ``withGraphTracking(_:)``
+- ``withGraphTrackingGroup(_:)``
 - ``Node/onChange(_:)``
 - <doc:Observation-Patterns>
 
