@@ -89,19 +89,50 @@ public func withGraphTracking(_ scope: () -> Void) -> AnyCancellable {
 }
 
 /**
-  
- - node1, node2, node3 should be subscribed
- - node2 is only subscribed when (node1 > 10), otherwise this closure will not be called whenever node2 value has changed.
+ Conditional dependency tracking within a graph tracking scope.
+ 
+ This function enables dynamic dependency management where nodes are only tracked
+ when they are accessed within true conditional branches. This allows for efficient
+ resource usage by avoiding unnecessary subscriptions.
+ 
+ ## Behavior
+ - Must be called within a `withGraphTracking` scope
+ - The handler closure is executed initially and re-executed whenever any tracked node changes
+ - Only nodes accessed during execution are tracked for the next iteration
+ - Conditional nodes are dynamically added/removed from tracking based on runtime conditions
+ 
+ ## Example: Conditional Tracking
  ```swift
+ let condition = Stored(wrappedValue: 5)
+ let conditionalNode = Stored(wrappedValue: 10) 
+ let alwaysNode = Stored(wrappedValue: 20)
+ 
  withGraphTracking {
    withGraphTrackingGroup {
-     if node1 > 10 {
-       print(node2)
+     // alwaysNode is always tracked
+     print("Always: \(alwaysNode.wrappedValue)")
+     
+     // conditionalNode is only tracked when condition > 10
+     if condition.wrappedValue > 10 {
+       print("Conditional: \(conditionalNode.wrappedValue)")
      }
-     print(node3)
    }
  }
- ``` 
+ ```
+ 
+ In this example:
+ - `alwaysNode` changes will always trigger re-execution
+ - `conditionalNode` changes only trigger re-execution when `condition > 10`
+ - `condition` changes will trigger re-execution (to re-evaluate the condition)
+ 
+ ## Use Cases
+ - Feature flags: Only track relevant nodes when features are enabled
+ - UI state: Track different nodes based on current screen/mode
+ - Performance optimization: Avoid expensive tracking when not needed
+ - Dynamic dependency graphs: Build reactive systems that adapt to runtime conditions
+ 
+ - Parameter handler: The closure to execute with conditional tracking
+ - Parameter isolation: Actor isolation context for execution
  */
 public func withGraphTrackingGroup(
   _ handler: @escaping () -> Void,
@@ -126,10 +157,7 @@ public func withGraphTrackingGroup(
       return .next
     },
     isolation: isolation
-  ) 
-                
-  // init    
-  handler()
+  )
   
   let cancellabe = AnyCancellable {
     isCancelled.withLock { $0 = true }     
