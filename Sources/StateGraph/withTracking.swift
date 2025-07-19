@@ -3,7 +3,7 @@
 /// To observe properties continuously, use ``withContinuousStateGraphTracking``.
 func withStateGraphTracking(
   apply: () -> Void,
-  didChange: @escaping @Sendable () -> Void
+  didChange: @escaping @Sendable (TrackingRegistration) -> Void
 ) {
   let registration = TrackingRegistration(didChange: didChange)
   TrackingRegistration.$registration.withValue(registration) {
@@ -24,11 +24,11 @@ func withContinuousStateGraphTracking(
   didChange: @escaping () -> StateGraphTrackingContinuation,
   isolation: isolated (any Actor)? = #isolation
 ) {
-
+  
   let applyBox = UnsafeSendable(apply)
   let didChangeBox = UnsafeSendable(didChange)
-
-  withStateGraphTracking(apply: apply) {
+  
+  let registration = TrackingRegistration(didChange: { trackingRegistration in
     Task {
       let continuation = await perform(didChangeBox._value, isolation: isolation)
       switch continuation {
@@ -37,13 +37,30 @@ func withContinuousStateGraphTracking(
       case .next:
         // continue tracking on next event loop.
         // It uses isolation and task dispatching to ensure apply closure is called on the same actor.
-        await withContinuousStateGraphTracking(
+        await Task.yield()
+        await _withContinuousStateGraphTracking(
           apply: applyBox._value,
-          didChange: didChangeBox._value,
+          trackingRegistration: trackingRegistration,
           isolation: isolation
         )
       }
     }
+  })
+  
+  _withContinuousStateGraphTracking(apply: apply, trackingRegistration: registration)
+}
+
+@inline(__always)
+private func _withContinuousStateGraphTracking(
+  apply: @escaping () -> Void,
+  trackingRegistration: TrackingRegistration,
+  isolation: isolated (any Actor)? = #isolation
+) {
+  
+  let applyBox = UnsafeSendable(apply)
+     
+  TrackingRegistration.$registration.withValue(trackingRegistration) {
+    apply()
   }
 }
 
@@ -81,14 +98,14 @@ public final class TrackingRegistration: Sendable, Hashable {
     hasher.combine(ObjectIdentifier(self))
   }
 
-  private let didChange: @Sendable () -> Void
+  private let didChange: @Sendable (TrackingRegistration) -> Void
 
-  init(didChange: @escaping @Sendable () -> Void) {
+  init(didChange: @escaping @Sendable (TrackingRegistration) -> Void) {
     self.didChange = didChange
   }
 
   func perform() {
-    didChange()
+    didChange(self)
   }
 
   @TaskLocal
