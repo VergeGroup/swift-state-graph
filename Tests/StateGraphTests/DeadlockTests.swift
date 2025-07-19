@@ -20,6 +20,7 @@ struct DeadlockTests {
     
     // Test that direct property access with async operations doesn't deadlock
     // This would have caused deadlock with the old _modify implementation     
+    // https://github.com/VergeGroup/swift-state-graph/pull/56
     await node.wrappedValue.run()
     try! await Task.sleep(nanoseconds: 20_000_000) // 20ms between sends
     
