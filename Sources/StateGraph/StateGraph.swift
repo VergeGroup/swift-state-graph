@@ -247,14 +247,17 @@ public final class Computed<Value>: Node, Observable, CustomDebugStringConvertib
   public let info: NodeInfo
 
   public var wrappedValue: Value {
-    _read {
+    get {
       #if canImport(Observation)
         if #available(macOS 14.0, iOS 17.0, watchOS 10.0, tvOS 17.0, *) {
           observationRegistrar.access(PointerKeyPathRoot.shared, keyPath: _keyPath(self))   
         }
       #endif
       recomputeIfNeeded()
-      yield _cachedValue!
+      
+      lock.lock()
+      defer { lock.unlock() }
+      return _cachedValue!
     }
   }
 
