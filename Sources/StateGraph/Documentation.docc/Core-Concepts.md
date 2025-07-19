@@ -223,6 +223,85 @@ This creates a reactive system where:
 - **No Manual Synchronization**: No need to remember to call update methods
 - **Declarative**: Your code expresses what values depend on, not how to update them
 
+## Reactive Processing with withGraphTrackingGroup
+
+Beyond simple observation, Swift State Graph provides `withGraphTrackingGroup` for reactive processing where code executes immediately and re-executes whenever accessed nodes change. This enables building reactive side effects that adapt to runtime conditions.
+
+### How It Works
+
+`withGraphTrackingGroup` provides Computed-like behavior for side effects:
+
+```swift
+let subscription = withGraphTracking {
+  withGraphTrackingGroup {
+    // This code runs initially and re-runs when any accessed node changes
+    
+    // Always tracked
+    print("Count: \(counter.wrappedValue)")
+    
+    // Conditionally tracked - only when enabled
+    if featureEnabled.wrappedValue {
+      print("Feature data: \(featureData.wrappedValue)")
+    }
+  }
+}
+```
+
+### Dynamic Dependency Tracking
+
+Unlike static dependency declaration, `withGraphTrackingGroup` tracks dependencies dynamically:
+
+```swift
+final class DataProcessor {
+  @GraphStored var isEnabled: Bool = false
+  @GraphStored var data: [Item] = []
+  @GraphStored var user: User?
+}
+
+let processor = DataProcessor()
+
+let subscription = withGraphTracking {
+  withGraphTrackingGroup {
+    // Only process when enabled
+    if processor.isEnabled {
+      let items = processor.data
+      print("Processing \(items.count) items")
+      
+      // Only track premium features for premium users
+      if processor.user?.isPremium == true {
+        performPremiumAnalysis(items)
+      } else {
+        performBasicAnalysis(items)
+      }
+    }
+    
+    // Always update UI
+    updateItemCount(processor.data.count)
+  }
+}
+```
+
+### Key Characteristics
+
+- **Immediate Execution**: Runs synchronously on first call
+- **Automatic Re-execution**: Re-runs when any tracked node changes
+- **Conditional Dependencies**: Only tracks nodes actually accessed in the current execution
+- **Actor Isolation**: Preserves the calling context's actor isolation
+- **Side Effect Focused**: For operations rather than value computation
+
+### Use Cases
+
+1. **Feature Flags**: Enable/disable functionality based on runtime conditions
+2. **User Permissions**: Conditionally execute code based on user state
+3. **Adaptive Processing**: Change behavior based on data characteristics
+4. **Performance Optimization**: Avoid tracking expensive nodes when not needed
+
+### Important Notes
+
+- Must be called within a `withGraphTracking` scope
+- The handler should perform side effects, not return values
+- All subscriptions are cleaned up when the returned cancellable is cancelled
+
 ## Memory Management
 
 Swift State Graph uses weak references and automatic cleanup to prevent memory leaks:
