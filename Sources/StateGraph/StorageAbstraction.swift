@@ -158,7 +158,7 @@ public final class _Stored<Value, S: Storage<Value>>: Node, Observable, CustomDe
   public let info: NodeInfo
   
   public var wrappedValue: Value {
-    _read {
+    get {
       
 #if canImport(Observation)
       if #available(macOS 14.0, iOS 17.0, watchOS 10.0, tvOS 17.0, *) {
@@ -180,9 +180,9 @@ public final class _Stored<Value, S: Storage<Value>>: Node, Observable, CustomDe
         self.trackingRegistrations.insert(registration)
       }
       
-      yield storage.value
+      return storage.value
     }
-    _modify {
+    set {
       
 #if canImport(Observation)
       if #available(macOS 14.0, iOS 17.0, watchOS 10.0, tvOS 17.0, *) { 
@@ -197,9 +197,9 @@ public final class _Stored<Value, S: Storage<Value>>: Node, Observable, CustomDe
 #endif
       
       lock.lock()
-            
-      yield &storage.value
-                
+      
+      storage.value = newValue
+      
       let _outgoingEdges = outgoingEdges
       let _trackingRegistrations = trackingRegistrations
       self.trackingRegistrations.removeAll()
@@ -318,4 +318,5 @@ public final class _Stored<Value, S: Storage<Value>>: Node, Observable, CustomDe
     let result = try body(&storage.value)
     return result
   }
+  
 } 

@@ -1,8 +1,6 @@
 import Testing
 import StateGraph
 
-/**
- this halts
 @Suite("Deadlock Tests")
 struct DeadlockTests {
   
@@ -20,6 +18,8 @@ struct DeadlockTests {
     
     let node = Stored<State>.init(wrappedValue: .init())
     
+    // Test that direct property access with async operations doesn't deadlock
+    // This would have caused deadlock with the old _modify implementation     
     await node.wrappedValue.run()
     try! await Task.sleep(nanoseconds: 20_000_000) // 20ms between sends
     
@@ -27,5 +27,3 @@ struct DeadlockTests {
   }
   
 }
-
-*/
