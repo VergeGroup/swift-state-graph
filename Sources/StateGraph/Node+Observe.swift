@@ -88,6 +88,57 @@ public func withGraphTracking(_ scope: () -> Void) -> AnyCancellable {
   
 }
 
+/**
+  
+ - node1, node2, node3 should be subscribed
+ - node2 is only subscribed when (node1 > 10), otherwise this closure will not be called whenever node2 value has changed.
+ ```swift
+ withGraphTracking {
+   withGraphTrackingGroup {
+     if node1 > 10 {
+       print(node2)
+     }
+     print(node3)
+   }
+ }
+ ``` 
+ */
+public func withGraphTrackingGroup(
+  _ handler: @escaping () -> Void,
+  isolation: isolated (any Actor)? = #isolation
+) {
+  
+  guard Subscriptions.subscriptions != nil else {
+    assertionFailure("You must call withGraphTracking before calling this method.")
+    return
+  }
+  
+  let _handler = UnsafeSendable(handler)
+      
+  let isCancelled = OSAllocatedUnfairLock(initialState: false)
+  
+  withContinuousStateGraphTracking(
+    apply: { 
+      _handler._value()
+    },
+    didChange: {
+      guard !isCancelled.withLock({ $0 }) else { return .stop }        
+      return .next
+    },
+    isolation: isolation
+  ) 
+                
+  // init    
+  handler()
+  
+  let cancellabe = AnyCancellable {
+    isCancelled.withLock { $0 = true }     
+  }
+  
+  Subscriptions.subscriptions!.append(cancellabe)
+  
+}
+
 public protocol Filter<Value> {
   
   associatedtype Value
