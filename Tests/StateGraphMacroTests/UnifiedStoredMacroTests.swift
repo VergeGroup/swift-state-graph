@@ -854,7 +854,7 @@ final class UnifiedStoredMacroTests: XCTestCase {
             initializes: $unowned_variable
           )
           init(initialValue) {
-            $unowned_variable = .init(wrappedValue: .init(initialValue))
+            $unowned_variable = .init(name: "unowned_variable", wrappedValue: .init(initialValue))
           }
           get {
             return $unowned_variable.wrappedValue.value
