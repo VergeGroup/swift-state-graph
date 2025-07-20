@@ -235,7 +235,7 @@ public final class Computed<Value>: Node, Observable, CustomDebugStringConvertib
       }
       
       for registration in _trackingRegistrations {
-        registration.perform()
+        registration.perform(context: .init(nodeInfo: info))
       }
             
     }

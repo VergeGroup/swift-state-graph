@@ -1,5 +1,5 @@
 
-public struct SourceLocation: ~Copyable, Sendable {
+public struct SourceLocation: Sendable {
   
   public let file: StaticString
   public let line: UInt
@@ -17,7 +17,7 @@ public struct SourceLocation: ~Copyable, Sendable {
   
 }
 
-public struct NodeInfo: ~Copyable, Sendable {
+public struct NodeInfo: Sendable {
   
   public let name: StaticString?
   public let sourceLocation: SourceLocation
