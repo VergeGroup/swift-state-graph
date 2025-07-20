@@ -89,6 +89,14 @@ func withStateGraphTrackingStream(
 // MARK: - Internals
 
 public final class TrackingRegistration: Sendable, Hashable {
+  
+  public struct Context: Sendable {
+    public let nodeInfo: NodeInfo
+    
+    init(nodeInfo: NodeInfo) {
+      self.nodeInfo = nodeInfo
+    }
+  }
 
   public static func == (lhs: TrackingRegistration, rhs: TrackingRegistration) -> Bool {
     lhs === rhs
@@ -104,12 +112,26 @@ public final class TrackingRegistration: Sendable, Hashable {
     self.didChange = didChange
   }
 
-  func perform() {
-    didChange(self)
+  func perform(context: Context?) {
+    Self.$context.withValue(context) {
+      didChange(self)
+    }
   }
+  
+  @TaskLocal
+  static var context: Context?
 
   @TaskLocal
   static var registration: TrackingRegistration?
+}
+
+public func _printStateGraphChanged() {
+  guard let context = TrackingRegistration.context else {
+    print("Unknown context for state graph tracking")
+    return
+  }
+  let nodeInfo = context.nodeInfo
+  print("\(nodeInfo.name) @ \(nodeInfo.sourceLocation.file):\(nodeInfo.sourceLocation.line)")
 }
 
 struct UnsafeSendable<V>: ~Copyable, @unchecked Sendable {
