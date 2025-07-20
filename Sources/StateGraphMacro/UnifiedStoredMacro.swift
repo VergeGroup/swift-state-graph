@@ -693,7 +693,7 @@ extension UnifiedStoredMacro: AccessorMacro {
         initializes: $\(raw: propertyName)
       )
       init(initialValue) {
-        $\(raw: propertyName) = .init(wrappedValue: \(raw: wrappedValue))
+        $\(raw: propertyName) = .init(name: "\(raw: propertyName)", wrappedValue: \(raw: wrappedValue))
       }
       """
     )

@@ -11,8 +11,8 @@ struct StaticPropertyTests {
     @GraphStored
     var instanceValue: Int = 0
   }
-  
-  @Test func static_property_compilation() {
+    
+  @Test @MainActor func static_property_compilation() {
     // Test if static @GraphStored properties compile and work correctly
     ModelWithStatic.sharedValue = 10
     #expect(ModelWithStatic.sharedValue == 10)
@@ -26,7 +26,7 @@ struct StaticPropertyTests {
     #expect(instance.instanceValue == 5)
   }
   
-  @Test func static_property_reactivity() async {
+  @Test @MainActor func static_property_reactivity() async {
     // Reset static value
     ModelWithStatic.sharedValue = 0
     
