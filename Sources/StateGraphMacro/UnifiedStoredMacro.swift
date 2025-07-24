@@ -8,35 +8,16 @@ public struct UnifiedStoredMacro {
   public enum Error: Swift.Error {
     case constantVariableIsNotSupported
     case computedVariableIsNotSupported
-    case needsTypeAnnotation
+    case needsInitializer
     case didSetNotSupported
     case willSetNotSupported
     case userDefaultsRequiresDefaultValue
     case invalidBackingArgument
+    case weakReferenceNotSupported
+    case unownedReferenceNotSupported
   }
 }
 
-// MARK: - Configuration
-
-extension UnifiedStoredMacro {
-  /// Configuration for backing storage type
-  enum BackingStorageType {
-    case memory
-    case userDefaults(Configuration)
-
-    struct Configuration {
-      let key: String
-      let suite: String?
-      let name: String?
-
-      init(key: String, suite: String? = nil, name: String? = nil) {
-        self.key = key
-        self.suite = suite
-        self.name = name
-      }
-    }
-  }
-}
 
 // MARK: - Diagnostic Messages
 
@@ -47,8 +28,8 @@ extension UnifiedStoredMacro.Error: DiagnosticMessage {
       return "Constant variables are not supported with @GraphStored"
     case .computedVariableIsNotSupported:
       return "Computed variables are not supported with @GraphStored"
-    case .needsTypeAnnotation:
-      return "@GraphStored requires explicit type annotation"
+    case .needsInitializer:
+      return "@GraphStored requires an initializer for non-optional properties"
     case .didSetNotSupported:
       return "didSet is not supported with @GraphStored"
     case .willSetNotSupported:
@@ -57,6 +38,10 @@ extension UnifiedStoredMacro.Error: DiagnosticMessage {
       return "@GraphStored with UserDefaults backing requires a default value"
     case .invalidBackingArgument:
       return "Invalid backing argument for @GraphStored"
+    case .weakReferenceNotSupported:
+      return "@GraphStored does not support weak references"
+    case .unownedReferenceNotSupported:
+      return "@GraphStored does not support unowned references"
     }
   }
 
@@ -76,13 +61,22 @@ extension UnifiedStoredMacro {
   /// Validates that the variable declaration is suitable for @GraphStored
   private static func validateDeclaration(
     _ variableDecl: VariableDeclSyntax,
-    backingType: BackingStorageType,
     context: some MacroExpansionContext,
     node: some SyntaxProtocol
   ) -> Bool {
-    // Check type annotation
+    // Check type annotation is required (but initializer is not)
     guard variableDecl.typeSyntax != nil else {
-      context.addDiagnostics(from: Error.needsTypeAnnotation, node: node)
+      context.addDiagnostics(from: Error.needsInitializer, node: node)
+      return false
+    }
+
+    // Check for weak/unowned modifiers
+    if variableDecl.modifiers.contains(where: { $0.name.tokenKind == .keyword(.weak) }) {
+      context.addDiagnostics(from: Error.weakReferenceNotSupported, node: node)
+      return false
+    }
+    if variableDecl.modifiers.contains(where: { $0.name.tokenKind == .keyword(.unowned) }) {
+      context.addDiagnostics(from: Error.unownedReferenceNotSupported, node: node)
       return false
     }
 
@@ -95,14 +89,6 @@ extension UnifiedStoredMacro {
     if variableDecl.willSetBlock != nil {
       context.addDiagnostics(from: Error.willSetNotSupported, node: node)
       return false
-    }
-
-    // UserDefaults specific validation
-    if case .userDefaults = backingType {
-      if !variableDecl.hasInitializer {
-        context.addDiagnostics(from: Error.userDefaultsRequiresDefaultValue, node: node)
-        return false
-      }
     }
 
     return true
@@ -128,121 +114,7 @@ extension UnifiedStoredMacro {
   }
 }
 
-// MARK: - Argument Parsing
 
-extension UnifiedStoredMacro {
-
-  /// Parses backing storage type from macro arguments
-  private static func parseBackingStorageType(
-    from node: AttributeSyntax,
-    context: some MacroExpansionContext
-  ) -> BackingStorageType {
-    guard let arguments = node.arguments?.as(LabeledExprListSyntax.self) else {
-      return .memory  // Default to memory if no arguments
-    }
-
-    // Find the 'backed' argument
-    guard let backedArgument = arguments.first(where: { $0.label?.text == "backed" }) else {
-      return .memory
-    }
-    
-    return parseBackingExpression(from: backedArgument.expression)
-  }
-  
-  /// Parses the backing expression to determine storage type
-  private static func parseBackingExpression(
-    from expression: ExprSyntax
-  ) -> BackingStorageType {
-    // Handle function call like .userDefaults(key: "key")
-    if let functionCall = expression.as(FunctionCallExprSyntax.self),
-       let callee = functionCall.calledExpression.as(MemberAccessExprSyntax.self),
-       callee.declName.baseName.text == "userDefaults" {
-      let config = parseUserDefaultsArguments(from: functionCall.arguments)
-      return .userDefaults(config)
-    }
-    
-    // Handle member access like .memory
-    if let memberAccess = expression.as(MemberAccessExprSyntax.self),
-       memberAccess.declName.baseName.text == "memory" {
-      return .memory
-    }
-    
-    // Default to memory for any unrecognized expression
-    return .memory
-  }
-
-  /// Parses UserDefaults arguments into Configuration
-  private static func parseUserDefaultsArguments(
-    from arguments: LabeledExprListSyntax
-  ) -> BackingStorageType.Configuration {
-    var key: String?
-    var suite: String?
-    var name: String?
-
-    for argument in arguments {
-      guard let label = argument.label?.text else { continue }
-
-      let stringValue = extractStringLiteral(from: argument.expression)
-
-      switch label {
-      case "key":
-        key = stringValue
-      case "suite":
-        suite = stringValue
-      case "name":
-        name = stringValue
-      default:
-        break
-      }
-    }
-
-    // Use key or empty string as fallback (validation will catch missing key)
-    return BackingStorageType.Configuration(
-      key: key ?? "",
-      suite: suite,
-      name: name
-    )
-  }
-
-  /// Extracts string literal value from expression
-  private static func extractStringLiteral(from expression: ExprSyntax) -> String? {
-    guard let stringLiteral = expression.as(StringLiteralExprSyntax.self),
-      let segment = stringLiteral.segments.first?.as(StringSegmentSyntax.self)
-    else {
-      return nil
-    }
-    return segment.content.text
-  }
-}
-
-// MARK: - Initializer Builder
-
-extension UnifiedStoredMacro {
-  
-  /// Builder for creating storage initializer expressions
-  struct InitializerBuilder {
-    let propertyName: String
-    let wrappedValue: String
-    let suite: String?
-    let key: String?
-    
-    func buildMemoryInitializer() -> ExprSyntax {
-      return #".init(name: "\#(raw: propertyName)", wrappedValue: \#(raw: wrappedValue))"# as ExprSyntax
-    }
-    
-    func buildUserDefaultsInitializer() -> ExprSyntax {
-      guard let key = key else {
-        fatalError("UserDefaults initializer requires a key")
-      }
-      
-      if let suite = suite {
-        return #".init(name: "\#(raw: propertyName)", suite: "\#(raw: suite)", key: "\#(raw: key)", defaultValue: \#(raw: wrappedValue))"# as ExprSyntax
-      } else {
-        return #".init(name: "\#(raw: propertyName)", key: "\#(raw: key)", defaultValue: \#(raw: wrappedValue))"# as ExprSyntax
-      }
-    }
-  }
-}
 
 // MARK: - Variable Declaration Generation
 
@@ -251,10 +123,11 @@ extension UnifiedStoredMacro {
   /// Creates the storage variable declaration
   private static func createStorageDeclaration(
     from variableDecl: VariableDeclSyntax,
-    backingType: BackingStorageType,
+    storageExpression: ExprSyntax,
+    initialValue: ExprSyntax,
     context: some MacroExpansionContext
   ) -> VariableDeclSyntax {
-    let propertyName = variableDecl.name
+    let _ = variableDecl.name
 
     var storageDecl = variableDecl
       .trimmed
@@ -273,152 +146,34 @@ extension UnifiedStoredMacro {
       storageDecl = storageDecl.with(\.modifiers, modifiers)
     }
 
-    // Rename with $ prefix and update type
-    storageDecl =
-      storageDecl
+    // Rename with $ prefix and remove type annotation (let Swift infer)
+    storageDecl = storageDecl
       .renamingIdentifier(with: "$")
-      .modifyingTypeAnnotation { type in
-        return createTypeAnnotation(for: type, backingType: backingType, variableDecl: variableDecl)
-      }
-
-    // Handle initialization based on backing type
-    storageDecl = createInitializer(
-      for: storageDecl,
-      variableDecl: variableDecl,
-      backingType: backingType,
-      propertyName: propertyName
-    )
-
-    // Remove accessors
+    
+    // Remove type annotation from bindings
     storageDecl = storageDecl.with(
       \.bindings,
-      .init(
+      PatternBindingListSyntax(
         storageDecl.bindings.map { binding in
-          binding.with(\.accessorBlock, nil)
+          binding.with(\.typeAnnotation, nil)
+        }
+      )
+    )
+
+    // Set initializer to use new syntax and remove accessors
+    let initExpression: ExprSyntax = "_Stored(storage: \(storageExpression), value: \(initialValue))"
+    storageDecl = storageDecl.with(
+      \.bindings,
+      PatternBindingListSyntax(
+        storageDecl.bindings.map { binding in
+          binding
+            .with(\.initializer, InitializerClauseSyntax(value: initExpression))
+            .with(\.accessorBlock, nil)
         }
       )
     )
 
     return storageDecl
-  }
-
-  /// Creates appropriate type annotation based on backing type
-  private static func createTypeAnnotation(
-    for type: TypeSyntax,
-    backingType: BackingStorageType,
-    variableDecl: VariableDeclSyntax
-  ) -> TypeSyntax {
-    switch backingType {
-    case .memory:
-      return createMemoryTypeAnnotation(for: type, variableDecl: variableDecl)
-    case .userDefaults:
-      return "UserDefaultsStored<\(type.trimmed)>" as TypeSyntax
-    }
-  }
-  
-  /// Creates memory storage type annotation
-  private static func createMemoryTypeAnnotation(
-    for type: TypeSyntax,
-    variableDecl: VariableDeclSyntax
-  ) -> TypeSyntax {
-    let baseType = type.removingOptionality().trimmed
-    
-    // Determine wrapper type based on variable modifiers
-    let wrappedType: String
-    if variableDecl.isWeak {
-      wrappedType = "Weak<\(baseType)>"
-    } else if variableDecl.isUnowned {
-      wrappedType = "Unowned<\(baseType)>"
-    } else if variableDecl.isImplicitlyUnwrappedOptional {
-      wrappedType = "\(baseType)?"
-    } else {
-      wrappedType = "\(type.trimmed)"
-    }
-    
-    return "Stored<\(raw: wrappedType)>" as TypeSyntax
-  }
-
-  /// Creates appropriate initializer based on backing type
-  private static func createInitializer(
-    for storageDecl: VariableDeclSyntax,
-    variableDecl: VariableDeclSyntax,
-    backingType: BackingStorageType,
-    propertyName: String
-  ) -> VariableDeclSyntax {
-    switch backingType {
-    case .memory:
-      return createMemoryInitializer(
-        for: storageDecl,
-        variableDecl: variableDecl,
-        propertyName: propertyName
-      )
-    case .userDefaults(let config):
-      return createUserDefaultsInitializer(
-        for: storageDecl,
-        variableDecl: variableDecl,
-        configuration: config,
-        propertyName: propertyName
-      )
-    }
-  }
-
-  /// Creates memory storage initializer
-  private static func createMemoryInitializer(
-    for storageDecl: VariableDeclSyntax,
-    variableDecl: VariableDeclSyntax,
-    propertyName: String
-  ) -> VariableDeclSyntax {
-    let needsWrapper = needsValueAccess(variableDecl)
-    
-    if (variableDecl.isOptional || variableDecl.isImplicitlyUnwrappedOptional)
-      && !variableDecl.hasInitializer
-    {
-      let wrappedValue = createWrapperInitExpression("nil", needsWrapper: needsWrapper)
-      let builder = InitializerBuilder(
-        propertyName: propertyName,
-        wrappedValue: wrappedValue,
-        suite: nil,
-        key: nil
-      )
-      return storageDecl.addInitializer(
-        InitializerClauseSyntax(value: builder.buildMemoryInitializer())
-      )
-    } else {
-      return storageDecl.modifyingInit { initializer in
-        let wrappedValue = createWrapperInitExpression(
-          "\(initializer.trimmed.value)",
-          needsWrapper: needsWrapper
-        )
-        let builder = InitializerBuilder(
-          propertyName: propertyName,
-          wrappedValue: wrappedValue,
-          suite: nil,
-          key: nil
-        )
-        return .init(value: builder.buildMemoryInitializer())
-      }
-    }
-  }
-
-  /// Creates UserDefaults storage initializer
-  private static func createUserDefaultsInitializer(
-    for storageDecl: VariableDeclSyntax,
-    variableDecl: VariableDeclSyntax,
-    configuration: BackingStorageType.Configuration,
-    propertyName: String
-  ) -> VariableDeclSyntax {
-    let finalNodeName = configuration.name ?? propertyName
-
-    return storageDecl.modifyingInit { initializer in
-      let builder = InitializerBuilder(
-        propertyName: finalNodeName,
-        wrappedValue: "\(initializer.trimmed.value)",
-        suite: configuration.suite,
-        key: configuration.key
-      )
-      
-      return .init(value: builder.buildUserDefaultsInitializer())
-    }
   }
 }
 
@@ -446,21 +201,117 @@ extension UnifiedStoredMacro: PeerMacro {
       return []
     }
 
-    // Parse backing storage type
-    let backingType = parseBackingStorageType(from: node, context: context)
-
     // Validate declaration
-    guard
-      validateDeclaration(
-        variableDecl, backingType: backingType, context: context, node: declaration)
-    else {
+    guard validateDeclaration(variableDecl, context: context, node: declaration) else {
       return []
+    }
+
+    // Get storage expression from backed argument, default to .memory
+    let storageExpression: ExprSyntax
+    if let arguments = node.arguments?.as(LabeledExprListSyntax.self),
+       let backedArgument = arguments.first(where: { $0.label?.text == "backed" }) {
+      // Transform shorthand syntax to full marker syntax
+      let expr = backedArgument.expression
+      if let memberAccess = expr.as(MemberAccessExprSyntax.self),
+         memberAccess.base == nil {
+        // Handle .memory -> MemoryMarker.memory
+        if memberAccess.declName.baseName.text == "memory" {
+          storageExpression = "MemoryMarker.memory" as ExprSyntax
+        } else {
+          // For any other member access, pass through as-is
+          storageExpression = expr
+        }
+      } else if let functionCall = expr.as(FunctionCallExprSyntax.self),
+                let memberAccess = functionCall.calledExpression.as(MemberAccessExprSyntax.self),
+                memberAccess.base == nil,
+                memberAccess.declName.baseName.text == "userDefaults" {
+        // Handle .userDefaults(...) -> UserDefaultsMarker.userDefaults(...)
+        let newCallee = ExprSyntax("UserDefaultsMarker.userDefaults")
+        storageExpression = ExprSyntax(functionCall.with(\.calledExpression, newCallee))
+      } else {
+        // For fully qualified expressions, pass through as-is
+        storageExpression = expr
+      }
+    } else {
+      // No arguments provided, use memory storage as default
+      storageExpression = "MemoryMarker.memory" as ExprSyntax
+    }
+    
+    // Get initial value
+    let initialValue: ExprSyntax
+    if let binding = variableDecl.bindings.first,
+       let initClause = binding.initializer {
+      // Check if the initializer is nil and we have an optional type
+      let initValue = initClause.value
+      if initValue.description == "nil" && 
+         (variableDecl.isOptional || variableDecl.isImplicitlyUnwrappedOptional) {
+        // Use typed nil for proper type inference
+        let typeSyntax = variableDecl.typeSyntax!
+        // Handle implicitly unwrapped optional specially
+        if variableDecl.isImplicitlyUnwrappedOptional {
+          let baseType = typeSyntax.removingOptionality()
+          initialValue = "nil as \(baseType.trimmed)?" as ExprSyntax
+        } else {
+          initialValue = "nil as \(typeSyntax.trimmed)" as ExprSyntax
+        }
+      } else {
+        // For expressions like .init(), we need to preserve type context
+        let initString = initValue.trimmed.description
+        if initString == ".init()" {
+          // Add explicit type for .init() expressions
+          let typeSyntax = variableDecl.typeSyntax!
+          initialValue = "\(typeSyntax.trimmed)()" as ExprSyntax
+        } else {
+          initialValue = initValue
+        }
+      }
+    } else {
+      // Handle properties without initializer
+      if variableDecl.isOptional || variableDecl.isImplicitlyUnwrappedOptional {
+        // Use typed nil for proper type inference
+        let typeSyntax = variableDecl.typeSyntax!
+        // Handle implicitly unwrapped optional specially
+        if variableDecl.isImplicitlyUnwrappedOptional {
+          let baseType = typeSyntax.removingOptionality()
+          initialValue = "nil as \(baseType.trimmed)?" as ExprSyntax
+        } else {
+          initialValue = "nil as \(typeSyntax.trimmed)" as ExprSyntax
+        }
+      } else {
+        // For non-optional properties without initializer, use appropriate default values
+        // The property will be set in the initializer before it's accessed
+        let typeSyntax = variableDecl.typeSyntax!
+        let typeString = typeSyntax.trimmed.description
+        
+        // Provide appropriate default values based on common types
+        switch typeString {
+        case "String":
+          initialValue = "\"\"" as ExprSyntax
+        case "Int", "Int32", "Int64", "UInt", "UInt32", "UInt64":
+          initialValue = "0" as ExprSyntax
+        case "Double", "Float", "CGFloat":
+          initialValue = "0.0" as ExprSyntax
+        case "Bool":
+          initialValue = "false" as ExprSyntax
+        default:
+          // For other types, try to use the default initializer
+          // This is a fallback that may not always work
+          if typeString.contains("<") || typeString.contains("[") {
+            // For generic types or arrays, use empty initialization
+            initialValue = "\(typeSyntax.trimmed)()" as ExprSyntax
+          } else {
+            // For custom types, try default init or use placeholder
+            initialValue = "\(typeSyntax.trimmed)()" as ExprSyntax
+          }
+        }
+      }
     }
 
     // Create storage declaration
     let storageDecl = createStorageDeclaration(
       from: variableDecl,
-      backingType: backingType,
+      storageExpression: storageExpression,
+      initialValue: initialValue,
       context: context
     )
 
@@ -497,259 +348,14 @@ extension UnifiedStoredMacro: AccessorMacro {
       context.addDiagnostics(from: Error.constantVariableIsNotSupported, node: declaration)
       return []
     }
-
-    // Parse backing storage type
-    let backingType = parseBackingStorageType(from: node, context: context)
-
-    return createAccessors(
-      propertyName: propertyName,
-      variableDecl: variableDecl,
-      backingType: backingType,
-      context: context
-    )
-  }
-
-  /// Creates accessor declarations based on backing type
-  private static func createAccessors(
-    propertyName: String,
-    variableDecl: VariableDeclSyntax,
-    backingType: BackingStorageType,
-    context: some MacroExpansionContext
-  ) -> [AccessorDeclSyntax] {
-    switch backingType {
-    case .memory:
-      return createMemoryAccessors(propertyName: propertyName, variableDecl: variableDecl, context: context)
-    case .userDefaults:
-      return createUserDefaultsAccessors(propertyName: propertyName, variableDecl: variableDecl)
-    }
-  }
-
-  /// Creates accessor declarations for memory storage
-  private static func createMemoryAccessors(
-    propertyName: String,
-    variableDecl: VariableDeclSyntax,
-    context: some MacroExpansionContext
-  ) -> [AccessorDeclSyntax] {
-    let needsInitAccessor = determineIfInitAccessorNeeded(for: variableDecl, context: context)
-    var accessors: [AccessorDeclSyntax] = []
-
-    if needsInitAccessor {
-      accessors.append(
-        createMemoryInitAccessor(propertyName: propertyName, variableDecl: variableDecl))
-    } else if !variableDecl.isStatic && !isTopLevelProperty(context: context) {
-      // Only add the access-based init accessor for non-static and non-top-level properties
-      accessors.append(createMemoryAccessor(propertyName: propertyName, variableDecl: variableDecl))
-    }
-
-    accessors.append(
-      createMemoryGetAccessor(propertyName: propertyName, variableDecl: variableDecl))
-    accessors.append(
-      createMemorySetAccessor(propertyName: propertyName, variableDecl: variableDecl))
-
-    return accessors
-  }
-
-  /// Creates accessor declarations for UserDefaults storage
-  private static func createUserDefaultsAccessors(
-    propertyName: String,
-    variableDecl: VariableDeclSyntax
-  ) -> [AccessorDeclSyntax] {
-    var accessors: [AccessorDeclSyntax] = []
-
-    // Add init accessor if no initializer
-    if !variableDecl.hasInitializer {
-      accessors.append(createStorageRestrictionsInitAccessor(
-        propertyName: propertyName,
-        body: "// This should be handled by PeerMacro\nfatalError(\"UserDefaultsStored requires default value\")"
-      ))
-    }
-
-    // Add getter and setter
-    accessors.append(createSimpleGetAccessor(propertyName: propertyName))
-    accessors.append(createSimpleSetAccessor(propertyName: propertyName))
-
-    return accessors
-  }
-  
-  // MARK: - Common Accessor Helpers
-  
-  private static func createStorageRestrictionsInitAccessor(
-    propertyName: String,
-    body: String
-  ) -> AccessorDeclSyntax {
-    return AccessorDeclSyntax(
-      """
-      @storageRestrictions(
-        initializes: $\(raw: propertyName)
-      )
-      init(initialValue) {
-        \(raw: body)
-      }
-      """
-    )
-  }
-  
-  private static func createSimpleGetAccessor(
-    propertyName: String
-  ) -> AccessorDeclSyntax {
-    return AccessorDeclSyntax(
-      """
-      get {
-        return $\(raw: propertyName).wrappedValue
-      }
-      """
-    )
-  }
-  
-  private static func createSimpleSetAccessor(
-    propertyName: String
-  ) -> AccessorDeclSyntax {
-    return AccessorDeclSyntax(
-      """
-      set { 
-        $\(raw: propertyName).wrappedValue = newValue
-      }
-      """
-    )
-  }
-
-  // MARK: - Memory Accessor Helpers
-  
-  /// Helper to determine if we need to access through .value for weak/unowned references
-  private static func needsValueAccess(_ variableDecl: VariableDeclSyntax) -> Bool {
-    return variableDecl.isWeak || variableDecl.isUnowned
-  }
-  
-  /// Helper to create wrapper initialization expression
-  private static func createWrapperInitExpression(
-    _ value: String,
-    needsWrapper: Bool
-  ) -> String {
-    return needsWrapper ? ".init(\(value))" : value
-  }
-  
-  /// Helper to create value access expression
-  private static func createValueAccessExpression(
-    propertyName: String,
-    needsValueAccess: Bool,
-    needsUnwrap: Bool = false
-  ) -> String {
-    let base = "$\(propertyName).wrappedValue"
-    let accessed = needsValueAccess ? "\(base).value" : base
-    return needsUnwrap ? "\(accessed)!" : accessed
-  }
-
-  private static func determineIfInitAccessorNeeded(for variableDecl: VariableDeclSyntax, context: some MacroExpansionContext) -> Bool {
-    // Static properties with initializers don't need init accessors
-    if variableDecl.isStatic && variableDecl.hasInitializer {
-      return false
-    }
     
-    // Top-level properties with initializers don't need init accessors
-    if isTopLevelProperty(context: context) && variableDecl.hasInitializer {
-      return false
-    }
-    
-    if variableDecl.isOptional || variableDecl.isImplicitlyUnwrappedOptional {
-      return false
-    } else {
-      return !variableDecl.hasInitializer
-    }
-  }
+    // All properties with type annotations can have accessors generated
+    // Properties without initializers will be handled by using placeholder values
 
-  /// Checks if the property is declared at top level (not inside a type)
-  private static func isTopLevelProperty(context: some MacroExpansionContext) -> Bool {
-    // Check if we're inside a type declaration by looking at the lexical context
-    // If we can't find a parent type context, it's likely a top-level property
-    let lexicalContext = context.lexicalContext
-    
-    // Look through the lexical context to see if we're inside a class, struct, enum, etc.
-    for syntax in lexicalContext {
-      if syntax.is(ClassDeclSyntax.self) ||
-         syntax.is(StructDeclSyntax.self) ||
-         syntax.is(EnumDeclSyntax.self) ||
-         syntax.is(ActorDeclSyntax.self) ||
-         syntax.is(ProtocolDeclSyntax.self) ||
-         syntax.is(ExtensionDeclSyntax.self) {
-        return false // We're inside a type declaration
-      }
-    }
-    
-    return true // No parent type found, so it's top-level
-  }
-
-  private static func createMemoryInitAccessor(
-    propertyName: String,
-    variableDecl: VariableDeclSyntax
-  ) -> AccessorDeclSyntax {
-    let wrappedValue = createWrapperInitExpression(
-      "initialValue", 
-      needsWrapper: needsValueAccess(variableDecl)
-    )
-    
-    return AccessorDeclSyntax(
-      """
-      @storageRestrictions(
-        initializes: $\(raw: propertyName)
-      )
-      init(initialValue) {
-        $\(raw: propertyName) = .init(name: "\(raw: propertyName)", wrappedValue: \(raw: wrappedValue))
-      }
-      """
-    )
-  }
-
-  private static func createMemoryAccessor(
-    propertyName: String,
-    variableDecl: VariableDeclSyntax
-  ) -> AccessorDeclSyntax {
-    let assignmentTarget = needsValueAccess(variableDecl) 
-      ? "$\(propertyName).wrappedValue.value"
-      : "$\(propertyName).wrappedValue"
-    
-    return AccessorDeclSyntax(
-      """
-      @storageRestrictions(
-        accesses: $\(raw: propertyName)
-      )
-      init(initialValue) {
-        \(raw: assignmentTarget) = initialValue
-      }
-      """)
-  }
-
-  private static func createMemoryGetAccessor(
-    propertyName: String,
-    variableDecl: VariableDeclSyntax
-  ) -> AccessorDeclSyntax {
-    let valueExpression = createValueAccessExpression(
-      propertyName: propertyName,
-      needsValueAccess: needsValueAccess(variableDecl),
-      needsUnwrap: variableDecl.isImplicitlyUnwrappedOptional
-    )
-    
-    return AccessorDeclSyntax(
-      """
-      get {
-        return \(raw: valueExpression)
-      }
-      """
-    )
-  }
-
-  private static func createMemorySetAccessor(
-    propertyName: String, variableDecl: VariableDeclSyntax
-  ) -> AccessorDeclSyntax {
-    let assignmentTarget = needsValueAccess(variableDecl)
-      ? "$\(propertyName).wrappedValue.value"
-      : "$\(propertyName).wrappedValue"
-    
-    return AccessorDeclSyntax(
-      """
-      set { 
-        \(raw: assignmentTarget) = newValue
-      }
-      """
-    )
+    // Simple accessors that just delegate to the storage
+    return [
+      AccessorDeclSyntax("get { return $\(raw: propertyName).wrappedValue }"),
+      AccessorDeclSyntax("set { $\(raw: propertyName).wrappedValue = newValue }")
+    ]
   }
 }

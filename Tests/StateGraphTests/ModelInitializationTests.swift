@@ -15,9 +15,8 @@ struct ModelInitializationTests {
       let shadow_value: Int
       
       init() {
-        self.optional_variable = 0
         self.shadow_value = 0
-        
+        self.optional_variable = 0
       }
       
     }
