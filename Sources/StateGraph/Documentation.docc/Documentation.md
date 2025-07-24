@@ -100,6 +100,4 @@ final class CounterViewModel {
 
 ### Utilities
 
-- ``Weak``
-- ``Unowned``
 - ``NodeStore``
