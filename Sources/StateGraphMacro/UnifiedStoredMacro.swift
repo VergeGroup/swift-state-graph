@@ -639,12 +639,10 @@ extension UnifiedStoredMacro: AccessorMacro {
   /// Helper to create value access expression
   private static func createValueAccessExpression(
     propertyName: String,
-    needsValueAccess: Bool,
     needsUnwrap: Bool = false
   ) -> String {
     let base = "$\(propertyName).wrappedValue"
-    let accessed = needsValueAccess ? "\(base).value" : base
-    return needsUnwrap ? "\(accessed)!" : accessed
+    return needsUnwrap ? "\(base)!" : base
   }
 
   private static func determineIfInitAccessorNeeded(for variableDecl: VariableDeclSyntax, context: some MacroExpansionContext) -> Bool {
@@ -730,7 +728,6 @@ extension UnifiedStoredMacro: AccessorMacro {
   ) -> AccessorDeclSyntax {
     let valueExpression = createValueAccessExpression(
       propertyName: propertyName,
-      needsValueAccess: false,
       needsUnwrap: variableDecl.isImplicitlyUnwrappedOptional
     )
     
