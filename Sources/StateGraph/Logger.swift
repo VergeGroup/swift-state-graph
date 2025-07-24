@@ -1,3 +1,4 @@
+#if canImport(os)
 import os.log
 
 enum Log {
@@ -18,3 +19,14 @@ extension OSLog {
   }
   
 }
+#else
+// Stub for platforms that don't support os.log
+enum Log {
+  struct DummyLogger {
+    func info(_ message: String) {}
+    func debug(_ message: String) {}
+    func error(_ message: String) {}
+  }
+  static let generic = DummyLogger()
+}
+#endif
