@@ -26,33 +26,33 @@ struct NodeObserveTests {
     let node = Stored(wrappedValue: 0)
     let stream = node.observe()
     
-    var results: [Int] = []
+    let results = OSAllocatedUnfairLock<[Int]>.init(initialState: [])
     let task = Task {
       for try await value in stream {
         print(value)
-        results.append(value)
+        results.withLock { $0.append(value) }
       }
     }
     
     try await Task.sleep(for: .milliseconds(100))
     
     // Initial value is included
-    #expect(results == [0])
+    #expect(results.withLock { $0 == [0] })
     
     // Change value
     node.wrappedValue = 1
     try await Task.sleep(for: .milliseconds(100))
-    #expect(results == [0, 1])
+    #expect(results.withLock { $0 == [0, 1] })
     
     // Change value again
     node.wrappedValue = 2
     try await Task.sleep(for: .milliseconds(100))
-    #expect(results == [0, 1, 2])
+    #expect(results.withLock { $0 == [0, 1, 2] })
     
     // Even with the same value, change notification is sent
     node.wrappedValue = 2
     try await Task.sleep(for: .milliseconds(100))
-    #expect(results == [0, 1, 2, 2])
+    #expect(results.withLock { $0 == [0, 1, 2, 2] })
     
     task.cancel()
   }
@@ -66,32 +66,32 @@ struct NodeObserveTests {
     let node = Stored(wrappedValue: TestStruct(value: 0))
     let stream = node.observe()
     
-    var results: [TestStruct] = []
+    let results = OSAllocatedUnfairLock<[TestStruct]>.init(initialState: [])
     let task = Task {
       for try await value in stream {
-        results.append(value)
+        results.withLock { $0.append(value) }
       }
     }
     try await Task.sleep(for: .milliseconds(100))
     
     // Initial value is included
-    #expect(results == [TestStruct(value: 0)])
+    #expect(results.withLock { $0 == [TestStruct(value: 0)] })
     
     // Change value
     node.wrappedValue = TestStruct(value: 1)
     try await Task.sleep(for: .milliseconds(100))
-    #expect(results == [TestStruct(value: 0), TestStruct(value: 1)])
+    #expect(results.withLock { $0 == [TestStruct(value: 0), TestStruct(value: 1)] })
     
     // Change value again
     node.wrappedValue = TestStruct(value: 2)
     try await Task.sleep(for: .milliseconds(100))
-    #expect(results == [TestStruct(value: 0), TestStruct(value: 1), TestStruct(value: 2)])
+    #expect(results.withLock { $0 == [TestStruct(value: 0), TestStruct(value: 1), TestStruct(value: 2)] })
     
     // Even with the same value, change notification is sent
     node.wrappedValue = TestStruct(value: 2)
     try await Task.sleep(for: .milliseconds(100))
     
-    #expect(results == [TestStruct(value: 0), TestStruct(value: 1), TestStruct(value: 2), TestStruct(value: 2)])
+    #expect(results.withLock { $0 == [TestStruct(value: 0), TestStruct(value: 1), TestStruct(value: 2), TestStruct(value: 2)] })
     
     task.cancel()
   }
@@ -100,44 +100,44 @@ struct NodeObserveTests {
   func testObserveWithMultipleSubscribers() async throws {
     let node = Stored(wrappedValue: 0)
     
-    var results1: [Int] = []
-    var results2: [Int] = []
+    let results1 = OSAllocatedUnfairLock<[Int]>.init(initialState: [])
+    let results2 = OSAllocatedUnfairLock<[Int]>.init(initialState: [])
     
     let task1 = Task {
       for try await value in node.observe() {
-        results1.append(value)
+        results1.withLock { $0.append(value) }
       }
     }
     
     let task2 = Task {
       for try await value in node.observe() {
-        results2.append(value)
+        results2.withLock { $0.append(value) }
       }
     }
     
     try await Task.sleep(for: .milliseconds(100))
     
     // Initial value is included
-    #expect(results1 == [0])
-    #expect(results2 == [0])
+    #expect(results1.withLock { $0 == [0] })
+    #expect(results2.withLock { $0 == [0] })
     
     // Change value
     node.wrappedValue = 1
     try await Task.sleep(for: .milliseconds(100))
-    #expect(results1 == [0, 1])
-    #expect(results2 == [0, 1])
+    #expect(results1.withLock { $0 == [0, 1] })
+    #expect(results2.withLock { $0 == [0, 1] })
     
     // Change value again
     node.wrappedValue = 2
     try await Task.sleep(for: .milliseconds(100))
-    #expect(results1 == [0, 1, 2])
-    #expect(results2 == [0, 1, 2])
+    #expect(results1.withLock { $0 == [0, 1, 2] })
+    #expect(results2.withLock { $0 == [0, 1, 2] })
     
     // Even with the same value, change notification is sent
     node.wrappedValue = 2
     try await Task.sleep(for: .milliseconds(100))
-    #expect(results1 == [0, 1, 2, 2])
-    #expect(results2 == [0, 1, 2, 2])
+    #expect(results1.withLock { $0 == [0, 1, 2, 2] })
+    #expect(results2.withLock { $0 == [0, 1, 2, 2] })
     
     task1.cancel()
     task2.cancel()

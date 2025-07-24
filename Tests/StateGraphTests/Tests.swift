@@ -390,13 +390,13 @@ struct GraphViewAdvancedTests {
 
     await confirmation(expectedCount: 3) { c in
 
-      var expectation: Int = -1
+      let expectation = OSAllocatedUnfairLock<Int>.init(initialState: -1)
       let task = Task {
         for await _ in withStateGraphTrackingStream(apply: {
           _ = model.counter
         }) {
           print(model.counter)
-          #expect(model.counter == expectation)
+          #expect(model.counter == expectation.withLock { $0 })
           c.confirm()
           if model.counter == 3 {
             break
@@ -407,17 +407,17 @@ struct GraphViewAdvancedTests {
       try! await Task.sleep(for: .milliseconds(100))
 
       // Trigger updates
-      expectation = 1
-      model.counter = expectation
+      expectation.withLock { $0 = 1 }
+      model.counter = expectation.withLock { $0 }
 
       try! await Task.sleep(for: .milliseconds(100))
 
-      expectation = 2
-      model.counter = expectation
+      expectation.withLock { $0 = 2 }
+      model.counter = expectation.withLock { $0 }
       try! await Task.sleep(for: .milliseconds(100))
 
-      expectation = 3
-      model.counter = expectation
+      expectation.withLock { $0 = 3 }
+      model.counter = expectation.withLock { $0 }
 
       try! await Task.sleep(for: .milliseconds(100))
 
