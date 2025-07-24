@@ -711,9 +711,7 @@ extension UnifiedStoredMacro: AccessorMacro {
     propertyName: String,
     variableDecl: VariableDeclSyntax
   ) -> AccessorDeclSyntax {
-    let assignmentTarget = false 
-      ? "$\(propertyName).wrappedValue.value"
-      : "$\(propertyName).wrappedValue"
+    let assignmentTarget = "$\(propertyName).wrappedValue"
     
     return AccessorDeclSyntax(
       """
@@ -748,9 +746,7 @@ extension UnifiedStoredMacro: AccessorMacro {
   private static func createMemorySetAccessor(
     propertyName: String, variableDecl: VariableDeclSyntax
   ) -> AccessorDeclSyntax {
-    let assignmentTarget = false
-      ? "$\(propertyName).wrappedValue.value"
-      : "$\(propertyName).wrappedValue"
+    let assignmentTarget = "$\(propertyName).wrappedValue"
     
     return AccessorDeclSyntax(
       """
