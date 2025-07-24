@@ -58,9 +58,6 @@ final class ImplicitInitializers {
   @GraphStored
   var value2: Int! = nil
   
-  @GraphStored
-  weak var weak_object: AnyObject? = nil
-  
   init() {
     
   }
@@ -73,10 +70,8 @@ final class ImplicitInitializers {
 
 final class A {
   
-  @GraphStored
   weak var weak_variable: AnyObject?
   
-  @GraphStored
   unowned var unowned_variable: AnyObject
   
   unowned let unowned_constant: AnyObject

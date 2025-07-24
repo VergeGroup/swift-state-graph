@@ -1,4 +1,4 @@
-import Foundation.NSLock
+import Foundation
 
 #if canImport(Observation)
   import Observation

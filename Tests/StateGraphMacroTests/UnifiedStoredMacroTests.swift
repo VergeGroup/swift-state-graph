@@ -595,7 +595,7 @@ final class UnifiedStoredMacroTests: XCTestCase {
     }
   }
   
-  func test_weak_optional_stored_property_with_implicit_init() {
+  func test_weak_optional_stored_property_error() {
     assertMacro {
       """
       final class Model {
@@ -609,30 +609,18 @@ final class UnifiedStoredMacroTests: XCTestCase {
       
       }
       """
-    } expansion: {
+    } diagnostics: {
       """
       final class Model {
-        weak var count: Ref? {
-          @storageRestrictions(
-            accesses: $count
-          )
-          init(initialValue) {
-            $count.wrappedValue.value = initialValue
-          }
-          get {
-            return $count.wrappedValue.value
-          }
-          set {
-            $count.wrappedValue.value = newValue
-          }
-        }
-
-        @GraphIgnored let $count: Stored<Weak<Ref>> = .init(name: "count", wrappedValue: .init(nil))
-
+      
+        @GraphStored
+        ╰─ 🛑 weak variables are not supported with @GraphStored
+        weak var count: Ref?
+      
         init() {
         
         }
-
+      
       }
       """
     }
@@ -645,9 +633,6 @@ final class UnifiedStoredMacroTests: XCTestCase {
       
         @GraphStored
         var count: Int?
-      
-        @GraphStored
-        weak var weak_object: AnyObject?
               
       }
       """
@@ -670,22 +655,6 @@ final class UnifiedStoredMacroTests: XCTestCase {
         }
 
         @GraphIgnored let $count: Stored<Int?> = .init(name: "count", wrappedValue: nil)
-        weak var weak_object: AnyObject? {
-          @storageRestrictions(
-            accesses: $weak_object
-          )
-          init(initialValue) {
-            $weak_object.wrappedValue.value = initialValue
-          }
-          get {
-            return $weak_object.wrappedValue.value
-          }
-          set {
-            $weak_object.wrappedValue.value = newValue
-          }
-        }
-
-        @GraphIgnored let $weak_object: Stored<Weak<AnyObject>> = .init(name: "weak_object", wrappedValue: .init(nil))
               
       }
       """
@@ -813,61 +782,47 @@ final class UnifiedStoredMacroTests: XCTestCase {
     }
   }
  
-  func test_weak_reference() {
+  func test_weak_reference_error() {
     assertMacro {
       """
       public final class A {
       
         @GraphStored
-        public weak var weak_variable: AnyObject?             
-        
-        @GraphStored
-        unowned var unowned_variable: AnyObject
-        
-        unowned let unowned_constant: AnyObject
+        public weak var weak_variable: AnyObject?
       
       }
       """
-    } expansion: {
+    } diagnostics: {
       """
       public final class A {
-        public weak var weak_variable: AnyObject? {             
-          @storageRestrictions(
-            accesses: $weak_variable
-          )
-          init(initialValue) {
-            $weak_variable.wrappedValue.value = initialValue
-          }
-          get {
-            return $weak_variable.wrappedValue.value
-          }
-          set {
-            $weak_variable.wrappedValue.value = newValue
-          }
-        }
-
-        @GraphIgnored
-          public let $weak_variable: Stored<Weak<AnyObject>> = .init(name: "weak_variable", wrappedValue: .init(nil))
-
-        unowned var unowned_variable: AnyObject {
-          @storageRestrictions(
-            initializes: $unowned_variable
-          )
-          init(initialValue) {
-            $unowned_variable = .init(name: "unowned_variable", wrappedValue: .init(initialValue))
-          }
-          get {
-            return $unowned_variable.wrappedValue.value
-          }
-          set {
-            $unowned_variable.wrappedValue.value = newValue
-          }
-        }
-
-        @GraphIgnored let $unowned_variable: Stored<Unowned<AnyObject>>
-        
-        unowned let unowned_constant: AnyObject
-
+      
+        @GraphStored
+        ╰─ 🛑 weak variables are not supported with @GraphStored
+        public weak var weak_variable: AnyObject?
+      
+      }
+      """
+    }
+  }
+  
+  func test_unowned_reference_error() {
+    assertMacro {
+      """
+      public final class A {
+      
+        @GraphStored
+        unowned var unowned_variable: AnyObject
+      
+      }
+      """
+    } diagnostics: {
+      """
+      public final class A {
+      
+        @GraphStored
+        ╰─ 🛑 unowned variables are not supported with @GraphStored
+        unowned var unowned_variable: AnyObject
+      
       }
       """
     }

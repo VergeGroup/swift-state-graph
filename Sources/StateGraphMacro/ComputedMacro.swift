@@ -13,6 +13,8 @@ public struct ComputedMacro {
     case cannotHaveInitializer
     case didSetNotSupported
     case willSetNotSupported
+    case weakVariableNotSupported
+    case unownedVariableNotSupported
   }
 }
 
@@ -30,6 +32,17 @@ extension ComputedMacro: PeerMacro {
     
     guard variableDecl.typeSyntax != nil else {
       context.addDiagnostics(from: Error.needsTypeAnnotation, node: declaration)
+      return []
+    }
+    
+    // Check for weak/unowned modifiers
+    if variableDecl.isWeak {
+      context.addDiagnostics(from: Error.weakVariableNotSupported, node: declaration)
+      return []
+    }
+    
+    if variableDecl.isUnowned {
+      context.addDiagnostics(from: Error.unownedVariableNotSupported, node: declaration)
       return []
     }
     
@@ -81,13 +94,7 @@ extension ComputedMacro: PeerMacro {
     _variableDecl
       .renamingIdentifier(with: prefix)
       .modifyingTypeAnnotation({ type in
-        if variableDecl.isWeak {
-          return "Computed<Weak<\(type.removingOptionality().trimmed)>>"
-        } else if variableDecl.isUnowned {
-          return "Computed<Unowned<\(type.removingOptionality().trimmed)>>"
-        } else {
-          return "Computed<\(type.trimmed)>"
-        }
+        return "Computed<\(type.trimmed)>"
       })
     
     let name = variableDecl.name

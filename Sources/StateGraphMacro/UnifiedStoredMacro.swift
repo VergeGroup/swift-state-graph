@@ -13,6 +13,8 @@ public struct UnifiedStoredMacro {
     case willSetNotSupported
     case userDefaultsRequiresDefaultValue
     case invalidBackingArgument
+    case weakVariableNotSupported
+    case unownedVariableNotSupported
   }
 }
 
@@ -57,6 +59,10 @@ extension UnifiedStoredMacro.Error: DiagnosticMessage {
       return "@GraphStored with UserDefaults backing requires a default value"
     case .invalidBackingArgument:
       return "Invalid backing argument for @GraphStored"
+    case .weakVariableNotSupported:
+      return "weak variables are not supported with @GraphStored"
+    case .unownedVariableNotSupported:
+      return "unowned variables are not supported with @GraphStored"
     }
   }
 
@@ -83,6 +89,17 @@ extension UnifiedStoredMacro {
     // Check type annotation
     guard variableDecl.typeSyntax != nil else {
       context.addDiagnostics(from: Error.needsTypeAnnotation, node: node)
+      return false
+    }
+
+    // Check for weak/unowned modifiers
+    if variableDecl.isWeak {
+      context.addDiagnostics(from: Error.weakVariableNotSupported, node: node)
+      return false
+    }
+    
+    if variableDecl.isUnowned {
+      context.addDiagnostics(from: Error.unownedVariableNotSupported, node: node)
       return false
     }
 
@@ -321,15 +338,10 @@ extension UnifiedStoredMacro {
     for type: TypeSyntax,
     variableDecl: VariableDeclSyntax
   ) -> TypeSyntax {
-    let baseType = type.removingOptionality().trimmed
-    
     // Determine wrapper type based on variable modifiers
     let wrappedType: String
-    if variableDecl.isWeak {
-      wrappedType = "Weak<\(baseType)>"
-    } else if variableDecl.isUnowned {
-      wrappedType = "Unowned<\(baseType)>"
-    } else if variableDecl.isImplicitlyUnwrappedOptional {
+    if variableDecl.isImplicitlyUnwrappedOptional {
+      let baseType = type.removingOptionality().trimmed
       wrappedType = "\(baseType)?"
     } else {
       wrappedType = "\(type.trimmed)"
@@ -368,15 +380,12 @@ extension UnifiedStoredMacro {
     variableDecl: VariableDeclSyntax,
     propertyName: String
   ) -> VariableDeclSyntax {
-    let needsWrapper = needsValueAccess(variableDecl)
-    
     if (variableDecl.isOptional || variableDecl.isImplicitlyUnwrappedOptional)
       && !variableDecl.hasInitializer
     {
-      let wrappedValue = createWrapperInitExpression("nil", needsWrapper: needsWrapper)
       let builder = InitializerBuilder(
         propertyName: propertyName,
-        wrappedValue: wrappedValue,
+        wrappedValue: "nil",
         suite: nil,
         key: nil
       )
@@ -385,13 +394,9 @@ extension UnifiedStoredMacro {
       )
     } else {
       return storageDecl.modifyingInit { initializer in
-        let wrappedValue = createWrapperInitExpression(
-          "\(initializer.trimmed.value)",
-          needsWrapper: needsWrapper
-        )
         let builder = InitializerBuilder(
           propertyName: propertyName,
-          wrappedValue: wrappedValue,
+          wrappedValue: "\(initializer.trimmed.value)",
           suite: nil,
           key: nil
         )
@@ -615,28 +620,13 @@ extension UnifiedStoredMacro: AccessorMacro {
 
   // MARK: - Memory Accessor Helpers
   
-  /// Helper to determine if we need to access through .value for weak/unowned references
-  private static func needsValueAccess(_ variableDecl: VariableDeclSyntax) -> Bool {
-    return variableDecl.isWeak || variableDecl.isUnowned
-  }
-  
-  /// Helper to create wrapper initialization expression
-  private static func createWrapperInitExpression(
-    _ value: String,
-    needsWrapper: Bool
-  ) -> String {
-    return needsWrapper ? ".init(\(value))" : value
-  }
-  
   /// Helper to create value access expression
   private static func createValueAccessExpression(
     propertyName: String,
-    needsValueAccess: Bool,
     needsUnwrap: Bool = false
   ) -> String {
     let base = "$\(propertyName).wrappedValue"
-    let accessed = needsValueAccess ? "\(base).value" : base
-    return needsUnwrap ? "\(accessed)!" : accessed
+    return needsUnwrap ? "\(base)!" : base
   }
 
   private static func determineIfInitAccessorNeeded(for variableDecl: VariableDeclSyntax, context: some MacroExpansionContext) -> Bool {
@@ -682,18 +672,13 @@ extension UnifiedStoredMacro: AccessorMacro {
     propertyName: String,
     variableDecl: VariableDeclSyntax
   ) -> AccessorDeclSyntax {
-    let wrappedValue = createWrapperInitExpression(
-      "initialValue", 
-      needsWrapper: needsValueAccess(variableDecl)
-    )
-    
     return AccessorDeclSyntax(
       """
       @storageRestrictions(
         initializes: $\(raw: propertyName)
       )
       init(initialValue) {
-        $\(raw: propertyName) = .init(name: "\(raw: propertyName)", wrappedValue: \(raw: wrappedValue))
+        $\(raw: propertyName) = .init(name: "\(raw: propertyName)", wrappedValue: initialValue)
       }
       """
     )
@@ -703,17 +688,13 @@ extension UnifiedStoredMacro: AccessorMacro {
     propertyName: String,
     variableDecl: VariableDeclSyntax
   ) -> AccessorDeclSyntax {
-    let assignmentTarget = needsValueAccess(variableDecl) 
-      ? "$\(propertyName).wrappedValue.value"
-      : "$\(propertyName).wrappedValue"
-    
     return AccessorDeclSyntax(
       """
       @storageRestrictions(
         accesses: $\(raw: propertyName)
       )
       init(initialValue) {
-        \(raw: assignmentTarget) = initialValue
+        $\(raw: propertyName).wrappedValue = initialValue
       }
       """)
   }
@@ -724,7 +705,6 @@ extension UnifiedStoredMacro: AccessorMacro {
   ) -> AccessorDeclSyntax {
     let valueExpression = createValueAccessExpression(
       propertyName: propertyName,
-      needsValueAccess: needsValueAccess(variableDecl),
       needsUnwrap: variableDecl.isImplicitlyUnwrappedOptional
     )
     
@@ -740,14 +720,10 @@ extension UnifiedStoredMacro: AccessorMacro {
   private static func createMemorySetAccessor(
     propertyName: String, variableDecl: VariableDeclSyntax
   ) -> AccessorDeclSyntax {
-    let assignmentTarget = needsValueAccess(variableDecl)
-      ? "$\(propertyName).wrappedValue.value"
-      : "$\(propertyName).wrappedValue"
-    
     return AccessorDeclSyntax(
       """
       set { 
-        \(raw: assignmentTarget) = newValue
+        $\(raw: propertyName).wrappedValue = newValue
       }
       """
     )

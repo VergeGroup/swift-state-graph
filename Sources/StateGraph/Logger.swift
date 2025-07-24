@@ -1,4 +1,5 @@
-import os.log
+#if canImport(os)
+import os
 
 enum Log {
   
@@ -18,3 +19,8 @@ extension OSLog {
   }
   
 }
+#else
+enum Log {
+  static let generic: Any? = nil
+}
+#endif

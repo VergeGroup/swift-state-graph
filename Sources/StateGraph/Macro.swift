@@ -37,4 +37,6 @@ public enum GraphStorageBacking {
 @attached(peer, names: prefixed(`$`))
 public macro GraphStored(backed: GraphStorageBacking = .memory) = #externalMacro(module: "StateGraphMacro", type: "UnifiedStoredMacro")
 
-@_exported import os.lock
+#if canImport(os)
+@_exported import os
+#endif
