@@ -493,9 +493,7 @@ extension Node {
 
 // MARK: - Internals
 
-#if canImport(Combine)
 @_exported @preconcurrency import class Combine.AnyCancellable
-#endif
 
 final class Subscriptions: Sendable, Hashable {
   
