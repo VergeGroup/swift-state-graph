@@ -121,7 +121,7 @@ Want your state to persist across app launches? Use backing storage:
 ```swift
 final class SettingsViewModel {
   // This value persists to UserDefaults automatically
-  @GraphStored(backed: .userDefaults(key: "theme"))
+  @GraphStored(backed: UserDefaultsMarker.userDefaults(key: "theme"))
   var theme: String = "light"
   
   @GraphComputed

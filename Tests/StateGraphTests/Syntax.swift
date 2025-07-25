@@ -1,4 +1,4 @@
-import StateGraph
+@testable import StateGraph
 
 #if DEBUG
 
@@ -47,7 +47,7 @@ final class UnifiedSyntaxDemo {
   @GraphStored(backed: .userDefaults(key: "isEnabled")) var isEnabled: Bool = true
   
   // UserDefaults with suite
-  @GraphStored(backed: .userDefaults(suite: "com.example.app", key: "apiUrl")) var apiUrl: String = "https://api.example.com"
+  @GraphStored(backed: .userDefaults(key: "apiUrl", suite: "com.example.app")) var apiUrl: String = "https://api.example.com"
   
 }
 
@@ -92,7 +92,7 @@ final class StateViewModel {
   let optional_constant_init: Int? = 0
   
   @GraphStored
-  var optional_variable_init: Int? = 0
+  var optional_variable_init: Int? = nil
   
   let optional_constant: Int?
   
@@ -112,11 +112,10 @@ final class StateViewModel {
   unowned let unowned_constant: AnyObject
   
   init() {
-    self.optional_constant = 0        
-    self.optional_variable = 0
+    self.optional_constant = 0
     unowned_constant = NSObject()
     self.unowned_variable = NSObject()
-    
+    self.optional_variable = 0
   }
   
 }

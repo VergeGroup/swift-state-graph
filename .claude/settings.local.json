@@ -10,7 +10,8 @@
       "Bash(swift test:*)",
       "Bash(swift build)",
       "Bash(git commit:*)",
-      "Bash(gh pr create:*)"
+      "Bash(gh pr create:*)",
+      "Bash(swift:*)"
     ],
     "deny": []
   }

@@ -57,7 +57,7 @@ profile.age = 30
 ```swift
 final class AppSettings {
   // This value persists across app launches
-  @GraphStored(backed: .userDefaults(key: "userName"))
+  @GraphStored(backed: UserDefaultsMarker.userDefaults(key: "userName"))
   var userName: String = ""
   
   // Computed properties work with persistent storage too
