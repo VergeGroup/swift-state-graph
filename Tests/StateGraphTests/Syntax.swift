@@ -57,10 +57,7 @@ final class ImplicitInitializers {
   
   @GraphStored
   var value2: Int! = nil
-  
-  @GraphStored
-  weak var weak_object: AnyObject? = nil
-  
+    
   init() {
     
   }
@@ -68,24 +65,6 @@ final class ImplicitInitializers {
   static func run() {
     _ = ImplicitInitializers()
   }
-}
-
-
-final class A {
-  
-  @GraphStored
-  weak var weak_variable: AnyObject?
-  
-  @GraphStored
-  unowned var unowned_variable: AnyObject
-  
-  unowned let unowned_constant: AnyObject
-  
-  init(weak_variable: AnyObject? = nil, unowned_variable: AnyObject, unowned_constant: AnyObject) {
-    self.unowned_variable = unowned_variable
-    self.unowned_constant = unowned_constant
-    self.weak_variable = weak_variable
-  }  
 }
 
 final class Box<T> {
@@ -101,29 +80,7 @@ final class Demo {
   
   @GraphStored
   var optional_variable_init: Int? = nil
-  
-  weak var count: Ref? {
-    @storageRestrictions(
-      accesses: box
-    )
-    init(initialValue) {
-      
-    }
-    get {
-      box.value.value
-    }
-    set {
-      box.value.value = newValue
-    }
-  }
-  
-  let v: Int
-  let box: Box<Weak<Ref>> = .init(.init(nil))
-  
-  init() {
-    /*self.count = Ref*/
-    self.v = 0
-  }
+   
 }
 
 final class StateViewModel {

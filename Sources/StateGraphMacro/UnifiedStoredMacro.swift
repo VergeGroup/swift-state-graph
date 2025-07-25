@@ -13,6 +13,8 @@ public struct UnifiedStoredMacro {
     case willSetNotSupported
     case userDefaultsRequiresDefaultValue
     case invalidBackingArgument
+    case weakVariableNotSupported
+    case unownedVariableNotSupported
   }
 }
 
@@ -57,6 +59,10 @@ extension UnifiedStoredMacro.Error: DiagnosticMessage {
       return "@GraphStored with UserDefaults backing requires a default value"
     case .invalidBackingArgument:
       return "Invalid backing argument for @GraphStored"
+    case .weakVariableNotSupported:
+      return "weak variables are not supported with @GraphStored"
+    case .unownedVariableNotSupported:
+      return "unowned variables are not supported with @GraphStored"
     }
   }
 
@@ -325,11 +331,7 @@ extension UnifiedStoredMacro {
     
     // Determine wrapper type based on variable modifiers
     let wrappedType: String
-    if variableDecl.isWeak {
-      wrappedType = "Weak<\(baseType)>"
-    } else if variableDecl.isUnowned {
-      wrappedType = "Unowned<\(baseType)>"
-    } else if variableDecl.isImplicitlyUnwrappedOptional {
+    if variableDecl.isImplicitlyUnwrappedOptional {
       wrappedType = "\(baseType)?"
     } else {
       wrappedType = "\(type.trimmed)"
@@ -368,7 +370,7 @@ extension UnifiedStoredMacro {
     variableDecl: VariableDeclSyntax,
     propertyName: String
   ) -> VariableDeclSyntax {
-    let needsWrapper = needsValueAccess(variableDecl)
+    let needsWrapper = false
     
     if (variableDecl.isOptional || variableDecl.isImplicitlyUnwrappedOptional)
       && !variableDecl.hasInitializer
@@ -498,6 +500,16 @@ extension UnifiedStoredMacro: AccessorMacro {
       return []
     }
 
+    guard !variableDecl.isWeak else {
+      context.addDiagnostics(from: Error.weakVariableNotSupported, node: declaration)
+      return []
+    }
+
+    guard !variableDecl.isUnowned else {
+      context.addDiagnostics(from: Error.unownedVariableNotSupported, node: declaration)
+      return []
+    }
+
     // Parse backing storage type
     let backingType = parseBackingStorageType(from: node, context: context)
 
@@ -615,10 +627,6 @@ extension UnifiedStoredMacro: AccessorMacro {
 
   // MARK: - Memory Accessor Helpers
   
-  /// Helper to determine if we need to access through .value for weak/unowned references
-  private static func needsValueAccess(_ variableDecl: VariableDeclSyntax) -> Bool {
-    return variableDecl.isWeak || variableDecl.isUnowned
-  }
   
   /// Helper to create wrapper initialization expression
   private static func createWrapperInitExpression(
@@ -631,12 +639,10 @@ extension UnifiedStoredMacro: AccessorMacro {
   /// Helper to create value access expression
   private static func createValueAccessExpression(
     propertyName: String,
-    needsValueAccess: Bool,
     needsUnwrap: Bool = false
   ) -> String {
     let base = "$\(propertyName).wrappedValue"
-    let accessed = needsValueAccess ? "\(base).value" : base
-    return needsUnwrap ? "\(accessed)!" : accessed
+    return needsUnwrap ? "\(base)!" : base
   }
 
   private static func determineIfInitAccessorNeeded(for variableDecl: VariableDeclSyntax, context: some MacroExpansionContext) -> Bool {
@@ -684,7 +690,7 @@ extension UnifiedStoredMacro: AccessorMacro {
   ) -> AccessorDeclSyntax {
     let wrappedValue = createWrapperInitExpression(
       "initialValue", 
-      needsWrapper: needsValueAccess(variableDecl)
+      needsWrapper: false
     )
     
     return AccessorDeclSyntax(
@@ -703,9 +709,7 @@ extension UnifiedStoredMacro: AccessorMacro {
     propertyName: String,
     variableDecl: VariableDeclSyntax
   ) -> AccessorDeclSyntax {
-    let assignmentTarget = needsValueAccess(variableDecl) 
-      ? "$\(propertyName).wrappedValue.value"
-      : "$\(propertyName).wrappedValue"
+    let assignmentTarget = "$\(propertyName).wrappedValue"
     
     return AccessorDeclSyntax(
       """
@@ -724,7 +728,6 @@ extension UnifiedStoredMacro: AccessorMacro {
   ) -> AccessorDeclSyntax {
     let valueExpression = createValueAccessExpression(
       propertyName: propertyName,
-      needsValueAccess: needsValueAccess(variableDecl),
       needsUnwrap: variableDecl.isImplicitlyUnwrappedOptional
     )
     
@@ -740,9 +743,7 @@ extension UnifiedStoredMacro: AccessorMacro {
   private static func createMemorySetAccessor(
     propertyName: String, variableDecl: VariableDeclSyntax
   ) -> AccessorDeclSyntax {
-    let assignmentTarget = needsValueAccess(variableDecl)
-      ? "$\(propertyName).wrappedValue.value"
-      : "$\(propertyName).wrappedValue"
+    let assignmentTarget = "$\(propertyName).wrappedValue"
     
     return AccessorDeclSyntax(
       """

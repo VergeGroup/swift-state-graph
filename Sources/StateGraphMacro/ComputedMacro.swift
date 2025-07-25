@@ -1,5 +1,6 @@
 
 import SwiftCompilerPlugin
+import SwiftDiagnostics
 import SwiftSyntax
 import SwiftSyntaxBuilder
 import SwiftSyntaxMacros
@@ -13,6 +14,8 @@ public struct ComputedMacro {
     case cannotHaveInitializer
     case didSetNotSupported
     case willSetNotSupported
+    case weakVariableNotSupported
+    case unownedVariableNotSupported
   }
 }
 
@@ -81,13 +84,7 @@ extension ComputedMacro: PeerMacro {
     _variableDecl
       .renamingIdentifier(with: prefix)
       .modifyingTypeAnnotation({ type in
-        if variableDecl.isWeak {
-          return "Computed<Weak<\(type.removingOptionality().trimmed)>>"
-        } else if variableDecl.isUnowned {
-          return "Computed<Unowned<\(type.removingOptionality().trimmed)>>"
-        } else {
-          return "Computed<\(type.trimmed)>"
-        }
+        return "Computed<\(type.trimmed)>"
       })
     
     let name = variableDecl.name
@@ -169,38 +166,62 @@ extension ComputedMacro: AccessorMacro {
       fatalError()
     }
     
-    if variableDecl.isWeak || variableDecl.isUnowned {
-            
-      let readAccessor = AccessorDeclSyntax(
-        """
-        get {
-          return $\(raw: propertyName).wrappedValue.value
-        }
-        """
-      )
-      
-      var accessors: [AccessorDeclSyntax] = []
-          
-      accessors.append(readAccessor)
-      
-      return accessors
-      
-    } else {
-            
-      let readAccessor = AccessorDeclSyntax(
-        """
-        get {
-          return $\(raw: propertyName).wrappedValue
-        }
-        """
-      )
-      
-      var accessors: [AccessorDeclSyntax] = []
-            
-      accessors.append(readAccessor)
-      
-      return accessors
+    guard !variableDecl.isWeak else {
+      context.addDiagnostics(from: Error.weakVariableNotSupported, node: declaration)
+      return []
     }
+
+    guard !variableDecl.isUnowned else {
+      context.addDiagnostics(from: Error.unownedVariableNotSupported, node: declaration)
+      return []
+    }
+    
+    let readAccessor = AccessorDeclSyntax(
+      """
+      get {
+        return $\(raw: propertyName).wrappedValue
+      }
+      """
+    )
+    
+    var accessors: [AccessorDeclSyntax] = []
+          
+    accessors.append(readAccessor)
+    
+    return accessors
   }
   
+}
+
+// MARK: - Diagnostic Messages
+
+extension ComputedMacro.Error: DiagnosticMessage {
+  public var message: String {
+    switch self {
+    case .constantVariableIsNotSupported:
+      return "Constant variables are not supported with @GraphComputed"
+    case .computedVariableIsNotSupported:
+      return "Computed variables are not supported with @GraphComputed"
+    case .needsTypeAnnotation:
+      return "@GraphComputed requires explicit type annotation"
+    case .cannotHaveInitializer:
+      return "@GraphComputed cannot have an initializer"
+    case .didSetNotSupported:
+      return "didSet is not supported with @GraphComputed"
+    case .willSetNotSupported:
+      return "willSet is not supported with @GraphComputed"
+    case .weakVariableNotSupported:
+      return "weak variables are not supported with @GraphComputed"
+    case .unownedVariableNotSupported:
+      return "unowned variables are not supported with @GraphComputed"
+    }
+  }
+
+  public var diagnosticID: MessageID {
+    MessageID(domain: "ComputedMacro", id: "\(self)")
+  }
+
+  public var severity: DiagnosticSeverity {
+    return .error
+  }
 }
