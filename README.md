@@ -1,5 +1,7 @@
 # Swift State Graph
 
+A graph-based state management library for hybrid UIKit-SwiftUI applications
+
 [![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/vergegroup/swift-state-graph)
 
 ## Introduction
