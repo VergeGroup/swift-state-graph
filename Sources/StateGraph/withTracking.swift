@@ -56,9 +56,7 @@ private func _withContinuousStateGraphTracking(
   trackingRegistration: TrackingRegistration,
   isolation: isolated (any Actor)? = #isolation
 ) {
-  
-  let applyBox = UnsafeSendable(apply)
-     
+       
   TrackingRegistration.$registration.withValue(trackingRegistration) {
     apply()
   }
@@ -131,7 +129,7 @@ public func _printStateGraphChanged() {
     return
   }
   let nodeInfo = context.nodeInfo
-  print("\(nodeInfo.name) @ \(nodeInfo.sourceLocation.file):\(nodeInfo.sourceLocation.line)")
+  print("\(String(describing: nodeInfo.name)) @ \(nodeInfo.sourceLocation.file):\(nodeInfo.sourceLocation.line)")
 }
 
 struct UnsafeSendable<V>: ~Copyable, @unchecked Sendable {
