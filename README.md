@@ -4,16 +4,17 @@
 
 ## Introduction
 
-Navigating the complexities of data and state in Swift applications can often feel like a maze, especially as your project grows. If you're seeking a more intuitive and robust way to approach **Swift state management**, you're in the right place. Traditional methods frequently lead to tangled dependencies, excessive boilerplate, and specific challenges when synchronizing **SwiftUI state** or managing **UIKit state**. This can make it difficult to **manage Swift app state** cohesively and effectively across your application.
+Managing state in Swift applications can be complex, often leading to tangled dependencies and boilerplate code. Many traditional approaches rely on a single, monolithic store, which can be cumbersome to maintain.
 
-Swift State Graph emerges as a powerful **Swift reactive library**, offering a refreshing graph-based approach to **reactive programming Swift**. It's engineered to untangle these complexities, providing a clear and declarative path to managing your application's data flow.
+Swift State Graph introduces a more modern, graph-based approach to state management, similar to the paradigm shift from Redux to Recoil in the React ecosystem. Instead of a single store, state is managed in decentralized, independent nodes. This library is designed to provide a more structured and declarative way to handle your application's data flow.
 
-With Swift State Graph, you can:
-*   Achieve crystal-clear, declarative state logic thanks to automatic **Swift dependency tracking**.
-*   Effortlessly **manage Swift app state** and derive dynamic information with powerful **Swift computed properties**.
-*   Streamline development across Apple platforms with unified strategies for both **SwiftUI state management** and **UIKit state management**.
+**Features:**
+*   **Atomic State**: Manage state in small, independent pieces.
+*   **Dependency Tracking**: Automatically tracks dependencies between nodes to reflect state changes efficiently.
+*   **Computed Properties**: Derive dynamic information from your existing state.
+*   **Platform Integration**: Provides patterns for use with both SwiftUI and UIKit.
 
-Dive in to discover how Swift State Graph can transform your approach to state.
+This document explains how to use Swift State Graph to manage your application's state.
 
 ## Table of Contents
 
