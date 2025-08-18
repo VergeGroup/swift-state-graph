@@ -15,6 +15,21 @@ With Swift State Graph, you can:
 
 Dive in to discover how Swift State Graph can transform your approach to state.
 
+## Table of Contents
+
+- [Introduction](#introduction)
+- [🚀 Quick Start](#-quick-start)
+- [Core Concepts](#core-concepts)
+- [Installation](#installation)
+- [Backing Storage](#backing-storage)
+- [Describing Models](#describing-models)
+- [SwiftUI Integration](#swiftui-integration)
+- [UIKit Integration](#uikit-integration)
+- [Advanced Usage](#advanced-usage)
+- [Comparing with Swift's Observable Protocol](#comparing-with-swifts-observable-protocol)
+- [Migration from Observable](#migration-from-observable)
+- [Data Normalization](#data-normalization)
+
 ## 🚀 Quick Start
 
 Here's a glimpse of how Swift State Graph simplifies state management:
@@ -70,20 +85,6 @@ Swift State Graph provides excellent **Swift Observable compatibility**, enhanci
 
 The framework's reactive nature and automatic **Swift dependency tracking** make it particularly effective for applications demanding complex state relationships and real-time data synchronization. This contributes to a more **declarative Swift state** approach, beneficial regardless of the UI framework or platform in use.
 
-## Table of Contents
-
-- [Introduction](#introduction)
-- [🚀 Quick Start](#-quick-start)
-- [Core Concepts](#core-concepts)
-- [Installation](#installation)
-- [Backing Storage](#backing-storage)
-- [Describing Models](#describing-models)
-- [SwiftUI Integration](#swiftui-integration)
-- [UIKit Integration](#uikit-integration)
-- [Advanced Usage](#advanced-usage)
-- [Comparing with Swift's Observable Protocol](#comparing-with-swifts-observable-protocol)
-- [Migration from Observable](#migration-from-observable)
-- [Data Normalization](#data-normalization)
 
 ## Core Concepts
 
