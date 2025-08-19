@@ -18,6 +18,11 @@ Swift State Graph introduces a more modern, graph-based approach to state manage
 
 This document explains how to use Swift State Graph to manage your application's state.
 
+## Requirements
+
+* Swift 6.0+
+* iOS 17+
+
 ## Table of Contents
 
 - [Introduction](#introduction)
