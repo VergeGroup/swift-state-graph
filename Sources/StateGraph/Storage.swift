@@ -1,4 +1,3 @@
-
 // MARK: - Storage Protocol
 
 public protocol Storage<Value>: Sendable {
@@ -60,7 +59,7 @@ public struct MemoryMarker {
 
 extension _Stored {
   /// Convenience initializer for InMemory storage
-  public convenience init(
+  public convenience init<Value>(
     storage marker: MemoryMarker,
     value: Value,
     _ file: StaticString = #fileID,
@@ -177,14 +176,14 @@ public struct UserDefaultsMarker {
 extension _Stored {
   
   /// Convenience initializer for UserDefaults storage
-  public convenience init(
+  public convenience init<Value: UserDefaultsStorable>(
     storage marker: UserDefaultsMarker,
     value: Value,
     _ file: StaticString = #fileID,
     _ line: UInt = #line,
     _ column: UInt = #column,
     name: StaticString? = nil
-  ) where S == UserDefaultsStorage<Value>, Value: UserDefaultsStorable {
+  ) where S == UserDefaultsStorage<Value> {
     let userDefaults = marker.suite.flatMap { UserDefaults(suiteName: $0) } ?? UserDefaults.standard
     self.init(
       file,
@@ -202,4 +201,3 @@ extension _Stored {
 }
 
 #endif
-

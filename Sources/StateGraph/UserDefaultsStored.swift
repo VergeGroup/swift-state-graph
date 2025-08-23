@@ -181,9 +181,9 @@ extension Optional: UserDefaultsStorable where Wrapped: UserDefaultsStorable {
 ///
 /// - When value changes: Changes propagate to all dependent nodes and are persisted to UserDefaults
 /// - When value is accessed: Dependencies are recorded and the value is loaded from UserDefaults if needed
-public typealias UserDefaultsStored<Value: UserDefaultsStorable> = _Stored<Value, UserDefaultsStorage<Value>>
+public typealias UserDefaultsStored<Value: UserDefaultsStorable> = _Stored<UserDefaultsStorage<Value>>
   
-extension _Stored where S == UserDefaultsStorage<Value> {
+extension _Stored {
   /// Initializes a UserDefaultsStored node with standard UserDefaults.
   ///
   /// - Parameters:
@@ -194,14 +194,14 @@ extension _Stored where S == UserDefaultsStorage<Value> {
   ///   - name: The name of the node (defaults to nil)
   ///   - key: The UserDefaults key to store the value
   ///   - defaultValue: The default value if no value exists in UserDefaults
-  public convenience init(
+  public convenience init<Value: UserDefaultsStorable>(
     _ file: StaticString = #fileID,
     _ line: UInt = #line,
     _ column: UInt = #column,
     name: StaticString? = nil,
     key: String,
     defaultValue: Value
-  ) {
+  ) where S == UserDefaultsStorage<Value> {
     let storage = UserDefaultsStorage(
       userDefaults: .standard,
       key: key,
@@ -227,7 +227,7 @@ extension _Stored where S == UserDefaultsStorage<Value> {
   ///   - suite: The UserDefaults suite name
   ///   - key: The UserDefaults key to store the value
   ///   - defaultValue: The default value if no value exists in UserDefaults
-  public convenience init(
+  public convenience init<Value: UserDefaultsStorable>(
     _ file: StaticString = #fileID,
     _ line: UInt = #line,
     _ column: UInt = #column,
@@ -235,7 +235,7 @@ extension _Stored where S == UserDefaultsStorage<Value> {
     suite: String,
     key: String,
     defaultValue: Value
-  ) {
+  ) where S == UserDefaultsStorage<Value> {
     let storage = UserDefaultsStorage(
       userDefaults: UserDefaults(suiteName: suite) ?? .standard,
       key: key,

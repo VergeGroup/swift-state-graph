@@ -6,7 +6,7 @@ import Foundation
 
 // MARK: - Base Stored Node
 
-public final class _Stored<Value, S: Storage<Value>>: Node, Observable, CustomDebugStringConvertible {
+public final class _Stored<S: Storage>: Node, Observable, CustomDebugStringConvertible {
   
   public let lock: NodeLock
   
@@ -193,4 +193,4 @@ public final class _Stored<Value, S: Storage<Value>>: Node, Observable, CustomDe
     return result
   }
   
-} 
+}

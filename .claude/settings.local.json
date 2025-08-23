@@ -11,7 +11,8 @@
       "Bash(swift build)",
       "Bash(git commit:*)",
       "Bash(gh pr create:*)",
-      "Bash(swift:*)"
+      "Bash(swift:*)",
+      "mcp__swiftlens__swift_analyze_files"
     ],
     "deny": []
   }

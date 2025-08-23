@@ -66,8 +66,8 @@ struct NewStorageSyntaxTests {
     #expect(type(of: memoryStored) != type(of: defaultsStored) as Any.Type)
     
     // The storage types should be correct
-    #expect(memoryStored is _Stored<Int, InMemoryStorage<Int>>)
-    #expect(defaultsStored is _Stored<Int, UserDefaultsStorage<Int>>)
+    #expect(memoryStored is _Stored<InMemoryStorage<Int>>)
+    #expect(defaultsStored is _Stored<UserDefaultsStorage<Int>>)
   }
   
   @Test("Works with Computed nodes")
