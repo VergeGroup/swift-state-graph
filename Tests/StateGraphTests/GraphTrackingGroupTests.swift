@@ -158,5 +158,30 @@ struct GraphTrackingGroupTests {
     print("\nTest completed. Final count: \(finalCount)")
     print("Dynamic condition tracking verified successfully")
   }
-  
+    
+  @Test("tearing")
+  func tearing() async throws {
+    
+    let model = Model()
+    
+    await confirmation(expectedCount: 2) { c in
+            
+      withContinuousStateGraphTracking { 
+        _ = model.count1
+        _ = model.count2
+      } didChange: { 
+        print(model.count1, model.count2)
+        c.confirm()
+        return .next
+      }
+            
+      model.count1 += 1
+      model.count2 += 1
+            
+      try? await Task.sleep(for: .milliseconds(100))
+
+    }     
+
+  }
 }
+
