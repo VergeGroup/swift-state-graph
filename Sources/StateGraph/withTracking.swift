@@ -1,12 +1,12 @@
 /// Tracks access to the properties of StoredNode or Computed.
 /// Similarly to Observation.withObservationTracking, didChange runs one time after property changes applied.
 /// To observe properties continuously, use ``withContinuousStateGraphTracking``.
-func withStateGraphTracking(
-  apply: () -> Void,
+func withStateGraphTracking<R>(
+  apply: () -> R,
   didChange: @escaping @Sendable (TrackingRegistration) -> Void
-) {
+) -> R {
   let registration = TrackingRegistration(didChange: didChange)
-  TrackingRegistration.$registration.withValue(registration) {
+  return TrackingRegistration.$registration.withValue(registration) {
     apply()
   }
 }
@@ -52,16 +52,11 @@ func withContinuousStateGraphTracking(
 
 @inline(__always)
 private func _withContinuousStateGraphTracking(
-  apply: @escaping () -> Void,
+  apply: () -> Void,
   trackingRegistration: TrackingRegistration,
   isolation: isolated (any Actor)? = #isolation
-) {
-  
-  let applyBox = UnsafeSendable(apply)
-     
-  TrackingRegistration.$registration.withValue(trackingRegistration) {
-    apply()
-  }
+) {       
+  TrackingRegistration.$registration.withValue(trackingRegistration, operation: apply)
 }
 
 func withStateGraphTrackingStream(

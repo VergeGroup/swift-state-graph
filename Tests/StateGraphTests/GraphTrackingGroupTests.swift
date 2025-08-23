@@ -1,5 +1,5 @@
 import Testing
-import StateGraph
+@testable import StateGraph
 import Foundation
 
 @Suite("GraphTrackingGroup Tests")
@@ -158,7 +158,14 @@ struct GraphTrackingGroupTests {
     print("\nTest completed. Final count: \(finalCount)")
     print("Dynamic condition tracking verified successfully")
   }
-    
+      
+  final class Model {
+    @GraphStored
+    var count1: Int = 0
+    @GraphStored
+    var count2: Int = 0
+  }
+  
   @Test("tearing")
   func tearing() async throws {
     

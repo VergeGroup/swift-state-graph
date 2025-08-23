@@ -143,12 +143,5 @@ struct NodeObserveTests {
     task1.cancel()
     task2.cancel()
   }
-  
-  final class Model {
-    @GraphStored
-    var count1: Int = 0
-    @GraphStored
-    var count2: Int = 0
-  }
-  
+ 
 } 
