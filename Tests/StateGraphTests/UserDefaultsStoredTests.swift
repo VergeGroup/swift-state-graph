@@ -95,7 +95,7 @@ struct UserDefaultsStoredTests {
       // グラフの変更を追跡
       withStateGraphTracking {
         _ = computedNode.wrappedValue
-      } didChange: { _ in
+      } didChange: {
         #expect(computedNode.wrappedValue == "computed_external_update")
         confirmation.confirm()
       }
@@ -103,6 +103,7 @@ struct UserDefaultsStoredTests {
       // UserDefaultsを外部から直接更新
       userDefaults.set("external_update", forKey: key)
             
+      try? await Task.sleep(for: .milliseconds(100))
     }
   }
   
@@ -132,14 +133,14 @@ struct UserDefaultsStoredTests {
       // 両方のノードの変更を追跡
       withStateGraphTracking {
         _ = node1.wrappedValue
-      } didChange: { _ in
+      } didChange: {
         #expect(node1.wrappedValue == "shared_update")
         confirmation.confirm()
       }
       
       withStateGraphTracking {
         _ = node2.wrappedValue
-      } didChange: { _ in
+      } didChange: {
         #expect(node2.wrappedValue == "shared_update")
         confirmation.confirm()
       }
@@ -150,6 +151,8 @@ struct UserDefaultsStoredTests {
         name: UserDefaults.didChangeNotification,
         object: userDefaults
       )
+      
+      try? await Task.sleep(for: .milliseconds(100))
     }
   }
   

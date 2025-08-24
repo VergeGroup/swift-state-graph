@@ -81,7 +81,7 @@ public final class _Stored<S: Storage>: Node, Observable, CustomDebugStringConve
       lock.unlock()
       
       for registration in _trackingRegistrations {
-        registration.perform(context: .init(nodeInfo: info))
+        registration.perform()
       }
       
       for edge in _outgoingEdges {
@@ -110,7 +110,7 @@ public final class _Stored<S: Storage>: Node, Observable, CustomDebugStringConve
     lock.unlock()
     
     for registration in _trackingRegistrations {
-      registration.perform(context: .init(nodeInfo: info))
+      registration.perform()
     }
     
     for edge in _outgoingEdges {

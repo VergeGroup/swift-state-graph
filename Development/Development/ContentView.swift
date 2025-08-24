@@ -152,12 +152,22 @@ private struct Book_StateView: View {
       Button("Update Count \(model.count2)") {
         model.count2 += 1
       }
+      Button("Batch") {
+        model.count1 += 1
+        model.count1 += 1
+        model.count2 += 1
+      }
     }
     .onAppear {
       
       print("onAppear")
                 
       subscription = withGraphTracking { 
+        
+        withGraphTrackingGroup { 
+          print("☁️", model.count1, model.count2)
+        }
+        
         Computed { _ in
           model.count1 + model.count2
         }
