@@ -290,11 +290,13 @@ struct StateGraphTrackingTests {
     await confirmation(expectedCount: 1) { c in
       withStateGraphTracking {
         _ = m.count
-      } didChange: { _ in
+      } didChange: {
         #expect(m.count == 1)
         c.confirm()
       }
       m.count += 1
+      
+      try! await Task.sleep(for: .milliseconds(100))
     }
 
   }
@@ -307,11 +309,14 @@ struct StateGraphTrackingTests {
       withStateGraphTracking {
         _ = m.count
         _ = m.count
-      } didChange: { _ in
+      } didChange: {
         #expect(m.count == 1)
         c.confirm()
       }
       m.count += 1
+      
+      try! await Task.sleep(for: .milliseconds(100))
+
     }
 
   }
@@ -359,12 +364,14 @@ struct GraphViewAdvancedTests {
     await confirmation(expectedCount: 1) { c in
       withStateGraphTracking {
         _ = model.subModel?.value
-      } didChange: { _ in
+      } didChange: {
         #expect(model.subModel?.value == "updated")
         c.confirm()
       }
 
       model.subModel?.updateValue("updated")
+      
+      try! await Task.sleep(for: .milliseconds(100))
     }
   }
 
@@ -376,12 +383,14 @@ struct GraphViewAdvancedTests {
         _ = model.counter
         model.createSubModel()
         _ = model.subModel?.value
-      } didChange: { _ in
+      } didChange: {
         #expect(model.counter == 1)
         c.confirm()
       }
 
       model.incrementCounter()
+      
+      try! await Task.sleep(for: .milliseconds(100))
     }
   }
 

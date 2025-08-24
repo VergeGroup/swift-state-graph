@@ -1,5 +1,5 @@
 {
-  "originHash" : "3f12b8b6f344aa81e91edddec0761136d22a1dad65db74ac3eecc4dce8f54c28",
+  "originHash" : "beef671bc10fe5c3c2f89b4b915468b878b171f733d8877ff1127fc7d0e3cbc0",
   "pins" : [
     {
       "identity" : "descriptors",
@@ -24,14 +24,14 @@
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/eure/swift-storybook.git",
       "state" : {
-        "revision" : "e31f24a055e7f51521ffc33050d59ee2583605e1",
-        "version" : "2.6.0"
+        "revision" : "05fd0928622073fca0a931f5d7b37bf37a1d9e4c",
+        "version" : "2.6.2"
       }
     },
     {
       "identity" : "swift-syntax",
       "kind" : "remoteSourceControl",
-      "location" : "https://github.com/apple/swift-syntax.git",
+      "location" : "https://github.com/swiftlang/swift-syntax.git",
       "state" : {
         "revision" : "0687f71944021d616d34d922343dcef086855920",
         "version" : "600.0.1"
