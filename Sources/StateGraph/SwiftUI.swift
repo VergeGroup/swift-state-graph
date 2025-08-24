@@ -34,12 +34,12 @@ import SwiftUI
 @available(iOS 17.0, *)
 public protocol GraphObject: Observable {}
 
-extension Stored {
+extension _Stored {
   
   /**
     Creates a SwiftUI binding from the stored property.
    */
-  public var binding: Binding<Value> {
+  public var binding: Binding<S.Value> {
     .init(
       get: { self.wrappedValue },
       set: { self.wrappedValue = $0 }
