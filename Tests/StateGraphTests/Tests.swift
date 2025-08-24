@@ -295,6 +295,8 @@ struct StateGraphTrackingTests {
         c.confirm()
       }
       m.count += 1
+      
+      try! await Task.sleep(for: .milliseconds(100))
     }
 
   }
@@ -312,6 +314,9 @@ struct StateGraphTrackingTests {
         c.confirm()
       }
       m.count += 1
+      
+      try! await Task.sleep(for: .milliseconds(100))
+
     }
 
   }
@@ -365,6 +370,8 @@ struct GraphViewAdvancedTests {
       }
 
       model.subModel?.updateValue("updated")
+      
+      try! await Task.sleep(for: .milliseconds(100))
     }
   }
 
@@ -382,6 +389,8 @@ struct GraphViewAdvancedTests {
       }
 
       model.incrementCounter()
+      
+      try! await Task.sleep(for: .milliseconds(100))
     }
   }
 

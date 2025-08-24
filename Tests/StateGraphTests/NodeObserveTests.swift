@@ -9,14 +9,16 @@ struct NodeObserveTests {
     let node = Stored(wrappedValue: 0)
     let stream = node.observe()
           
-    try await confirmation(expectedCount: 2) { c in
+    await confirmation(expectedCount: 2) { c in
       Task { 
         for try await _ in stream {
           c.confirm()
         }
       }
       node.wrappedValue = 1
-      try await Task.sleep(nanoseconds: 100_000)
+
+      try? await Task.sleep(for: .milliseconds(100))
+
     }
     
   }

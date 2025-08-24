@@ -103,6 +103,7 @@ struct UserDefaultsStoredTests {
       // UserDefaultsを外部から直接更新
       userDefaults.set("external_update", forKey: key)
             
+      try? await Task.sleep(for: .milliseconds(100))
     }
   }
   
@@ -150,6 +151,8 @@ struct UserDefaultsStoredTests {
         name: UserDefaults.didChangeNotification,
         object: userDefaults
       )
+      
+      try? await Task.sleep(for: .milliseconds(100))
     }
   }
   
