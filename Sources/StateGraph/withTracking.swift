@@ -84,25 +84,25 @@ func withStateGraphTrackingStream(
 
 // MARK: - Internals
 
-public struct TrackingRegistration: Sendable, Hashable {
+public final class TrackingRegistration: Sendable, Hashable {
 
-  private struct State {
+  private struct State: Sendable {
     var isInvalidated: Bool = false
     let didChange: @isolated(any) @Sendable () -> Void
   }
-
-  public struct Context: Sendable {
-    public let nodeInfo: NodeInfo
-
-    init(nodeInfo: NodeInfo) {
-      self.nodeInfo = nodeInfo
-    }
+   
+  public static func == (lhs: TrackingRegistration, rhs: TrackingRegistration) -> Bool {
+    lhs === rhs
   }
 
-  private let state: _ManagedCriticalState<State>
+  public func hash(into hasher: inout Hasher) {
+    hasher.combine(ObjectIdentifier(self))
+  }
+  
+  private let state: OSAllocatedUnfairLock<State>
 
   init(didChange: @escaping @isolated(any) @Sendable () -> Void) {
-    self.state = _ManagedCriticalState<State>(
+    self.state = .init(uncheckedState: 
       .init(
         didChange: didChange
       )
@@ -110,7 +110,7 @@ public struct TrackingRegistration: Sendable, Hashable {
   }
 
   func perform() {
-    state.withCriticalRegion { state in
+    state.withLock { state in
       guard state.isInvalidated == false else {
         return
       }
