@@ -207,7 +207,7 @@ public final class _Stored<Value, S: Storage<Value>>: Node, Observable, CustomDe
       lock.unlock()
       
       for registration in _trackingRegistrations {
-        registration.perform(context: .init(nodeInfo: info))
+        registration.perform()
       }
       
       for edge in _outgoingEdges {
@@ -236,7 +236,7 @@ public final class _Stored<Value, S: Storage<Value>>: Node, Observable, CustomDe
     lock.unlock()
     
     for registration in _trackingRegistrations {
-      registration.perform(context: .init(nodeInfo: info))
+      registration.perform()
     }
     
     for edge in _outgoingEdges {

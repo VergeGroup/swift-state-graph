@@ -109,37 +109,21 @@ public struct TrackingRegistration: Sendable, Hashable {
     )
   }
 
-  func perform(context: Context?) {
-    Self.$context.withValue(context) {
-      state.withCriticalRegion { state in
-        guard state.isInvalidated == false else {
-          return
-        }
-        state.isInvalidated = true
-        let closure = state.didChange
-        Task {
-          await closure()
-        }
+  func perform() {
+    state.withCriticalRegion { state in
+      guard state.isInvalidated == false else {
+        return
+      }
+      state.isInvalidated = true
+      let closure = state.didChange
+      Task {
+        await closure()
       }
     }
   }
 
   @TaskLocal
-  static var context: Context?
-
-  @TaskLocal
   static var registration: TrackingRegistration?
-}
-
-public func _printStateGraphChanged() {
-  guard let context = TrackingRegistration.context else {
-    print("Unknown context for state graph tracking")
-    return
-  }
-  let nodeInfo = context.nodeInfo
-  print(
-    "\(nodeInfo.name) @ \(nodeInfo.sourceLocation.file):\(nodeInfo.sourceLocation.line)"
-  )
 }
 
 struct UnsafeSendable<V>: ~Copyable, @unchecked Sendable {
