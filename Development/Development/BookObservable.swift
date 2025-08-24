@@ -22,7 +22,7 @@ private struct _Book: View {
         _ = model.count2
       } onChange: { 
         print(
-          "count1: \(model.count1), count2: \(model.count2)"
+          "change"
         )
       }
       
