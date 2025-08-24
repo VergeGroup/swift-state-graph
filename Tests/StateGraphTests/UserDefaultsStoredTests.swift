@@ -95,7 +95,7 @@ struct UserDefaultsStoredTests {
       // グラフの変更を追跡
       withStateGraphTracking {
         _ = computedNode.wrappedValue
-      } didChange: { _ in
+      } didChange: {
         #expect(computedNode.wrappedValue == "computed_external_update")
         confirmation.confirm()
       }
@@ -132,14 +132,14 @@ struct UserDefaultsStoredTests {
       // 両方のノードの変更を追跡
       withStateGraphTracking {
         _ = node1.wrappedValue
-      } didChange: { _ in
+      } didChange: {
         #expect(node1.wrappedValue == "shared_update")
         confirmation.confirm()
       }
       
       withStateGraphTracking {
         _ = node2.wrappedValue
-      } didChange: { _ in
+      } didChange: {
         #expect(node2.wrappedValue == "shared_update")
         confirmation.confirm()
       }

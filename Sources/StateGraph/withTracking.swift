@@ -1,9 +1,10 @@
 /// Tracks access to the properties of StoredNode or Computed.
 /// Similarly to Observation.withObservationTracking, didChange runs one time after property changes applied.
 /// To observe properties continuously, use ``withContinuousStateGraphTracking``.
+@discardableResult
 func withStateGraphTracking<R>(
   apply: () -> R,
-  didChange: @escaping @Sendable (TrackingRegistration) -> Void
+  didChange: @escaping @Sendable () -> Void
 ) -> R {
   let registration = TrackingRegistration(didChange: didChange)
   return TrackingRegistration.$registration.withValue(registration) {
@@ -19,16 +20,16 @@ public enum StateGraphTrackingContinuation: Sendable {
 /// Tracks access to the properties of StoredNode or Computed.
 /// Continuously tracks until `didChange` returns `.stop`.
 /// It does not provides update of the properties granurarly. some frequency of updates may be aggregated into single event.
-func withContinuousStateGraphTracking(
-  apply: @escaping () -> Void,
+func withContinuousStateGraphTracking<R>(
+  apply: @escaping () -> R,
   didChange: @escaping () -> StateGraphTrackingContinuation,
   isolation: isolated (any Actor)? = #isolation
 ) {
-  
+
   let applyBox = UnsafeSendable(apply)
   let didChangeBox = UnsafeSendable(didChange)
-  
-  let registration = TrackingRegistration(didChange: { trackingRegistration in
+
+  withStateGraphTracking(apply: apply) {
     Task {
       let continuation = await perform(didChangeBox._value, isolation: isolation)
       switch continuation {
@@ -37,26 +38,14 @@ func withContinuousStateGraphTracking(
       case .next:
         // continue tracking on next event loop.
         // It uses isolation and task dispatching to ensure apply closure is called on the same actor.
-        await Task.yield()
-        await _withContinuousStateGraphTracking(
+        await withContinuousStateGraphTracking(
           apply: applyBox._value,
-          trackingRegistration: trackingRegistration,
+          didChange: didChangeBox._value,
           isolation: isolation
         )
       }
     }
-  })
-  
-  _withContinuousStateGraphTracking(apply: apply, trackingRegistration: registration)
-}
-
-@inline(__always)
-private func _withContinuousStateGraphTracking(
-  apply: () -> Void,
-  trackingRegistration: TrackingRegistration,
-  isolation: isolated (any Actor)? = #isolation
-) {       
-  TrackingRegistration.$registration.withValue(trackingRegistration, operation: apply)
+  }
 }
 
 func withStateGraphTrackingStream(
@@ -83,7 +72,12 @@ func withStateGraphTrackingStream(
 
 // MARK: - Internals
 
-public final class TrackingRegistration: Sendable, Hashable {
+public struct TrackingRegistration: Sendable, Hashable {
+  
+  private struct State {
+    var isInvalidated: Bool = false
+    let didChange: @Sendable () -> Void
+  }
   
   public struct Context: Sendable {
     public let nodeInfo: NodeInfo
@@ -92,24 +86,24 @@ public final class TrackingRegistration: Sendable, Hashable {
       self.nodeInfo = nodeInfo
     }
   }
+  
+  private let state: _ManagedCriticalState<State>
 
-  public static func == (lhs: TrackingRegistration, rhs: TrackingRegistration) -> Bool {
-    lhs === rhs
+  init(didChange: @escaping @Sendable () -> Void) {        
+    self.state = _ManagedCriticalState<State>(.init(
+      didChange: didChange
+    ))
   }
 
-  public func hash(into hasher: inout Hasher) {
-    hasher.combine(ObjectIdentifier(self))
-  }
-
-  private let didChange: @Sendable (TrackingRegistration) -> Void
-
-  init(didChange: @escaping @Sendable (TrackingRegistration) -> Void) {
-    self.didChange = didChange
-  }
-
-  func perform(context: Context?) {
+  func perform(context: Context?) {   
     Self.$context.withValue(context) {
-      didChange(self)
+      state.withCriticalRegion { state in
+        guard state.isInvalidated == false else {
+          return
+        }        
+        state.isInvalidated = true
+        state.didChange()
+      }
     }
   }
   
