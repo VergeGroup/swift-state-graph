@@ -60,7 +60,8 @@ final class CounterViewModel {
 ### Persistence and Storage
 
 - <doc:Backing-Storage>
-- ``GraphStorageBacking``
+- ``MemoryMarker``
+- ``UserDefaultsMarker``
 
 ### Building Reactive Models
 

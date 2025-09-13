@@ -303,7 +303,7 @@ struct UserTheme: Codable {
 }
 
 final class ThemeModel {
-  @GraphStored(backed: .userDefaults(key: "selectedTheme"))
+  @GraphStored(backed: UserDefaultsMarker.userDefaults(key: "selectedTheme"))
   var selectedTheme: UserTheme = UserTheme(
     name: "Default",
     primaryColor: "#007AFF",

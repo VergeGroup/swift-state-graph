@@ -200,11 +200,11 @@ You can back your stored properties with UserDefaults for automatic persistence:
 ```swift
 final class SettingsViewModel {
   // Basic UserDefaults storage
-  @GraphStored(backed: .userDefaults(key: "theme")) 
+  @GraphStored(backed: UserDefaultsMarker.userDefaults(key: "theme")) 
   var theme: String = "light"
   
   // UserDefaults with custom suite
-  @GraphStored(backed: .userDefaults(suite: "com.myapp.settings", key: "apiUrl"))
+  @GraphStored(backed: UserDefaultsMarker.userDefaults(key: "apiUrl", suite: "com.myapp.settings"))
   var apiUrl: String = "https://api.example.com"
   
   // All GraphStored features work with backing storage
@@ -225,10 +225,10 @@ Backing storage integrates seamlessly with the reactive system:
 
 ```swift
 final class UserPreferencesViewModel {
-  @GraphStored(backed: .userDefaults(key: "userName"))
+  @GraphStored(backed: UserDefaultsMarker.userDefaults(key: "userName"))
   var userName: String = ""
   
-  @GraphStored(backed: .userDefaults(key: "notificationsEnabled"))
+  @GraphStored(backed: UserDefaultsMarker.userDefaults(key: "notificationsEnabled"))
   var notificationsEnabled: Bool = true
   
   @GraphComputed
@@ -278,13 +278,15 @@ struct SettingsView: View {
 
 ### Storage Types
 
-Swift State Graph supports multiple backing storage types through the `GraphStorageBacking` enum:
+Swift State Graph supports multiple backing storage types through marker types:
 
 ```swift
-public enum GraphStorageBacking {
-  case memory                                          // In-memory (default)
-  case userDefaults(key: String)                      // UserDefaults with key
-  case userDefaults(suite: String, key: String)       // UserDefaults with suite
+struct MemoryMarker {
+  static var memory: MemoryMarker                     // In-memory (default)
+}
+
+struct UserDefaultsMarker {
+  static func userDefaults(key: String, suite: String? = nil, name: String? = nil) -> UserDefaultsMarker
 }
 ```
 

@@ -4,135 +4,9 @@ import Foundation
   import Observation
 #endif
 
-// MARK: - Storage Protocol
-
-public protocol Storage<Value>: Sendable {
-  
-  associatedtype Value
-      
-  mutating func loaded(context: StorageContext)
-  
-  func unloaded() 
-  
-  var value: Value { get set }
-  
-}
-
-public struct StorageContext: Sendable {
-  
-  private let onStorageUpdated: @Sendable () -> Void
-    
-  init(onStorageUpdated: @Sendable @escaping () -> Void) {
-    self.onStorageUpdated = onStorageUpdated
-  }
-  
-  public func notifyStorageUpdated() {
-    onStorageUpdated()
-  }
-  
-}
-
-// MARK: - Concrete Storage Implementations
-
-public struct InMemoryStorage<Value>: Storage {
-  
-  nonisolated(unsafe)
-  public var value: Value
-  
-  public init(initialValue: consuming Value) {
-    self.value = initialValue
-  }
-    
-  public func loaded(context: StorageContext) {
-    
-  }
-  
-  public func unloaded() {
-    
-  }
-    
-}
-
-public final class UserDefaultsStorage<Value: UserDefaultsStorable>: Storage, Sendable {
-  
-  nonisolated(unsafe)
-  private let userDefaults: UserDefaults
-  private let key: String
-  private let defaultValue: Value
-  
-  nonisolated(unsafe)
-  private var subscription: NSObjectProtocol?
-  
-  nonisolated(unsafe)
-  private var cachedValue: Value?
-  
-  public var value: Value {
-    get {
-      if let cachedValue {
-        return cachedValue
-      }
-      let loadedValue = Value._getValue(
-        from: userDefaults,
-        forKey: key,
-        defaultValue: defaultValue
-      )
-      cachedValue = loadedValue
-      return loadedValue
-    }
-    set {
-      cachedValue = newValue
-      newValue._setValue(to: userDefaults, forKey: key)
-    }
-  }
-  
-  nonisolated(unsafe)
-  private var previousValue: Value?
-  
-  public init(
-    userDefaults: UserDefaults,
-    key: String,
-    defaultValue: Value
-  ) {
-    self.userDefaults = userDefaults
-    self.key = key
-    self.defaultValue = defaultValue
-  }
-     
-  public func loaded(context: StorageContext) {
-    
-    previousValue = value
-    
-    subscription = NotificationCenter.default
-      .addObserver(
-        forName: UserDefaults.didChangeNotification,
-        object: userDefaults,
-        queue: nil,
-        using: { [weak self] _ in                      
-          guard let self else { return }
-          
-          // Invalidate cache and reload value
-          self.cachedValue = nil
-          let value = self.value
-          guard self.previousValue != value else {
-            return
-          }
-          
-          self.previousValue = value
-          
-          context.notifyStorageUpdated()
-        }
-      )
-  }  
-  
-  public func unloaded() {
-    guard let subscription else { return }
-    NotificationCenter.default.removeObserver(subscription)
-  }
-}
-
 // MARK: - Base Stored Node
 
-public final class _Stored<Value, S: Storage<Value>>: Node, Observable, CustomDebugStringConvertible {
+public final class _Stored<S: Storage>: Node, Observable, CustomDebugStringConvertible {
   
   public let lock: NodeLock
   
@@ -157,7 +31,7 @@ public final class _Stored<Value, S: Storage<Value>>: Node, Observable, CustomDe
   
   public let info: NodeInfo
   
-  public var wrappedValue: Value {
+  public var wrappedValue: S.Value {
     get {
       
 #if canImport(Observation)
@@ -309,7 +183,7 @@ public final class _Stored<Value, S: Storage<Value>>: Node, Observable, CustomDe
   /// - Parameter body: A closure that takes an inout parameter of the value
   /// - Returns: The result of the closure
   public borrowing func withLock<Result, E>(
-    _ body: (inout Value) throws(E) -> Result
+    _ body: (inout S.Value) throws(E) -> Result
   ) throws(E) -> Result where E : Error {
     lock.lock()
     defer {
@@ -319,4 +193,4 @@ public final class _Stored<Value, S: Storage<Value>>: Node, Observable, CustomDe
     return result
   }
   
-} 
+}

@@ -233,7 +233,7 @@ extension UnifiedStoredMacro {
     let key: String?
     
     func buildMemoryInitializer() -> ExprSyntax {
-      return #".init(name: "\#(raw: propertyName)", wrappedValue: \#(raw: wrappedValue))"# as ExprSyntax
+      return #"_Stored(storage: .memory, value: \#(raw: wrappedValue))"# as ExprSyntax
     }
     
     func buildUserDefaultsInitializer() -> ExprSyntax {
@@ -242,9 +242,9 @@ extension UnifiedStoredMacro {
       }
       
       if let suite = suite {
-        return #".init(name: "\#(raw: propertyName)", suite: "\#(raw: suite)", key: "\#(raw: key)", defaultValue: \#(raw: wrappedValue))"# as ExprSyntax
+        return #"_Stored(storage: .userDefaults(suite: "\#(raw: suite)", key: "\#(raw: key)"), value: \#(raw: wrappedValue))"# as ExprSyntax
       } else {
-        return #".init(name: "\#(raw: propertyName)", key: "\#(raw: key)", defaultValue: \#(raw: wrappedValue))"# as ExprSyntax
+        return #"_Stored(storage: .userDefaults(key: "\#(raw: key)"), value: \#(raw: wrappedValue))"# as ExprSyntax
       }
     }
   }
@@ -318,7 +318,7 @@ extension UnifiedStoredMacro {
     case .memory:
       return createMemoryTypeAnnotation(for: type, variableDecl: variableDecl)
     case .userDefaults:
-      return "UserDefaultsStored<\(type.trimmed)>" as TypeSyntax
+      return "_Stored<UserDefaultsStorage<\(type.trimmed)>>" as TypeSyntax
     }
   }
   
@@ -337,7 +337,7 @@ extension UnifiedStoredMacro {
       wrappedType = "\(type.trimmed)"
     }
     
-    return "Stored<\(raw: wrappedType)>" as TypeSyntax
+    return "_Stored<InMemoryStorage<\(raw: wrappedType)>>" as TypeSyntax
   }
 
   /// Creates appropriate initializer based on backing type
@@ -699,7 +699,7 @@ extension UnifiedStoredMacro: AccessorMacro {
         initializes: $\(raw: propertyName)
       )
       init(initialValue) {
-        $\(raw: propertyName) = .init(name: "\(raw: propertyName)", wrappedValue: \(raw: wrappedValue))
+        $\(raw: propertyName) = _Stored(storage: .memory, value: \(raw: wrappedValue))
       }
       """
     )

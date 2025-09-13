@@ -5,7 +5,7 @@ import Testing
 
 final class Author {
   @GraphStored
-  var name: String
+  var name: String = ""
 
   init(
     name: String
@@ -16,7 +16,7 @@ final class Author {
 
 final class Tag {
   @GraphStored
-  var name: String
+  var name: String = ""
 
   init(
     name: String
@@ -29,9 +29,9 @@ final class Book {
 
   let author: Author
   @GraphStored
-  var title: String
+  var title: String = ""
   @GraphStored
-  var tags: [Tag]
+  var tags: [Tag] = [Tag]()
 
   init(
     author: Author,

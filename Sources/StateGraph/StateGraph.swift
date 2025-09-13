@@ -17,17 +17,17 @@ import Foundation.NSLock
 ///
 /// - When value changes: Changes propagate to all dependent nodes, triggering recalculations
 /// - When value is accessed: Dependencies are recorded, automatically building the graph structure
-public typealias Stored<Value> = _Stored<Value, InMemoryStorage<Value>>
+public typealias Stored<Value> = _Stored<InMemoryStorage<Value>>
 
-extension _Stored where S == InMemoryStorage<Value> {
+extension _Stored {
   /// 便利な初期化メソッド（wrappedValue指定）
-  public convenience init(
+  public convenience init<Value>(
     _ file: StaticString = #fileID,
     _ line: UInt = #line,
     _ column: UInt = #column,
     name: StaticString? = nil,
     wrappedValue: Value
-  ) {
+  ) where S == InMemoryStorage<Value> {
     let storage = InMemoryStorage(initialValue: wrappedValue)
     self.init(
       file,
@@ -326,7 +326,7 @@ public final class Computed<Value>: Node, Observable, CustomDebugStringConvertib
       name: name,
       sourceLocation: .init(file: file, line: line, column: column)
     )
-    self.descriptor = AnyComputedDescriptor(compute: rule, isEqual: { _, _ in false })      
+    self.descriptor = AnyComputedDescriptor(compute: rule, isEqual: { _, _ in false })
     self.lock = .init()
 
 #if DEBUG
