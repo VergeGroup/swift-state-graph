@@ -35,3 +35,30 @@ public macro GraphStored(backed: UserDefaultsMarker) = #externalMacro(module: "S
 
 
 @_exported import os.lock
+
+protocol StorageDescriptor {
+  
+  func makeStorage<Value>(initialValue: Value) -> Storage
+}
+
+extension StorageDescriptor {
+  
+  struct InMemory: StorageDescriptor {
+    
+    func makeStorage<Value>(initialValue: Value) -> InMemoryStorage<Value> {
+      
+    }
+      
+  }
+  
+  struct InMemoryStorage<Value> {
+    
+  }
+  
+}
+
+final class MyStorage<Value, S: StorageDescriptor> {
+  
+  var value: Value
+
+}
