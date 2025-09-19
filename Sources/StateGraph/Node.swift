@@ -9,9 +9,6 @@ public protocol TypeErasedNode: Hashable, AnyObject, Sendable, CustomDebugString
   /// inverse edges that depending on nodes
   var incomingEdges: ContiguousArray<Edge> { get set }
   
-  @_spi(Internal)
-  var trackingRegistrations: Set<TrackingRegistration> { get set }
-  
   var potentiallyDirty: Bool { get set }
   
   func recomputeIfNeeded()

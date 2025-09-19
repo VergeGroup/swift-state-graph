@@ -3,26 +3,22 @@ import Observation
 /// Tracks access to the properties of StoredNode or Computed.
 /// Similarly to Observation.withObservationTracking, didChange runs one time after property changes applied.
 /// To observe properties continuously, use ``withContinuousStateGraphTracking``.
+@available(macOS 14.0, iOS 17.0, watchOS 10.0, tvOS 17.0, *)
 @discardableResult
 func withStateGraphTracking<R>(
   apply: () -> R,
   @_inheritActorContext didChange: @escaping @isolated(any) @Sendable () -> Void
 ) -> R {
-  #if false  // #available(macOS 14.0, iOS 17.0, watchOS 10.0, tvOS 17.0, *)
-    return withObservationTracking(
-      apply,
-      onChange: {
-        Task {
-          await didChange()
-        }
+  // For Observable integration, use Apple's tracking
+
+  return withObservationTracking(
+    apply,
+    onChange: {
+      Task {
+        await didChange()
       }
-    )
-  #else
-    let registration = TrackingRegistration(didChange: didChange)
-    return TrackingRegistration.$registration.withValue(registration) {
-      apply()
     }
-  #endif
+  )
 
 }
 
@@ -34,6 +30,7 @@ public enum StateGraphTrackingContinuation: Sendable {
 /// Tracks access to the properties of StoredNode or Computed.
 /// Continuously tracks until `didChange` returns `.stop`.
 /// It does not provides update of the properties granurarly. some frequency of updates may be aggregated into single event.
+@available(macOS 14.0, iOS 17.0, watchOS 10.0, tvOS 17.0, *)
 func withContinuousStateGraphTracking<R>(
   apply: @escaping () -> R,
   didChange: @escaping () -> StateGraphTrackingContinuation,
@@ -60,6 +57,7 @@ func withContinuousStateGraphTracking<R>(
   }
 }
 
+@available(macOS 14.0, iOS 17.0, watchOS 10.0, tvOS 17.0, *)
 func withStateGraphTrackingStream(
   apply: @escaping () -> Void
 ) -> AsyncStream<Void> {
@@ -83,48 +81,6 @@ func withStateGraphTrackingStream(
 }
 
 // MARK: - Internals
-
-public final class TrackingRegistration: Sendable, Hashable {
-
-  private struct State: Sendable {
-    var isInvalidated: Bool = false
-    let didChange: @isolated(any) @Sendable () -> Void
-  }
-   
-  public static func == (lhs: TrackingRegistration, rhs: TrackingRegistration) -> Bool {
-    lhs === rhs
-  }
-
-  public func hash(into hasher: inout Hasher) {
-    hasher.combine(ObjectIdentifier(self))
-  }
-  
-  private let state: OSAllocatedUnfairLock<State>
-
-  init(didChange: @escaping @isolated(any) @Sendable () -> Void) {
-    self.state = .init(uncheckedState: 
-      .init(
-        didChange: didChange
-      )
-    )
-  }
-
-  func perform() {
-    state.withLock { state in
-      guard state.isInvalidated == false else {
-        return
-      }
-      state.isInvalidated = true
-      let closure = state.didChange
-      Task {
-        await closure()
-      }
-    }
-  }
-
-  @TaskLocal
-  static var registration: TrackingRegistration?
-}
 
 struct UnsafeSendable<V>: ~Copyable, @unchecked Sendable {
 

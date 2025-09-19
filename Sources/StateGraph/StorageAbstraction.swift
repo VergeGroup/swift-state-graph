@@ -175,11 +175,7 @@ public final class _Stored<Value, S: Storage<Value>>: Node, Observable, CustomDe
         outgoingEdges.append(edge)
         currentNode.incomingEdges.append(edge)
       }
-      // record tracking
-      if let registration = TrackingRegistration.registration {
-        self.trackingRegistrations.insert(registration)
-      }
-      
+
       return storage.value
     }
     set {
@@ -201,15 +197,9 @@ public final class _Stored<Value, S: Storage<Value>>: Node, Observable, CustomDe
       storage.value = newValue
       
       let _outgoingEdges = outgoingEdges
-      let _trackingRegistrations = trackingRegistrations
-      self.trackingRegistrations.removeAll()
-      
+
       lock.unlock()
-      
-      for registration in _trackingRegistrations {
-        registration.perform()
-      }
-      
+
       for edge in _outgoingEdges {
         edge.isPending = true
         edge.to.potentiallyDirty = true
@@ -230,15 +220,9 @@ public final class _Stored<Value, S: Storage<Value>>: Node, Observable, CustomDe
     lock.lock()
         
     let _outgoingEdges = outgoingEdges
-    let _trackingRegistrations = trackingRegistrations
-    self.trackingRegistrations.removeAll()
-    
+
     lock.unlock()
-    
-    for registration in _trackingRegistrations {
-      registration.perform()
-    }
-    
+
     for edge in _outgoingEdges {
       edge.isPending = true
       edge.to.potentiallyDirty = true
@@ -257,8 +241,6 @@ public final class _Stored<Value, S: Storage<Value>>: Node, Observable, CustomDe
   nonisolated(unsafe)
   public var outgoingEdges: ContiguousArray<Edge> = []
   
-  nonisolated(unsafe)
-  public var trackingRegistrations: Set<TrackingRegistration> = []
   
   public init(
     _ file: StaticString = #fileID,
