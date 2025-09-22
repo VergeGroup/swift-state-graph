@@ -364,7 +364,7 @@
 			repositoryURL = "https://github.com/eure/swift-storybook.git";
 			requirement = {
 				kind = upToNextMajorVersion;
-				minimumVersion = 2.6.0;
+				minimumVersion = 2.7.0;
 			};
 		};
 /* End XCRemoteSwiftPackageReference section */

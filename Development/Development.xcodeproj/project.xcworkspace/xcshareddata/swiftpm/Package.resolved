@@ -24,8 +24,8 @@
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/eure/swift-storybook.git",
       "state" : {
-        "revision" : "05fd0928622073fca0a931f5d7b37bf37a1d9e4c",
-        "version" : "2.6.2"
+        "revision" : "d964f81a4611dbb415e8fcf2cf558833a175c59b",
+        "version" : "2.7.0"
       }
     },
     {
@@ -33,8 +33,8 @@
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/swiftlang/swift-syntax.git",
       "state" : {
-        "revision" : "0687f71944021d616d34d922343dcef086855920",
-        "version" : "600.0.1"
+        "revision" : "4799286537280063c85a32f09884cfbca301b1a1",
+        "version" : "602.0.0"
       }
     },
     {
