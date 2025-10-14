@@ -179,20 +179,21 @@ public final class _Stored<Value, S: Storage<Value>>: Node, Observable, CustomDe
       return storage.value
     }
     set {
+                              
+      lock.lock()
+      
+      if let comparator {      
+        guard comparator.isEqual(storage.value, newValue) == false else {
+          lock.unlock()
+          return
+        }
+      }
       
 #if canImport(Observation)
       if #available(macOS 14.0, iOS 17.0, watchOS 10.0, tvOS 17.0, *) { 
         observationRegistrar.willSet(PointerKeyPathRoot.shared, keyPath: _keyPath(self))   
       }
-      
-      defer {
-        if #available(macOS 14.0, iOS 17.0, watchOS 10.0, tvOS 17.0, *) {
-          observationRegistrar.didSet(PointerKeyPathRoot.shared, keyPath: _keyPath(self))
-        }
-      }
 #endif
-      
-      lock.lock()
       
       storage.value = newValue
       
@@ -204,8 +205,16 @@ public final class _Stored<Value, S: Storage<Value>>: Node, Observable, CustomDe
         edge.isPending = true
         edge.to.potentiallyDirty = true
       }
+      
+#if canImport(Observation)
+      if #available(macOS 14.0, iOS 17.0, watchOS 10.0, tvOS 17.0, *) {
+        observationRegistrar.didSet(PointerKeyPathRoot.shared, keyPath: _keyPath(self))
+      }      
+#endif
     }
   }
+  
+  private let comparator: (any _Comparator<Value>)?
   
   private func notifyStorageUpdated() {
 #if canImport(Observation)
@@ -240,14 +249,48 @@ public final class _Stored<Value, S: Storage<Value>>: Node, Observable, CustomDe
   
   nonisolated(unsafe)
   public var outgoingEdges: ContiguousArray<Edge> = []
-  
-  
-  public init(
+    
+  public convenience init(
     _ file: StaticString = #fileID,
     _ line: UInt = #line,
     _ column: UInt = #column,
     name: StaticString? = nil,
     storage: consuming S
+  ) {
+    self.init(
+      file,
+      line,
+      column,
+      name: name,
+      storage: storage,
+      comparator: nil
+    )
+  }
+  
+  public convenience init(
+    _ file: StaticString = #fileID,
+    _ line: UInt = #line,
+    _ column: UInt = #column,
+    name: StaticString? = nil,
+    storage: consuming S
+  ) where Value : Equatable {
+    self.init(
+      file,
+      line,
+      column,
+      name: name,
+      storage: storage,
+      comparator: Comparator.init()
+    )
+  }
+  
+  private init(
+    _ file: StaticString = #fileID,
+    _ line: UInt = #line,
+    _ column: UInt = #column,
+    name: StaticString? = nil,
+    storage: consuming S,
+    comparator: (any _Comparator<Value>)?
   ) {
     self.info = .init(
       name: name,
@@ -255,6 +298,7 @@ public final class _Stored<Value, S: Storage<Value>>: Node, Observable, CustomDe
     )
     self.lock = .init()
     self.storage = storage
+    self.comparator = comparator
            
     self.storage.loaded(context: .init(onStorageUpdated: { [weak self] in      
       self?.notifyStorageUpdated()      
@@ -301,4 +345,24 @@ public final class _Stored<Value, S: Storage<Value>>: Node, Observable, CustomDe
     return result
   }
   
-} 
+}
+
+protocol _Comparator<Value>: Sendable {
+  associatedtype Value
+  func isEqual(_ lhs: Value, _ rhs: Value) -> Bool
+}
+
+private struct Comparator<Value: Equatable>: _Comparator, Sendable {
+  
+  init() {
+    
+  }
+  
+  @_specialize(where Value == Int)
+  @_specialize(where Value == String)
+  @_specialize(where Value == Bool)
+  func isEqual(_ lhs: Value, _ rhs: Value) -> Bool {
+    lhs == rhs
+  }
+  
+}

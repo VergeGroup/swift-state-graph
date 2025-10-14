@@ -51,12 +51,7 @@ struct NodeObserveTests {
     node.wrappedValue = 2
     try await Task.sleep(for: .milliseconds(100))
     #expect(results.withLock { $0 == [0, 1, 2] })
-    
-    // Even with the same value, change notification is sent
-    node.wrappedValue = 2
-    try await Task.sleep(for: .milliseconds(100))
-    #expect(results.withLock { $0 == [0, 1, 2, 2] })
-    
+        
     task.cancel()
   }
   
@@ -89,13 +84,7 @@ struct NodeObserveTests {
     node.wrappedValue = TestStruct(value: 2)
     try await Task.sleep(for: .milliseconds(100))
     #expect(results.withLock { $0 == [TestStruct(value: 0), TestStruct(value: 1), TestStruct(value: 2)] })
-    
-    // Even with the same value, change notification is sent
-    node.wrappedValue = TestStruct(value: 2)
-    try await Task.sleep(for: .milliseconds(100))
-    
-    #expect(results.withLock { $0 == [TestStruct(value: 0), TestStruct(value: 1), TestStruct(value: 2), TestStruct(value: 2)] })
-    
+           
     task.cancel()
   }
   
@@ -135,13 +124,7 @@ struct NodeObserveTests {
     try await Task.sleep(for: .milliseconds(100))
     #expect(results1.withLock { $0 == [0, 1, 2] })
     #expect(results2.withLock { $0 == [0, 1, 2] })
-    
-    // Even with the same value, change notification is sent
-    node.wrappedValue = 2
-    try await Task.sleep(for: .milliseconds(100))
-    #expect(results1.withLock { $0 == [0, 1, 2, 2] })
-    #expect(results2.withLock { $0 == [0, 1, 2, 2] })
-    
+           
     task1.cancel()
     task2.cancel()
   }

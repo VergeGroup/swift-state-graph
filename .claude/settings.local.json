@@ -12,7 +12,8 @@
       "Bash(git commit:*)",
       "Bash(gh pr create:*)",
       "mcp__swiftlens__swift_search_pattern",
-      "mcp__swiftlens__swift_get_symbols_overview"
+      "mcp__swiftlens__swift_get_symbols_overview",
+      "mcp__swiftlens__swift_analyze_files"
     ],
     "deny": []
   }
