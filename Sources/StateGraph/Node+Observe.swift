@@ -316,7 +316,10 @@ public protocol Filter<Value> {
 
   /// Processes a value and returns it if it should be passed to the handler, or nil to suppress the notification.
   /// - Parameter value: The new value from the node
-  /// - Returns: The value to pass to the change handler, or nil to suppress the notification
+  /// - Returns: The value to pass to the change handler, or nil to suppress
+  ///   the handler call. Returning nil does NOT affect Observation notifications
+  ///   (used by SwiftUI) - those are triggered at the node level when the node
+  ///   becomes potentially dirty.
   mutating func send(value: Value) -> Value?
 }
 
@@ -338,8 +341,14 @@ public struct PassthroughFilter<Value>: Filter {
 /**
  A filter that only passes through values that are different from the previous value.
 
- This filter uses equality comparison to suppress duplicate notifications,
+ This filter uses equality comparison to suppress duplicate onChange handler calls,
  which is useful for avoiding unnecessary work when the actual value hasn't changed.
+
+ Note: This only affects onChange handler calls. SwiftUI and other Observation
+ consumers will still receive notifications when the node becomes potentially dirty,
+ allowing them to check for updates. This is the correct behavior because:
+ - SwiftUI needs to know a value *might* have changed to trigger re-evaluation
+ - onChange handlers should only run when values *actually* changed
 
  ```swift
  node.onChange(DistinctFilter<String>()) { value in

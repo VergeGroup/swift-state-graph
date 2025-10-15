@@ -222,6 +222,10 @@ public final class Computed<Value>: Node, Observable, CustomDebugStringConvertib
 
       lock.unlock()
 
+      // Notify observers when becoming potentially dirty, even if the computed value
+      // might not actually change. This is necessary for SwiftUI and other Observation
+      // consumers to know they should check for updates. The actual value equality
+      // is checked during recomputation to avoid unnecessary downstream propagation.
 #if canImport(Observation)
       if #available(macOS 14.0, iOS 17.0, watchOS 10.0, tvOS 17.0, *) {
         observationRegistrar.willSet(PointerKeyPathRoot.shared, keyPath: _keyPath(self))
