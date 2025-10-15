@@ -204,17 +204,17 @@ struct Tests {
   }
 
   @Test func withGraphTracking_onChange() async {
-    
+
     final class Model: Sendable {
       @GraphStored var name: String = ""
       @GraphStored var count1: Int = 0
       @GraphStored var count2: Int = 0
     }
-    
+
     let model = Model()
-    
+
     await confirmation(expectedCount: 5) { c in
-      
+
       let cancellable = withGraphTracking {
         Computed { _ in
           model.count1 + model.count2
@@ -226,17 +226,60 @@ struct Tests {
           c.confirm()
         }
       }
-      
+
       try? await Task.sleep(for: .milliseconds(100))
-      
+
       model.count1 = 10
       try? await Task.sleep(for: .milliseconds(100))
       model.count2 = 5
       try? await Task.sleep(for: .milliseconds(100))
-      
+
       withExtendedLifetime(cancellable, {})
     }
-      
+
+  }
+
+  @Test func computed_onChange_notCalledWhenResultIsSame() async {
+
+    final class Model: Sendable {
+      @GraphStored var count1: Int = 5
+      @GraphStored var count2: Int = 5
+    }
+
+    let model = Model()
+
+    // onChange should be called for initial value and when the computed result actually changes
+    // Expected calls: 1) initial value (10), 2) when sum changes to 11
+    await confirmation(expectedCount: 2) { c in
+
+      let cancellable = withGraphTracking {
+        Computed { _ in
+          model.count1 + model.count2
+        }
+        .onChange { value in
+          c.confirm()
+        }
+      }
+
+      try? await Task.sleep(for: .milliseconds(100))
+
+      // Change count1 and count2, but sum remains 10 - should NOT trigger onChange
+      model.count1 = 6
+      model.count2 = 4
+      try? await Task.sleep(for: .milliseconds(100))
+
+      // Change again, but sum still remains 10 - should NOT trigger onChange
+      model.count1 = 7
+      model.count2 = 3
+      try? await Task.sleep(for: .milliseconds(100))
+
+      // Finally change the sum to 11 - this SHOULD trigger onChange
+      model.count1 = 8
+      try? await Task.sleep(for: .milliseconds(100))
+
+      withExtendedLifetime(cancellable, {})
+    }
+
   }
 
 }
