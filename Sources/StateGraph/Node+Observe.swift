@@ -305,42 +305,42 @@ public func withGraphTrackingGroup(
 
 /**
  A protocol for filtering values in node observation.
- 
+
  Filters allow you to control which values trigger change notifications by implementing
  custom filtering logic. The filter's `send` method is called with each new value and
  can decide whether to pass it through or suppress the notification.
  */
 public protocol Filter<Value> {
-  
+
   associatedtype Value
-  
-  /// Processes a value and returns it (potentially modified).
+
+  /// Processes a value and returns it if it should be passed to the handler, or nil to suppress the notification.
   /// - Parameter value: The new value from the node
-  /// - Returns: The value to pass to the change handler (may be the same or modified)
-  mutating func send(value: Value) -> Value
+  /// - Returns: The value to pass to the change handler, or nil to suppress the notification
+  mutating func send(value: Value) -> Value?
 }
 
 /**
  A filter that passes through all values without any filtering.
- 
+
  This is the default filter used when no explicit filter is specified.
  Every value change will trigger the onChange handler.
  */
 public struct PassthroughFilter<Value>: Filter {
-  
-  public func send(value: Value) -> Value {
+
+  public func send(value: Value) -> Value? {
     return value
   }
-  
+
   public init() {}
 }
 
 /**
  A filter that only passes through values that are different from the previous value.
- 
+
  This filter uses equality comparison to suppress duplicate notifications,
  which is useful for avoiding unnecessary work when the actual value hasn't changed.
- 
+
  ```swift
  node.onChange(DistinctFilter<String>()) { value in
    // Only called when value actually changes
@@ -349,15 +349,15 @@ public struct PassthroughFilter<Value>: Filter {
  ```
  */
 public struct DistinctFilter<Value: Equatable>: Filter {
-  
+
   private var lastValue: Value?
-  
-  public mutating func send(value: Value) -> Value {
-    guard value != lastValue else { return value }
+
+  public mutating func send(value: Value) -> Value? {
+    guard value != lastValue else { return nil }
     lastValue = value
     return value
   }
-  
+
   public init() {}
 }
 
@@ -398,39 +398,47 @@ extension Node {
     _ handler: @escaping (Self.Value) -> Void,
     isolation: isolated (any Actor)? = #isolation
   ) {
-    
+
     guard Subscriptions.subscriptions != nil else {
       assertionFailure("You must call withGraphTracking before calling onChange.")
       return
     }
-    
+
     let _handler = UnsafeSendable(handler)
-        
+    var _filter = filter
+
     let isCancelled = OSAllocatedUnfairLock(initialState: false)
-    
+
     withContinuousStateGraphTracking(
       apply: { [weak self] in
         _ = self?.wrappedValue
       },
       didChange: { [weak self] in
         guard let self else { return .stop }
-        guard !isCancelled.withLock({ $0 }) else { return .stop }        
-        _handler._value(filter.send(value: self.wrappedValue))
+        guard !isCancelled.withLock({ $0 }) else { return .stop }
+        let filteredValue = _filter.send(value: self.wrappedValue)
+        if let filteredValue = filteredValue {
+          _handler._value(filteredValue)
+        }
         return .next
       },
       isolation: isolation
-    ) 
-                  
-    // init    
-    handler(filter.send(value: self.wrappedValue))
-    
+    )
+
+    // init
+    let initialFilteredValue = _filter.send(value: self.wrappedValue)
+
+    if let initialFilteredValue = initialFilteredValue {
+      handler(initialFilteredValue)
+    }
+
     let cancellabe = AnyCancellable {
       withExtendedLifetime(self) {}
-      isCancelled.withLock { $0 = true }     
+      isCancelled.withLock { $0 = true }
     }
-    
+
     Subscriptions.subscriptions!.append(cancellabe)
-          
+
   }
   
   /**
