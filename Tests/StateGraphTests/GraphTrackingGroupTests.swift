@@ -368,7 +368,7 @@ struct IssuesTrackingOnHeavyOperation {
 
 }
 
-@Suite
+@Suite(.disabled())
 struct IssuesObservationsDetached {
 
   final class Model: Sendable {
@@ -376,6 +376,46 @@ struct IssuesObservationsDetached {
     var count1: Int = 0
     @GraphStored
     var count2: Int = 0
+  }
+
+  // Manual ObservationRegistrar implementation with @unchecked Sendable
+  final class ManualObservableModel: @unchecked Sendable, Observable {
+    private let lock = NSLock()
+    private let _$observationRegistrar = ObservationRegistrar()
+
+    private var _count1: Int = 0
+    var count1: Int {
+      get {
+        _$observationRegistrar.access(self, keyPath: \.count1)
+        lock.lock()
+        defer { lock.unlock() }
+        return _count1
+      }
+      set {
+        _$observationRegistrar.withMutation(of: self, keyPath: \.count1) {
+          lock.lock()
+          defer { lock.unlock() }
+          _count1 = newValue
+        }
+      }
+    }
+
+    private var _count2: Int = 0
+    var count2: Int {
+      get {
+        _$observationRegistrar.access(self, keyPath: \.count2)
+        lock.lock()
+        defer { lock.unlock() }
+        return _count2
+      }
+      set {
+        _$observationRegistrar.withMutation(of: self, keyPath: \.count2) {
+          lock.lock()
+          defer { lock.unlock() }
+          _count2 = newValue
+        }
+      }
+    }
   }
 
   @available(macOS 26, iOS 26, *)

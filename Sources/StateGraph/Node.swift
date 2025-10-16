@@ -2,15 +2,18 @@ public protocol TypeErasedNode: Hashable, AnyObject, Sendable, CustomDebugString
   // var name: String? { get }
   var info: NodeInfo { get }
   var lock: NodeLock { get }
-  
+
   /// edges affecting nodes
   var outgoingEdges: ContiguousArray<Edge> { get set }
-  
+
   /// inverse edges that depending on nodes
   var incomingEdges: ContiguousArray<Edge> { get set }
-  
+
+  @_spi(Internal)
+  var trackingRegistrations: Set<TrackingRegistration> { get set }
+
   var potentiallyDirty: Bool { get set }
-  
+
   func recomputeIfNeeded()
 }
 
