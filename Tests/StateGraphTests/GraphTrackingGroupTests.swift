@@ -501,7 +501,7 @@ struct IssuesObservationsObservableObject {
           model.count2 = 2
         }
       }
-      try? await Task.sleep(for: .seconds(3))
+      try? await Task.sleep(for: .seconds(5))
     }
 
   }
