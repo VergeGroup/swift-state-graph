@@ -329,14 +329,18 @@ struct IssuesTrackingOnHeavyOperation {
         
         let _cancellable = withGraphTracking {
           withGraphTrackingGroup {
+            print("💥 In")
             #expect(Thread.isMainThread)
             if model.count2 == 2 {
+              print("✨ confirm")
               c.confirm()
             }
             
             if model.count1 == 1 {
+              print("😪 sleep")
               Thread.sleep(forTimeInterval: 2)
             }
+            print("💥 out")
             
           }
         }
@@ -346,7 +350,8 @@ struct IssuesTrackingOnHeavyOperation {
         }
       }
 
-      Task {
+      Task {        
+        try? await Task.sleep(for: .milliseconds(100))
         print("Update count1")
         model.count1 = 1
         Task {
@@ -354,13 +359,12 @@ struct IssuesTrackingOnHeavyOperation {
           print("Update count2")
           model.count2 = 2
         }
+
+        withExtendedLifetime(cancellable) {}
       }
 
-      try? await Task.sleep(for: .seconds(3))
-
+      try? await Task.sleep(for: .seconds(4))
       #expect(model.count2 == 2)
-
-      withExtendedLifetime(cancellable) {}
 
     }
 
