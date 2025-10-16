@@ -206,7 +206,7 @@ struct ContinuousTrackingTests {
 
     }
   }
-  
+
   @Test("tearing")
   func tearing() async throws {
 
@@ -233,7 +233,7 @@ struct ContinuousTrackingTests {
   }
 
   @MainActor
-  @Test("background")  
+  @Test("background")
   func background() async throws {
 
     let model = Model()
@@ -260,4 +260,250 @@ struct ContinuousTrackingTests {
     }
 
   }
+
+}
+
+@Suite
+struct IssuesTrackingOnHeavyOperation {
+
+  final class Model: Sendable {
+    @GraphStored
+    var count1: Int = 0
+    @GraphStored
+    var count2: Int = 0
+  }
+
+  @Test
+  func stuck() async {
+
+    let model = Model()
+
+    var cancellable: AnyCancellable?
+
+    await confirmation(expectedCount: 1) { c in
+
+      cancellable = withGraphTracking {
+        withGraphTrackingGroup {
+
+          if model.count2 == 2 {
+            c.confirm()
+          }
+
+          if model.count1 == 1 {
+            Thread.sleep(forTimeInterval: 2)
+          }
+
+        }
+      }
+      Task.detached {
+        print("Update count1")
+        model.count1 = 1
+        Task.detached {
+          try? await Task.sleep(for: .milliseconds(100))
+          print("Update count2")
+          model.count2 = 2
+        }
+      }
+
+      try? await Task.sleep(for: .seconds(3))
+
+      #expect(model.count2 == 2)
+    }
+
+    withExtendedLifetime(cancellable) {}
+
+  }
+
+  @Test
+  func stuckMain() async {
+
+    let model = Model()
+
+    await confirmation(expectedCount: 1) { c in
+
+      let cancellable: OSAllocatedUnfairLock<AnyCancellable?> = .init(
+        uncheckedState: nil
+      )
+
+      Task { @MainActor in
+        
+        let _cancellable = withGraphTracking {
+          withGraphTrackingGroup {
+            #expect(Thread.isMainThread)
+            if model.count2 == 2 {
+              c.confirm()
+            }
+            
+            if model.count1 == 1 {
+              Thread.sleep(forTimeInterval: 2)
+            }
+            
+          }
+        }
+        
+        cancellable.withLockUnchecked {
+          $0 = _cancellable
+        }
+      }
+
+      Task {
+        print("Update count1")
+        model.count1 = 1
+        Task {
+          try? await Task.sleep(for: .milliseconds(100))
+          print("Update count2")
+          model.count2 = 2
+        }
+      }
+
+      try? await Task.sleep(for: .seconds(3))
+
+      #expect(model.count2 == 2)
+
+      withExtendedLifetime(cancellable) {}
+
+    }
+
+  }
+
+}
+
+@Suite
+struct IssuesObservationsDetached {
+
+  final class Model: Sendable {
+    @GraphStored
+    var count1: Int = 0
+    @GraphStored
+    var count2: Int = 0
+  }
+
+  @available(macOS 26, iOS 26, *)
+  @Test("Observation")
+  func observation() async {
+    let model = Model()
+    await confirmation { c in
+      Task {
+        let s = Observations<Void, Never>.untilFinished {
+          if model.count2 == 2 {
+            print("Sleep", Thread.current)
+            return .finish
+          }
+          if model.count1 == 1 {
+            print("Sleep", Thread.current)
+            Thread.sleep(forTimeInterval: 2)
+            return .next(())
+          }
+          return .next(())
+        }
+        var eventCount: Int = 0
+        for await e in s {
+          eventCount += 1
+        }
+        c.confirm()
+      }
+
+      Task {
+        print("Update count1")
+        model.count1 = 1
+        Task {
+          try? await Task.sleep(for: .milliseconds(100))
+          print("Update count2")
+          model.count2 = 2
+        }
+      }
+      try? await Task.sleep(for: .seconds(3))
+    }
+
+  }
+
+  @available(macOS 26, iOS 26, *)
+  @Test("Observation")
+  @MainActor
+  func observationMainActor() async {
+    let model = Model()
+    await confirmation { c in
+      Task {
+        let s = Observations<Void, Never>.untilFinished {
+          if model.count2 == 2 {
+            return .finish
+          }
+          if model.count1 == 1 {
+            Thread.sleep(forTimeInterval: 2)
+            return .next(())
+          }
+          return .next(())
+        }
+        var eventCount: Int = 0
+        for await e in s {
+          eventCount += 1
+        }
+        c.confirm()
+      }
+
+      Task {
+        print("Update count1")
+        model.count1 = 1
+        Task {
+          try? await Task.sleep(for: .milliseconds(100))
+          print("Update count2")
+          model.count2 = 2
+        }
+      }
+      try? await Task.sleep(for: .seconds(3))
+    }
+
+  }
+}
+
+@Suite
+struct IssuesObservationsObservableObject {
+
+  // Requires Sendable for Observations then needs @MainActor
+  @MainActor
+  @Observable
+  final class ObservableModel: Sendable {
+    var count1: Int = 0
+    var count2: Int = 0
+  }
+
+  @available(macOS 26, iOS 26, *)
+  @Test("Observation")
+  @MainActor
+  func observation() async {
+    let model = ObservableModel()
+    await confirmation { c in
+      Task {
+        let s = Observations<Void, Never>.untilFinished {
+          print("Up")
+          if model.count2 == 2 {
+            return .finish
+          }
+          if model.count1 == 1 {
+            Thread.sleep(forTimeInterval: 2)
+            return .next(())
+          }
+          return .next(())
+        }
+        var eventCount: Int = 0
+        for await e in s {
+          eventCount += 1
+        }
+        c.confirm()
+      }
+
+      Task {
+        print("Update count1")
+        model.count1 = 1
+        Task {
+          try? await Task.sleep(for: .milliseconds(100))
+          print("Update count2")
+          model.count2 = 2
+        }
+      }
+      try? await Task.sleep(for: .seconds(3))
+    }
+
+  }
+
 }
