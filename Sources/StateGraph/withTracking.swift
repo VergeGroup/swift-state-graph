@@ -18,6 +18,7 @@ func withStateGraphTracking<R>(
       }
     )
   #else
+    /// Need this for now as https://github.com/VergeGroup/swift-state-graph/pull/79
     let registration = TrackingRegistration(didChange: didChange)
     return TrackingRegistration.$registration.withValue(registration) {
       apply()
