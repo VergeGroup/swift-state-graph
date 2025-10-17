@@ -216,13 +216,17 @@ struct Tests {
     await confirmation(expectedCount: 5) { c in
 
       let cancellable = withGraphTracking {
-        Computed { _ in
+        let computed = Computed { _ in
           model.count1 + model.count2
         }
-        .onChange { value in
+        withGraphTrackingMap {
+          computed.wrappedValue
+        } onChange: { value in
           c.confirm()
         }
-        model.$count1.onChange { value in
+        withGraphTrackingMap {
+          model.$count1.wrappedValue
+        } onChange: { value in
           c.confirm()
         }
       }
@@ -253,10 +257,12 @@ struct Tests {
     await confirmation(expectedCount: 2) { c in
 
       let cancellable = withGraphTracking {
-        Computed { _ in
+        let computed = Computed { _ in
           model.count1 + model.count2
         }
-        .onChange { value in
+        withGraphTrackingMap {
+          computed.wrappedValue
+        } onChange: { value in
           c.confirm()
         }
       }

@@ -588,18 +588,22 @@ class CounterViewController: UIViewController {
 
     // Reactive updates
     subscription = withGraphTracking {
-      viewModel.$count.onChange { value in
+      withGraphTrackingMap {
+        viewModel.count
+      } onChange: { [weak self] value in
         // Handle count changes if needed
       }
-      viewModel.$isEven.onChange { value in
+
+      withGraphTrackingMap {
+        viewModel.isEven
+      } onChange: { [weak self] value in
         // Handle isEven changes if needed
       }
 
       // Define what happens when changes occur
-      Computed { _ in
+      withGraphTrackingMap {
         (viewModel.count, viewModel.isEven)
-      }
-      .onChange { [weak self] _ in
+      } onChange: { [weak self] _ in
         self?.updateUI()
       }
     }
@@ -641,11 +645,10 @@ var availabilitySubscription: AnyCancellable?
 
 availabilitySubscription = withGraphTracking {
   // Computed node to determine if the product can be added to cart
-  Computed { _ in
+  withGraphTrackingMap {
     // This computation runs when `stockLevel` or `itemsInCart` changes.
     viewModel.stockLevel > viewModel.itemsInCart
-  }
-  .onChange { isAvailable in
+  } onChange: { isAvailable in
     // This block is called when the `isAvailable` value changes.
     if isAvailable {
       print("✅ Product is available to add to cart.")
@@ -655,12 +658,16 @@ availabilitySubscription = withGraphTracking {
   }
 
   // Observe changes in stock level directly
-  viewModel.$stockLevel.onChange { newStock in
+  withGraphTrackingMap {
+    viewModel.$stockLevel.wrappedValue
+  } onChange: { newStock in
     print("📦 Stock level updated: \(newStock)")
   }
 
   // Observe changes in items in cart directly
-  viewModel.$itemsInCart.onChange { items in
+  withGraphTrackingMap {
+    viewModel.$itemsInCart.wrappedValue
+  } onChange: { items in
     print("🛒 Items in cart updated: \(items)")
   }
 }
@@ -693,7 +700,9 @@ availabilitySubscription = withGraphTracking {
 1. **Non-UI State Reactions**:
    ```swift
    subscription = withGraphTracking {
-     model.$isLoggedIn.onChange { isLoggedIn in
+     withGraphTrackingMap {
+       model.$isLoggedIn.wrappedValue
+     } onChange: { isLoggedIn in
        if isLoggedIn {
          analyticsService.logEvent("user_login")
        }
@@ -704,10 +713,9 @@ availabilitySubscription = withGraphTracking {
 2. **Derived Calculations**:
    ```swift
    subscription = withGraphTracking {
-     Computed { _ in
+     withGraphTrackingMap {
        repository.items.filter { $0.isCompleted }.count
-     }
-     .onChange { completedCount in
+     } onChange: { completedCount in
        if completedCount == repository.items.count {
          notificationService.sendCompletionNotification()
        }
@@ -718,10 +726,9 @@ availabilitySubscription = withGraphTracking {
 3. **Multi-value Dependencies**:
    ```swift
    subscription = withGraphTracking {
-     Computed { _ in
+     withGraphTrackingMap {
        (authService.isAuthorized, networkMonitor.isConnected)
-     }
-     .onChange { (isAuthorized, isConnected) in
+     } onChange: { (isAuthorized, isConnected) in
        syncService.canSync = isAuthorized && isConnected
      }
    }
@@ -904,23 +911,29 @@ import StateGraph
 final class ViewController {
   private let viewModel = UserViewModel()
   private var subscription: AnyCancellable?
-  
+
   func setupObservation() {
     subscription = withGraphTracking {
-      viewModel.$name.onChange { [weak self] name in
+      withGraphTrackingMap {
+        viewModel.$name.wrappedValue
+      } onChange: { [weak self] name in
         self?.updateNameLabel(name)
       }
-      
-      viewModel.$email.onChange { [weak self] email in
+
+      withGraphTrackingMap {
+        viewModel.$email.wrappedValue
+      } onChange: { [weak self] email in
         self?.updateEmailField(email)
       }
-      
-      viewModel.$isValid.onChange { [weak self] isValid in
+
+      withGraphTrackingMap {
+        viewModel.$isValid.wrappedValue
+      } onChange: { [weak self] isValid in
         self?.updateSubmitButton(isValid)
       }
     }
   }
-  
+
   private func updateNameLabel(_ name: String) { /* Update name label */ }
   private func updateEmailField(_ email: String) { /* Update email field */ }
   private func updateSubmitButton(_ isValid: Bool) { /* Update submit button */ }
