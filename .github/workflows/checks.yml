@@ -7,23 +7,23 @@ on:
 
 jobs:
   package-test:
-    runs-on: macos-15
+    runs-on: macos-26
 
     steps:
       - uses: maxim-lobanov/setup-xcode@v1.1
         with:
-          xcode-version: "16.4"
+          xcode-version: "26.0"
       - uses: actions/checkout@v4
       - name: Run Test
         run: swift test
 
   build-development:
-    runs-on: macos-15
+    runs-on: macos-26
 
     steps:
       - uses: maxim-lobanov/setup-xcode@v1.1
         with:
-          xcode-version: "16.4"
+          xcode-version: "26.0"
       - uses: actions/checkout@v4
       - name: Build Development project
         run: |

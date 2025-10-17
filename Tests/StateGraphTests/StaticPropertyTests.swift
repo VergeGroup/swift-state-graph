@@ -32,7 +32,9 @@ struct StaticPropertyTests {
     
     await confirmation(expectedCount: 2) { c in
       let cancellable = withGraphTracking {
-        ModelWithStatic.$sharedValue.onChange { value in
+        withGraphTrackingMap {
+          ModelWithStatic.$sharedValue.wrappedValue
+        } onChange: { value in
           if value == 10 {
             c.confirm()
           } else if value == 42 {

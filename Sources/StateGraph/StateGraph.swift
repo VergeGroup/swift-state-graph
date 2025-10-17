@@ -232,13 +232,19 @@ public final class Computed<Value>: Node, Observable, CustomDebugStringConvertib
       
       guard _potentiallyDirty, _potentiallyDirty != oldValue else {
         lock.unlock()
-        return 
+        return
       }
-            
+
       let _outgoingEdges = outgoingEdges
+      let _trackingRegistrations = trackingRegistrations
+      trackingRegistrations.removeAll()
 
       lock.unlock()
 
+      // Notify observers when becoming potentially dirty, even if the computed value
+      // might not actually change. This is necessary for SwiftUI and other Observation
+      // consumers to know they should check for updates. The actual value equality
+      // is checked during recomputation to avoid unnecessary downstream propagation.
 #if canImport(Observation)
       if #available(macOS 14.0, iOS 17.0, watchOS 10.0, tvOS 17.0, *) {
         observationRegistrar.willSet(PointerKeyPathRoot.shared, keyPath: _keyPath(self))
@@ -247,6 +253,10 @@ public final class Computed<Value>: Node, Observable, CustomDebugStringConvertib
 
       for edge in _outgoingEdges {
         edge.to.potentiallyDirty = true
+      }
+
+      for registration in _trackingRegistrations {
+        registration.perform()
       }
             
     }
@@ -276,10 +286,12 @@ public final class Computed<Value>: Node, Observable, CustomDebugStringConvertib
 
   nonisolated(unsafe)
   public var incomingEdges: ContiguousArray<Edge> = []
-  
+
   nonisolated(unsafe)
   public var outgoingEdges: ContiguousArray<Edge> = []
-  
+
+  nonisolated(unsafe)
+  public var trackingRegistrations: Set<TrackingRegistration> = []
 
   /// Initializes a computed node.
   ///
@@ -396,6 +408,10 @@ public final class Computed<Value>: Node, Observable, CustomDebugStringConvertib
       outgoingEdges.append(edge)
       currentNode.incomingEdges.append(edge)
     }
+    // record tracking
+    if let registration = TrackingRegistration.registration {
+      self.trackingRegistrations.insert(registration)
+    }
 
     if !_potentiallyDirty && _cachedValue != nil { return }
 
@@ -412,7 +428,13 @@ public final class Computed<Value>: Node, Observable, CustomDebugStringConvertib
         removeIncomingEdges()
         var context = Context(environment: .init())
 
-        _cachedValue = descriptor.compute(context: &context)
+        /**
+        To prevent adding tracking registration to the incoming nodes.
+        Only register the registration to the current node.
+        */
+        _cachedValue = TrackingRegistration.$registration.withValue(nil) {
+          return descriptor.compute(context: &context)
+        }
 
         // propagate changes to dependent nodes
         do {

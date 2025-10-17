@@ -30,7 +30,9 @@ struct TopLevelPropertyTests {
     
     await confirmation(expectedCount: 1) { c in
       let cancellable = withGraphTracking {
-        $topLevelValue2.onChange { value in
+        withGraphTrackingMap {
+          $topLevelValue2.wrappedValue
+        } onChange: { value in
           if value == 999 {
             c.confirm()
           }

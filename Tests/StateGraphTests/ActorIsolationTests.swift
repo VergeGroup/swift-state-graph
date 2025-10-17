@@ -77,10 +77,12 @@ struct ActorIsolationTests {
   func onChangePreservesMainActorIsolation() async throws {
     let node = Stored(wrappedValue: 0)
     let tracker = ThreadTracker()
-    
+
     // Start onChange on MainActor
     let cancellable = withGraphTracking {
-      node.onChange { value in
+      withGraphTrackingMap {
+        node.wrappedValue
+      } onChange: { value in
         tracker.recordCall()
         print("=== onChange called, value: \(value), isMainThread: \(Thread.isMainThread) ===")
       }

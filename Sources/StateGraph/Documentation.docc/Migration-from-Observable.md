@@ -124,23 +124,29 @@ import StateGraph
 final class ViewController {
   private let viewModel = UserViewModel()
   private var subscription: AnyCancellable?
-  
+
   func setupObservation() {
     subscription = withGraphTracking {
-      viewModel.$name.onChange { [weak self] name in
+      withGraphTrackingMap {
+        viewModel.$name.wrappedValue
+      } onChange: { [weak self] name in
         self?.nameLabel.text = name
       }
-      
-      viewModel.$email.onChange { [weak self] email in
+
+      withGraphTrackingMap {
+        viewModel.$email.wrappedValue
+      } onChange: { [weak self] email in
         self?.emailLabel.text = email
       }
-      
-      viewModel.$isValid.onChange { [weak self] isValid in
+
+      withGraphTrackingMap {
+        viewModel.$isValid.wrappedValue
+      } onChange: { [weak self] isValid in
         self?.submitButton.isEnabled = isValid
       }
     }
   }
-  
+
   // No explicit cleanup needed - subscription handles it
 }
 ```
@@ -360,9 +366,13 @@ func updateCalculations() {
 // Before
 withObservationTracking { ... } onChange: { ... }
 
-// After  
-withGraphTracking { 
-  node.onChange { value in ... }
+// After
+withGraphTracking {
+  withGraphTrackingMap {
+    node.wrappedValue
+  } onChange: { value in
+    // Handle changes
+  }
 }
 ```
 
