@@ -301,6 +301,53 @@ public func withGraphTrackingGroup(
   
 }
 
+/**
+ Tracks graph nodes accessed during projection and calls onChange when filtered values change.
+
+ This function enables reactive processing where you project (compute) a derived value from
+ multiple nodes, and receive change notifications only for distinct values. It's similar to
+ `withGraphTrackingGroup`, but adds value projection and filtering capabilities.
+
+ ## Behavior
+ - Must be called within a `withGraphTracking` scope
+ - The `applier` closure is executed initially and re-executed whenever any accessed nodes change
+ - Only nodes accessed during `applier` execution are tracked
+ - The projected value is passed through a `DistinctFilter` (for `Equatable` types)
+ - `onChange` is only called when the filtered value passes through (i.e., when it's different)
+
+ ## Example: Computed Value Tracking
+ ```swift
+ let firstName = Stored(wrappedValue: "John")
+ let lastName = Stored(wrappedValue: "Doe")
+ let age = Stored(wrappedValue: 30)
+
+ withGraphTracking {
+   // Track full name changes, ignore age changes
+   withGraphTrackingMap {
+     "\(firstName.wrappedValue) \(lastName.wrappedValue)"
+   } onChange: { fullName in
+     print("Name changed to: \(fullName)")  // Only called when name actually changes
+   }
+ }
+
+ firstName.wrappedValue = "Jane"  // ✓ Triggers: "Jane Doe"
+ lastName.wrappedValue = "Smith"  // ✓ Triggers: "Jane Smith"
+ age.wrappedValue = 31            // ✗ Doesn't trigger (age not accessed in applier)
+ firstName.wrappedValue = "Jane"  // ✗ Doesn't trigger (same value, filtered by DistinctFilter)
+ ```
+
+ ## Use Cases
+ - Derived state tracking: Monitor computed values from multiple nodes
+ - UI state calculation: Compute view states from multiple data sources
+ - Performance optimization: Only update when computed values actually change
+ - Conditional dependencies: Dynamically track different nodes based on conditions
+
+ - Parameter applier: Closure that computes the projected value by accessing nodes
+ - Parameter onChange: Handler called with the filtered projected value
+ - Parameter isolation: Actor isolation context for execution
+
+ - Important: This variant automatically uses `DistinctFilter`, only triggering for distinct values
+ */
 public func withGraphTrackingMap<Projection>(
   _ applier: @escaping () -> Projection,
   onChange: @escaping (Projection) -> Void,
@@ -308,7 +355,72 @@ public func withGraphTrackingMap<Projection>(
 ) where Projection : Equatable {
   withGraphTrackingMap(applier, filter: DistinctFilter(), onChange: onChange)
 }
-  
+
+/**
+ Tracks graph nodes accessed during projection with custom filtering.
+
+ This is the fully customizable variant of `withGraphTrackingMap` that allows you to specify
+ a custom filter for controlling when `onChange` is triggered. This is useful when you need
+ filtering logic beyond simple equality comparison.
+
+ ## Custom Filter Example
+ ```swift
+ // Only notify on significant percentage changes
+ struct SignificantChangeFilter: Filter {
+   private var lastValue: Double?
+   private let threshold: Double = 0.1  // 10% change
+
+   mutating func send(value: Double) -> Double? {
+     guard let last = lastValue else {
+       lastValue = value
+       return value
+     }
+     let change = abs((value - last) / last)
+     if change >= threshold {
+       lastValue = value
+       return value
+     }
+     return nil
+   }
+ }
+
+ let progress = Stored(wrappedValue: 0.0)
+
+ withGraphTracking {
+   withGraphTrackingMap(
+     { progress.wrappedValue },
+     filter: SignificantChangeFilter()
+   ) { value in
+     print("Significant progress change: \(value)")
+   }
+ }
+
+ progress.wrappedValue = 0.05  // ✗ Not significant (< 10%)
+ progress.wrappedValue = 0.15  // ✓ Significant (>= 10%)
+ ```
+
+ ## Advanced Use Case: Debouncing
+ ```swift
+ struct DebounceFilter<Value>: Filter {
+   private var lastTime: Date?
+   private let interval: TimeInterval
+
+   mutating func send(value: Value) -> Value? {
+     let now = Date()
+     if let last = lastTime, now.timeIntervalSince(last) < interval {
+       return nil  // Suppress rapid changes
+     }
+     lastTime = now
+     return value
+   }
+ }
+ ```
+
+ - Parameter applier: Closure that computes the projected value by accessing nodes
+ - Parameter filter: Custom filter to control when onChange is triggered
+ - Parameter onChange: Handler called with the filtered projected value
+ - Parameter isolation: Actor isolation context for execution
+ */
 public func withGraphTrackingMap<Projection>(
   _ applier: @escaping () -> Projection,
   filter: consuming some Filter<Projection>,
