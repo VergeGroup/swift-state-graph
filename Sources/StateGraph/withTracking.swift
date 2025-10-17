@@ -44,7 +44,7 @@ func withContinuousStateGraphTracking<R>(
   let applyBox = UnsafeSendable(apply)
   let didChangeBox = UnsafeSendable(didChange)
 
-  let result = withStateGraphTracking(apply: apply) {
+  withStateGraphTracking(apply: apply) {
     let continuation = perform(didChangeBox._value, isolation: isolation)
     switch continuation {
     case .stop:
