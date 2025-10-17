@@ -47,11 +47,19 @@ public struct PassthroughFilter<Value>: Filter {
  - onChange handlers should only run when values *actually* changed
 
  ```swift
- node.onChange(DistinctFilter<String>()) { value in
-   // Only called when value actually changes
-   print("New value: \(value)")
+ withGraphTracking {
+   withGraphTrackingMap(
+     { node.wrappedValue },
+     filter: DistinctFilter<String>()
+   ) { value in
+     // Only called when value actually changes
+     print("New value: \(value)")
+   }
  }
  ```
+
+ Note: When using `withGraphTrackingMap` with `Equatable` types, `DistinctFilter`
+ is automatically applied, so you typically don't need to specify it explicitly.
  */
 public struct DistinctFilter<Value: Equatable>: Filter {
 

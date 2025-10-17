@@ -4,7 +4,7 @@
 // This file provides reactive observation capabilities for StateGraph nodes.
 // It includes:
 // - AsyncSequence-based observation with `observe()`
-// - Callback-based observation with `onChange()`  
+// - Projected value tracking with `withGraphTrackingMap()`
 // - Group tracking with `withGraphTrackingGroup()`
 // - Value filtering with custom Filter implementations
 //
@@ -14,14 +14,16 @@
 // ```swift
 // let node = Stored(wrappedValue: 0)
 //
-// // Method 1: Callback-based
+// // Method 1: Projected value tracking
 // let cancellable = withGraphTracking {
-//   node.onChange { value in
+//   withGraphTrackingMap {
+//     node.wrappedValue
+//   } onChange: { value in
 //     print("Changed to: \(value)")
 //   }
 // }
 //
-// // Method 2: AsyncSequence-based  
+// // Method 2: AsyncSequence-based
 // for try await value in node.observe() {
 //   print("Value: \(value)")
 // }
@@ -39,13 +41,14 @@
 //   }
 // }
 //
-// // Filtered observations
+// // Projected value tracking with custom filtering
 // withGraphTracking {
-//   // Only distinct values
-//   node.onChange { value in /* Equitable values only */ }
-//   
-//   // Custom filtering
-//   node.onChange(MyCustomFilter()) { value in /* filtered */ }
+//   withGraphTrackingMap(
+//     { node.wrappedValue },
+//     filter: MyCustomFilter()
+//   ) { value in
+//     print("Filtered value: \(value)")
+//   }
 // }
 // ```
 
@@ -159,37 +162,39 @@ extension AsyncStartWithSequence: Sendable where Base.Element: Sendable, Base: S
 
 /**
  Creates a tracking scope for observing node changes in the StateGraph.
- 
- This function establishes a reactive tracking context where you can subscribe to node changes
- using `onChange` methods or conditional tracking with `withGraphTrackingGroup`. All subscriptions
- created within this scope are automatically managed and cleaned up when the returned cancellable
- is cancelled or deallocated.
- 
+
+ This function establishes a reactive tracking context where you can use `withGraphTrackingMap`,
+ `withGraphTrackingGroup`, or other tracking functions. All subscriptions created within this
+ scope are automatically managed and cleaned up when the returned cancellable is cancelled or
+ deallocated.
+
  ## Basic Usage
  ```swift
  let node = Stored(wrappedValue: 0)
- 
+
  let cancellable = withGraphTracking {
-   node.onChange { value in
+   withGraphTrackingMap {
+     node.wrappedValue
+   } onChange: { value in
      print("Value changed to: \(value)")
    }
  }
- 
+
  // Later: cancel all subscriptions
  cancellable.cancel()
  ```
- 
+
  ## Multiple Subscriptions
  ```swift
  let cancellable = withGraphTracking {
-   node1.onChange { value in print("Node1: \(value)") }
-   node2.onChange { value in print("Node2: \(value)") }
-   node3.onChange { value in print("Node3: \(value)") }
+   withGraphTrackingMap { node1.wrappedValue } onChange: { print("Node1: \($0)") }
+   withGraphTrackingMap { node2.wrappedValue } onChange: { print("Node2: \($0)") }
+   withGraphTrackingMap { node3.wrappedValue } onChange: { print("Node3: \($0)") }
  }
  // All subscriptions are managed together
  ```
- 
- ## Group Tracking  
+
+ ## Group Tracking
  ```swift
  let cancellable = withGraphTracking {
    withGraphTrackingGroup {
@@ -200,12 +205,12 @@ extension AsyncStartWithSequence: Sendable where Base.Element: Sendable, Base: S
    }
  }
  ```
- 
+
  ## Memory Management
  - The returned `AnyCancellable` manages all subscriptions created within the scope
  - Subscriptions are automatically cancelled when the cancellable is deallocated
  - Use `cancellable.cancel()` for explicit cleanup
- 
+
  - Parameter scope: A closure where you set up your node observations
  - Returns: An `AnyCancellable` that manages all subscriptions created within the scope
  */
@@ -460,143 +465,6 @@ public func withGraphTrackingMap<Projection>(
   
 }
 
-extension Node {
-  
-  /**
-   Observes changes to this node's value with a custom filter.
-   
-   This method sets up a reactive subscription that calls the handler whenever the node's value
-   changes, after applying the specified filter. The subscription is automatically managed
-   within the current `withGraphTracking` scope.
-   
-   ## Filter Examples
-   ```swift
-   // Custom filter for significant changes only
-   struct ThresholdFilter: Filter {
-     let threshold: Double
-     mutating func send(value: Double) -> Double {
-       return abs(value) > threshold ? value : previousValue
-     }
-   }
-   
-   withGraphTracking {
-     temperatureNode.onChange(ThresholdFilter(threshold: 5.0)) { temp in
-       print("Significant temperature change: \(temp)")
-     }
-   }
-   ```
-   
-   - Parameter filter: A filter to process values before triggering the handler
-   - Parameter handler: Closure called when the filtered value changes
-   - Parameter isolation: Actor isolation context for the handler execution
-   
-   - Important: Must be called within a `withGraphTracking` scope
-   */
-  public func onChange(
-    _ filter: consuming some Filter<Self.Value>,
-    _ handler: @escaping (Self.Value) -> Void,
-    isolation: isolated (any Actor)? = #isolation
-  ) {
-
-    guard Subscriptions.subscriptions != nil else {
-      assertionFailure("You must call withGraphTracking before calling onChange.")
-      return
-    }
-
-    let _handler = UnsafeSendable(handler)
-    var _filter = filter
-
-    let isCancelled = OSAllocatedUnfairLock(initialState: false)
-
-    withContinuousStateGraphTracking(
-      apply: { [weak self] in
-        _ = self?.wrappedValue
-      },
-      didChange: { [weak self] in
-        guard let self else { return .stop }
-        guard !isCancelled.withLock({ $0 }) else { return .stop }
-        let filteredValue = _filter.send(value: self.wrappedValue)
-        if let filteredValue = filteredValue {
-          _handler._value(filteredValue)
-        }
-        return .next
-      },
-      isolation: isolation
-    )
-
-    // init
-    let initialFilteredValue = _filter.send(value: self.wrappedValue)
-
-    if let initialFilteredValue = initialFilteredValue {
-      handler(initialFilteredValue)
-    }
-
-    let cancellabe = AnyCancellable {
-      withExtendedLifetime(self) {}
-      isCancelled.withLock { $0 = true }
-    }
-
-    Subscriptions.subscriptions!.append(cancellabe)
-
-  }
-  
-  /**
-   Observes all changes to this node's value.
-   
-   This is the most common way to observe node changes. Every value update will trigger
-   the handler, regardless of whether the value is the same as the previous one.
-   
-   ```swift
-   withGraphTracking {
-     node.onChange { value in
-       print("Node value: \(value)")
-       updateUI(with: value)
-     }
-   }
-   ```
-   
-   - Parameter handler: Closure called whenever the node's value changes
-   - Parameter isolation: Actor isolation context for the handler execution
-   
-   - Important: Must be called within a `withGraphTracking` scope
-   */
-  public func onChange(
-    _ handler: @escaping (Self.Value) -> Void,
-    isolation: isolated (any Actor)? = #isolation
-  ) {    
-    onChange(PassthroughFilter<Self.Value>(), handler, isolation: isolation)
-  }
-  
-  /**
-   Observes changes to this node's value, but only when the value actually changes.
-   
-   This variant uses equality comparison to filter out duplicate notifications.
-   It's particularly useful for expensive operations that should only run when
-   the value is genuinely different.
-   
-   ```swift
-   withGraphTracking {
-     expensiveNode.onChange { value in
-       // Only called when value != previous value
-       performExpensiveOperation(with: value)
-     }
-   }
-   ```
-   
-   - Parameter handler: Closure called when the node's value changes to a different value
-   - Parameter isolation: Actor isolation context for the handler execution
-   
-   - Important: Must be called within a `withGraphTracking` scope
-   - Note: Available only for `Equatable` value types
-   */
-  public func onChange(
-    _ handler: @escaping (Self.Value) -> Void,
-    isolation: isolated (any Actor)? = #isolation
-  ) where Value : Equatable {
-    onChange(DistinctFilter<Self.Value>(), handler, isolation: isolation)
-  }
-  
-}
 
 // MARK: - Internals
 
