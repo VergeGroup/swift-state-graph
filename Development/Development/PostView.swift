@@ -285,7 +285,9 @@ final class PostListViewModel: ObservableObject {
     
     // isAutoAddEnabledの変化を監視し、start/stopを呼ぶ
     self.cancellable = withGraphTracking {
-      $isAutoAddEnabled.onChange { [weak self] value in
+      withGraphTrackingMap { [isAutoAddEnabled = $isAutoAddEnabled] in
+        isAutoAddEnabled.wrappedValue
+      } onChange: { [weak self] value in
         guard let self else { return }
         if value {
           self.mockServer.start()

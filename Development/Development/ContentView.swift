@@ -162,21 +162,23 @@ private struct Book_StateView: View {
       
       print("onAppear")
                 
-      subscription = withGraphTracking { 
-        
-        withGraphTrackingGroup { 
+      subscription = withGraphTracking {
+
+        withGraphTrackingGroup {
           print("☁️", model.count1, model.count2)
         }
-        
-        Computed { _ in
+
+        withGraphTrackingMap {
           model.count1 + model.count2
+        } onChange: { value in
+          print("computed", value)
         }
-        .onChange { value in
-          print("computed", value)          
-        }
-        model.$count1.onChange { value in
+
+        withGraphTrackingMap {
+          model.$count1.wrappedValue
+        } onChange: { value in
           print("count", value)
-        }       
+        }
       }
       
     }
