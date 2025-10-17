@@ -13,6 +13,7 @@
       "Bash(gh pr create:*)",
       "mcp__swiftlens__swift_search_pattern",
       "mcp__swiftlens__swift_get_symbols_overview",
+      "mcp__swiftlens__swift_analyze_files"
       "WebFetch(domain:github.com)",
       "WebFetch(domain:raw.githubusercontent.com)"
     ],

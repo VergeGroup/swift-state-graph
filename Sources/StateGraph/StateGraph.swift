@@ -20,7 +20,6 @@ import Foundation.NSLock
 public typealias Stored<Value> = _Stored<Value, InMemoryStorage<Value>>
 
 extension _Stored where S == InMemoryStorage<Value> {
-  /// 便利な初期化メソッド（wrappedValue指定）
   public convenience init(
     _ file: StaticString = #fileID,
     _ line: UInt = #line,
@@ -28,6 +27,24 @@ extension _Stored where S == InMemoryStorage<Value> {
     name: StaticString? = nil,
     wrappedValue: Value
   ) {
+    let storage = InMemoryStorage(initialValue: wrappedValue)
+    self.init(
+      file,
+      line,
+      column,
+      name: name,
+      storage: storage
+    )
+  }
+  
+  /// Equatable Filter Available
+  public convenience init(
+    _ file: StaticString = #fileID,
+    _ line: UInt = #line,
+    _ column: UInt = #column,
+    name: StaticString? = nil,
+    wrappedValue: Value
+  ) where Value : Equatable {
     let storage = InMemoryStorage(initialValue: wrappedValue)
     self.init(
       file,
