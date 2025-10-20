@@ -230,7 +230,9 @@ public final class Computed<Value>: Node, Observable, CustomDebugStringConvertib
       // is checked during recomputation to avoid unnecessary downstream propagation.
 #if canImport(Observation)
       if #available(macOS 14.0, iOS 17.0, watchOS 10.0, tvOS 17.0, *) {
-        observationRegistrar.willSet(PointerKeyPathRoot.shared, keyPath: _keyPath(self))
+        withMainActor { [observationRegistrar, keyPath = _keyPath(self)] in   
+          observationRegistrar.willSet(PointerKeyPathRoot.shared, keyPath: keyPath)
+        }
       }
 #endif
 
