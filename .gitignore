@@ -8,3 +8,4 @@ DerivedData/
 .netrc
 Derived
 *.xcodeproj
+settings.local.json
