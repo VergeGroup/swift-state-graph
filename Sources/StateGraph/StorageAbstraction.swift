@@ -186,12 +186,16 @@ public final class _Stored<Value, S: Storage<Value>>: Node, Observable, CustomDe
       
 #if canImport(Observation)
       if #available(macOS 14.0, iOS 17.0, watchOS 10.0, tvOS 17.0, *) { 
-        observationRegistrar.willSet(PointerKeyPathRoot.shared, keyPath: _keyPath(self))   
+        withMainActor { [observationRegistrar, keyPath = _keyPath(self)] in     
+          observationRegistrar.willSet(PointerKeyPathRoot.shared, keyPath: keyPath)   
+        }
       }
       
       defer {
         if #available(macOS 14.0, iOS 17.0, watchOS 10.0, tvOS 17.0, *) {
-          observationRegistrar.didSet(PointerKeyPathRoot.shared, keyPath: _keyPath(self))
+          withMainActor { [observationRegistrar, keyPath = _keyPath(self)] in     
+            observationRegistrar.didSet(PointerKeyPathRoot.shared, keyPath: keyPath)
+          }
         }
       }
 #endif
@@ -222,8 +226,10 @@ public final class _Stored<Value, S: Storage<Value>>: Node, Observable, CustomDe
     if #available(macOS 14.0, iOS 17.0, watchOS 10.0, tvOS 17.0, *) {
       // Workaround: SwiftUI will not trigger update if we call only didSet.
       // as here is where the value already updated.
-      observationRegistrar.willSet(PointerKeyPathRoot.shared, keyPath: _keyPath(self))   
-      observationRegistrar.didSet(PointerKeyPathRoot.shared, keyPath: _keyPath(self))   
+      withMainActor { [observationRegistrar, keyPath = _keyPath(self)] in   
+        observationRegistrar.willSet(PointerKeyPathRoot.shared, keyPath: keyPath)
+        observationRegistrar.didSet(PointerKeyPathRoot.shared, keyPath: keyPath)  
+      }
     }
 #endif
     

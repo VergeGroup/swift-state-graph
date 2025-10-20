@@ -296,6 +296,7 @@ struct SubscriptionTests {
 }
 
 @Suite
+@MainActor
 struct StateViewTests {
 
   final class Model: Sendable {
