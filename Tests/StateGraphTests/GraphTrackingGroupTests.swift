@@ -172,6 +172,315 @@ struct GraphTrackingGroupTests {
     print("Dynamic condition tracking verified successfully")
   }
 
+  @Test
+  @MainActor
+  func infiniteLoopWhenSettingSameValue() async throws {
+    let node = Stored(wrappedValue: 42)
+    let callCounter = CallCounter()
+    let maxIterations = 10
+
+    let cancellable = withGraphTracking {
+      withGraphTrackingGroup {
+        let currentCount = callCounter.count
+
+        // Safety guard: stop after maxIterations to prevent actual infinite loop during testing
+        guard currentCount < maxIterations else {
+          return
+        }
+
+        callCounter.increment()
+        print("=== Handler called, count: \(callCounter.count) ===")
+
+        // Read the current value
+        let value = node.wrappedValue
+
+        // Set the same value back - this should NOT trigger re-execution
+        // but currently causes an infinite loop (bug)
+        node.wrappedValue = value
+      }
+    }
+
+    // Wait a short time for any potential iterations
+    try await Task.sleep(nanoseconds: 100_000_000)  // 100ms
+
+    // Expected behavior: handler should only be called once (initial setup)
+    // Setting the same value should NOT trigger re-execution
+    print("\nFinal count: \(callCounter.count)")
+    print("Expected: 1 (initial call only)")
+    print("Actual: \(callCounter.count)")
+
+    if callCounter.count > 1 {
+      print("❌ INFINITE LOOP DETECTED: Handler was called \(callCounter.count) times")
+      print("This indicates that setting an unchanged value triggers re-execution")
+    }
+
+    // This expectation will FAIL with current implementation (infinite loop bug)
+    // It should PASS once the bug is fixed
+    #expect(callCounter.count == 1, "Setting unchanged value should not trigger re-execution, but handler was called \(callCounter.count) times indicating an infinite loop")
+
+    cancellable.cancel()
+  }
+
+  @Test
+  @MainActor
+  func infiniteLoopWithMultipleProperties() async throws {
+    let node1 = Stored(wrappedValue: 10)
+    let node2 = Stored(wrappedValue: 20)
+    let node3 = Stored(wrappedValue: 30)
+    let callCounter = CallCounter()
+    let maxIterations = 10
+
+    let cancellable = withGraphTracking {
+      withGraphTrackingGroup {
+        let currentCount = callCounter.count
+
+        // Safety guard: stop after maxIterations
+        guard currentCount < maxIterations else {
+          return
+        }
+
+        callCounter.increment()
+        print("=== Handler called (multiple props), count: \(callCounter.count) ===")
+
+        // Read all three node values
+        let value1 = node1.wrappedValue
+        let value2 = node2.wrappedValue
+        let value3 = node3.wrappedValue
+
+        // Set all three values back to the same values
+        // Without re-entry prevention, this would cause infinite loop
+        node1.wrappedValue = value1
+        node2.wrappedValue = value2
+        node3.wrappedValue = value3
+      }
+    }
+
+    try await Task.sleep(nanoseconds: 100_000_000)  // 100ms
+
+    print("\nMultiple properties test - Final count: \(callCounter.count)")
+    print("Expected: 1 (initial call only)")
+    print("Actual: \(callCounter.count)")
+
+    if callCounter.count > 1 {
+      print("❌ INFINITE LOOP with multiple properties")
+    }
+
+    #expect(callCounter.count == 1, "Setting multiple unchanged values should not trigger re-execution, but handler was called \(callCounter.count) times")
+
+    cancellable.cancel()
+  }
+
+  @Test
+  @MainActor
+  func mixedChangedAndUnchangedValues() async throws {
+    let node1 = Stored(wrappedValue: 10)
+    let node2 = Stored(wrappedValue: 20)
+    let callCounter = CallCounter()
+    let maxIterations = 10
+
+    let cancellable = withGraphTracking {
+      withGraphTrackingGroup {
+        let currentCount = callCounter.count
+
+        guard currentCount < maxIterations else {
+          return
+        }
+
+        callCounter.increment()
+        print("=== Handler called (mixed), count: \(callCounter.count) ===")
+
+        let value1 = node1.wrappedValue
+        let value2 = node2.wrappedValue
+
+        // Set node1 to same value (unchanged)
+        node1.wrappedValue = value1
+
+        // Set node2 to same value too
+        // Even if we changed it, the re-entry guard would prevent re-execution
+        // during the same handler execution context
+        node2.wrappedValue = value2
+      }
+    }
+
+    try await Task.sleep(nanoseconds: 100_000_000)  // 100ms
+
+    print("\nMixed values test - Final count: \(callCounter.count)")
+    print("Expected: 1 (initial call only)")
+    print("Actual: \(callCounter.count)")
+
+    // Re-entry guard prevents triggering the same handler during its execution
+    // Even if a value changes within the handler, it won't re-trigger itself
+    #expect(callCounter.count == 1, "Mixed scenario: handler was called \(callCounter.count) times, expected 1")
+
+    cancellable.cancel()
+  }
+
+  @Test
+  @MainActor
+  func conditionalPropertyAccess() async throws {
+    let toggleNode = Stored(wrappedValue: true)
+    let node1 = Stored(wrappedValue: 100)
+    let node2 = Stored(wrappedValue: 200)
+    let callCounter = CallCounter()
+    let maxIterations = 10
+
+    let cancellable = withGraphTracking {
+      withGraphTrackingGroup {
+        let currentCount = callCounter.count
+
+        guard currentCount < maxIterations else {
+          return
+        }
+
+        callCounter.increment()
+        print("=== Handler called (conditional), count: \(callCounter.count) ===")
+
+        let toggle = toggleNode.wrappedValue
+
+        if toggle {
+          let value1 = node1.wrappedValue
+          node1.wrappedValue = value1  // Set unchanged value
+        } else {
+          let value2 = node2.wrappedValue
+          node2.wrappedValue = value2  // Set unchanged value
+        }
+
+        // Don't modify toggle on first call to avoid changing the condition
+        if currentCount > 0 {
+          toggleNode.wrappedValue = toggle
+        }
+      }
+    }
+
+    try await Task.sleep(nanoseconds: 100_000_000)  // 100ms
+
+    print("\nConditional access test - Final count: \(callCounter.count)")
+    print("Expected: 1 (initial call only)")
+    print("Actual: \(callCounter.count)")
+
+    #expect(callCounter.count == 1, "Conditional property access with unchanged values: handler was called \(callCounter.count) times")
+
+    cancellable.cancel()
+  }
+
+  @Test
+  @MainActor
+  func nestedObjectProperties() async throws {
+    struct InnerState: Equatable {
+      var value: Int
+    }
+
+    let node = Stored(wrappedValue: InnerState(value: 42))
+    let callCounter = CallCounter()
+    let maxIterations = 10
+
+    let cancellable = withGraphTracking {
+      withGraphTrackingGroup {
+        let currentCount = callCounter.count
+
+        guard currentCount < maxIterations else {
+          return
+        }
+
+        callCounter.increment()
+        print("=== Handler called (nested), count: \(callCounter.count) ===")
+
+        // Read the struct
+        let state = node.wrappedValue
+
+        // Set it back (even though the struct is equal, no equality check in setter)
+        node.wrappedValue = state
+      }
+    }
+
+    try await Task.sleep(nanoseconds: 100_000_000)  // 100ms
+
+    print("\nNested object test - Final count: \(callCounter.count)")
+    print("Expected: 1 (initial call only)")
+    print("Actual: \(callCounter.count)")
+
+    #expect(callCounter.count == 1, "Nested object with unchanged value: handler was called \(callCounter.count) times")
+
+    cancellable.cancel()
+  }
+
+  @Test
+  @MainActor
+  func sequentialSameValueSets() async throws {
+    let node = Stored(wrappedValue: 50)
+    let callCounter = CallCounter()
+    let maxIterations = 10
+
+    let cancellable = withGraphTracking {
+      withGraphTrackingGroup {
+        let currentCount = callCounter.count
+
+        guard currentCount < maxIterations else {
+          return
+        }
+
+        callCounter.increment()
+        print("=== Handler called (sequential), count: \(callCounter.count) ===")
+
+        let value = node.wrappedValue
+
+        // Set the same value multiple times in sequence
+        node.wrappedValue = value
+        node.wrappedValue = value
+        node.wrappedValue = value
+      }
+    }
+
+    try await Task.sleep(nanoseconds: 100_000_000)  // 100ms
+
+    print("\nSequential sets test - Final count: \(callCounter.count)")
+    print("Expected: 1 (initial call only)")
+    print("Actual: \(callCounter.count)")
+
+    #expect(callCounter.count == 1, "Sequential same-value sets: handler was called \(callCounter.count) times")
+
+    cancellable.cancel()
+  }
+
+  @Test
+  @MainActor
+  func externalChangeStillTriggers() async throws {
+    let node = Stored(wrappedValue: 100)
+    let callCounter = CallCounter()
+
+    let cancellable = withGraphTracking {
+      withGraphTrackingGroup {
+        callCounter.increment()
+        print("=== Handler called (external), count: \(callCounter.count) ===")
+
+        // Just read the value, don't set it inside the handler
+        let value = node.wrappedValue
+        print("  Current value: \(value)")
+      }
+    }
+
+    try await Task.sleep(nanoseconds: 50_000_000)  // 50ms
+
+    print("\nAfter initial setup: \(callCounter.count)")
+    #expect(callCounter.count == 1)
+
+    // Now change the value OUTSIDE the handler
+    print("\nChanging value externally...")
+    node.wrappedValue = 200
+
+    try await Task.sleep(nanoseconds: 100_000_000)  // 100ms
+
+    print("After external change: \(callCounter.count)")
+    print("Expected: 2 (initial + external change)")
+    print("Actual: \(callCounter.count)")
+
+    // External changes should still trigger the handler
+    // Re-entry guard only prevents same handler from triggering itself
+    #expect(callCounter.count == 2, "External change should trigger handler: was called \(callCounter.count) times, expected 2")
+
+    cancellable.cancel()
+  }
+
 }
 
 @Suite
@@ -182,6 +491,12 @@ struct ContinuousTrackingTests {
     var count1: Int = 0
     @GraphStored
     var count2: Int = 0
+  }
+
+  @Observable
+  @MainActor
+  final class ObservableTestModel {
+    var value: Int = 42
   }
 
   @Test("Use observation api")
@@ -205,6 +520,62 @@ struct ContinuousTrackingTests {
       try? await Task.sleep(for: .milliseconds(100))
 
     }
+  }
+
+  @Test("Observation API - infinite loop check")
+  @MainActor
+  func observation_api_infiniteLoopCheck() async throws {
+    let model = ObservableTestModel()
+    let callCounter = GraphTrackingGroupTests.CallCounter()
+    let maxIterations = 10
+
+    nonisolated(unsafe) var trackingSetup: (() -> Void)?
+
+    let setupTracking: @MainActor () -> Void = {
+      let currentCount = callCounter.count
+
+      // Safety guard: stop after maxIterations
+      guard currentCount < maxIterations else { return }
+
+      callCounter.increment()
+      print("=== Observation handler called, count: \(callCounter.count) ===")
+
+      withObservationTracking {
+        // Read the current value
+        let value = model.value
+        print("  Read value: \(value)")
+
+        // Set the same value back - does this trigger infinite loop?
+        model.value = value
+        print("  Set same value: \(value)")
+      } onChange: {
+        print("  onChange triggered")
+        Task { @MainActor in
+          trackingSetup?()
+        }
+      }
+    }
+
+    trackingSetup = setupTracking
+
+    setupTracking()
+
+    // Wait to see if iterations occur
+    try await Task.sleep(nanoseconds: 100_000_000)  // 100ms
+
+    print("\n=== Observation API Test Results ===")
+    print("Final count: \(callCounter.count)")
+    print("Expected: 1 (initial call only)")
+    print("Actual: \(callCounter.count)")
+
+    if callCounter.count > 1 {
+      print("❌ INFINITE LOOP DETECTED in Observation API")
+    } else {
+      print("✅ Observation API does NOT have infinite loop issue")
+    }
+
+    // This test shows whether Apple's Observation framework has the same issue
+    #expect(callCounter.count == 1, "Observation API: Setting unchanged value should not trigger re-execution, but handler was called \(callCounter.count) times")
   }
 
   @Test("tearing")

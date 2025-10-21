@@ -215,11 +215,11 @@ extension AsyncStartWithSequence: Sendable where Base.Element: Sendable, Base: S
  - Returns: An `AnyCancellable` that manages all subscriptions created within the scope
  */
 public func withGraphTracking(_ scope: () -> Void) -> AnyCancellable {
-  
-  let subscriptions = Subscriptions.$subscriptions.withValue(.init()) {     
+
+  let subscriptions = ThreadLocal.subscriptions.withValue(.init()) {
     scope()
-    
-    return Subscriptions.subscriptions!
+
+    return ThreadLocal.subscriptions.value!
   }
   
   return AnyCancellable {
@@ -279,8 +279,8 @@ public func withGraphTrackingGroup(
   _ handler: @escaping () -> Void,
   isolation: isolated (any Actor)? = #isolation
 ) {
-  
-  guard Subscriptions.subscriptions != nil else {
+
+  guard ThreadLocal.subscriptions.value != nil else {
     assertionFailure("You must call withGraphTracking before calling this method.")
     return
   }
@@ -288,21 +288,21 @@ public func withGraphTrackingGroup(
   let isCancelled = OSAllocatedUnfairLock(initialState: false)
   
   withContinuousStateGraphTracking(
-    apply: { 
+    apply: {
       handler()
     },
     didChange: {
-      guard !isCancelled.withLock({ $0 }) else { return .stop }        
+      guard !isCancelled.withLock({ $0 }) else { return .stop }
       return .next
     },
     isolation: isolation
   )
-  
+
   let cancellabe = AnyCancellable {
-    isCancelled.withLock { $0 = true }     
+    isCancelled.withLock { $0 = true }
   }
-  
-  Subscriptions.subscriptions!.append(cancellabe)
+
+  ThreadLocal.subscriptions.value!.append(cancellabe)
   
 }
 
@@ -432,8 +432,8 @@ public func withGraphTrackingMap<Projection>(
   onChange: @escaping (Projection) -> Void,
   isolation: isolated (any Actor)? = #isolation
 ) {
- 
-  guard Subscriptions.subscriptions != nil else {
+
+  guard ThreadLocal.subscriptions.value != nil else {
     assertionFailure("You must call withGraphTracking before calling this method.")
     return
   }
@@ -458,11 +458,11 @@ public func withGraphTrackingMap<Projection>(
   )
   
   let cancellabe = AnyCancellable {
-    isCancelled.withLock { $0 = true }     
+    isCancelled.withLock { $0 = true }
   }
-  
-  Subscriptions.subscriptions!.append(cancellabe)
-  
+
+  ThreadLocal.subscriptions.value!.append(cancellabe)
+
 }
 
 
@@ -491,7 +491,5 @@ final class Subscriptions: Sendable, Hashable {
       $0.append(cancellable)
     }
   }
-  
-  @TaskLocal
-  static var subscriptions: Subscriptions? = nil
+
 }

@@ -168,15 +168,15 @@ public final class _Stored<Value, S: Storage<Value>>: Node, Observable, CustomDe
       
       lock.lock()
       defer { lock.unlock() }
-      
+
       // record dependency
-      if let currentNode = TaskLocals.currentNode {
+      if let currentNode = ThreadLocal.currentNode.value {
         let edge = Edge(from: self, to: currentNode)
         outgoingEdges.append(edge)
         currentNode.incomingEdges.append(edge)
       }
       // record tracking
-      if let registration = TrackingRegistration.registration {
+      if let registration = ThreadLocal.registration.value {
         self.trackingRegistrations.insert(registration)
       }
 
@@ -209,7 +209,7 @@ public final class _Stored<Value, S: Storage<Value>>: Node, Observable, CustomDe
       self.trackingRegistrations.removeAll()
 
       lock.unlock()
-
+          
       for registration in _trackingRegistrations {
         registration.perform()
       }
