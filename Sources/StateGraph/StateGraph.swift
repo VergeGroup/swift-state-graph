@@ -178,7 +178,7 @@ public final class Computed<Value>: Node, Observable, CustomDebugStringConvertib
      ```
      */
     public func withoutTracking<R>(_ block: () throws -> R) rethrows -> R{
-      try TaskLocals.$currentNode.withValue(nil) {
+      try ThreadLocal.currentNode.withValue(nil) {
         try block()
       }
     }
@@ -387,14 +387,14 @@ public final class Computed<Value>: Node, Observable, CustomDebugStringConvertib
     defer { lock.unlock() }
 
     // record dependency
-    if let currentNode = TaskLocals.currentNode {
+    if let currentNode = ThreadLocal.currentNode.value {
       let edge = Edge(from: self, to: currentNode)
       // TODO: consider removing duplicated edges
       outgoingEdges.append(edge)
       currentNode.incomingEdges.append(edge)
     }
     // record tracking
-    if let registration = TrackingRegistration.registration {
+    if let registration = ThreadLocal.registration.value {
       self.trackingRegistrations.insert(registration)
     }
 
@@ -408,7 +408,7 @@ public final class Computed<Value>: Node, Observable, CustomDebugStringConvertib
 
     if hasPendingIncomingEdge || _cachedValue == nil {
 
-      TaskLocals.$currentNode.withValue(self) { () -> Void in
+      ThreadLocal.currentNode.withValue(self) { () -> Void in
         let previousValue = _cachedValue
         removeIncomingEdges()
         var context = Context(environment: .init())
@@ -417,7 +417,7 @@ public final class Computed<Value>: Node, Observable, CustomDebugStringConvertib
         To prevent adding tracking registration to the incoming nodes.
         Only register the registration to the current node.
         */
-        _cachedValue = TrackingRegistration.$registration.withValue(nil) {
+        _cachedValue = ThreadLocal.registration.withValue(nil) {
           return descriptor.compute(context: &context)
         }
 

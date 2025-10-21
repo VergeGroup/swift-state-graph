@@ -20,7 +20,7 @@ func withStateGraphTracking<R>(
   #else
     /// Need this for now as https://github.com/VergeGroup/swift-state-graph/pull/79
     let registration = TrackingRegistration(didChange: didChange)
-    return TrackingRegistration.$registration.withValue(registration) {
+    return ThreadLocal.registration.withValue(registration) {
       apply()
     }
   #endif
@@ -115,9 +115,7 @@ public final class TrackingRegistration: Sendable, Hashable {
       guard state.isInvalidated == false else {
         return
       }
-
-      state.isInvalidated = true
-
+      
       // Re-entry Prevention Guard
       // ========================
       //
@@ -152,10 +150,12 @@ public final class TrackingRegistration: Sendable, Hashable {
       //   }
       //
       // This behavior is similar to Apple's Observation framework.
-      if TrackingRegistration.registration == self {
+      if ThreadLocal.registration.value == self {
         return
       }
-
+      
+      state.isInvalidated = true
+      
       let closure = state.didChange
       Task {
         await closure()
@@ -163,8 +163,6 @@ public final class TrackingRegistration: Sendable, Hashable {
     }
   }
 
-  @TaskLocal
-  static var registration: TrackingRegistration?
 }
 
 struct UnsafeSendable<V>: ~Copyable, @unchecked Sendable {
@@ -185,3 +183,4 @@ func perform<Return>(
 {
   closure()
 }
+
