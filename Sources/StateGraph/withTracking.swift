@@ -115,7 +115,47 @@ public final class TrackingRegistration: Sendable, Hashable {
       guard state.isInvalidated == false else {
         return
       }
+
       state.isInvalidated = true
+
+      // Re-entry Prevention Guard
+      // ========================
+      //
+      // Problem: Infinite loop when setting unchanged values within tracking handlers
+      //
+      // Scenario:
+      // 1. withGraphTrackingGroup { ... } establishes a tracking context
+      // 2. Inside the handler, we read a node's value (e.g., node.wrappedValue)
+      // 3. We set the same value back (e.g., node.wrappedValue = value)
+      // 4. The setter ALWAYS triggers tracking registrations (no equality check)
+      // 5. This calls perform() on the same registration that's currently executing
+      // 6. The handler runs again, repeating steps 2-5 infinitely
+      //
+      // Solution:
+      // Check if the registration trying to perform is the SAME as the one currently
+      // executing (stored in TaskLocal). If so, skip re-execution to break the cycle.
+      //
+      // How it works:
+      // - TrackingRegistration.registration is a @TaskLocal that holds the currently
+      //   executing registration during handler execution
+      // - If `self` (the registration being performed) matches the TaskLocal value,
+      //   we're attempting to re-enter the same handler
+      // - Return early to prevent the infinite loop
+      //
+      // Example:
+      //   let node = Stored(wrappedValue: 42)
+      //   withGraphTracking {
+      //     withGraphTrackingGroup {
+      //       let value = node.wrappedValue  // Establishes tracking
+      //       node.wrappedValue = value      // Without this guard, would loop infinitely
+      //     }
+      //   }
+      //
+      // This behavior is similar to Apple's Observation framework.
+      if TrackingRegistration.registration == self {
+        return
+      }
+
       let closure = state.didChange
       Task {
         await closure()

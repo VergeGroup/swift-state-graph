@@ -172,6 +172,55 @@ struct GraphTrackingGroupTests {
     print("Dynamic condition tracking verified successfully")
   }
 
+  @Test
+  @MainActor
+  func infiniteLoopWhenSettingSameValue() async throws {
+    let node = Stored(wrappedValue: 42)
+    let callCounter = CallCounter()
+    let maxIterations = 10
+
+    let cancellable = withGraphTracking {
+      withGraphTrackingGroup {
+        let currentCount = callCounter.count
+
+        // Safety guard: stop after maxIterations to prevent actual infinite loop during testing
+        guard currentCount < maxIterations else {
+          return
+        }
+
+        callCounter.increment()
+        print("=== Handler called, count: \(callCounter.count) ===")
+
+        // Read the current value
+        let value = node.wrappedValue
+
+        // Set the same value back - this should NOT trigger re-execution
+        // but currently causes an infinite loop (bug)
+        node.wrappedValue = value
+      }
+    }
+
+    // Wait a short time for any potential iterations
+    try await Task.sleep(nanoseconds: 100_000_000)  // 100ms
+
+    // Expected behavior: handler should only be called once (initial setup)
+    // Setting the same value should NOT trigger re-execution
+    print("\nFinal count: \(callCounter.count)")
+    print("Expected: 1 (initial call only)")
+    print("Actual: \(callCounter.count)")
+
+    if callCounter.count > 1 {
+      print("❌ INFINITE LOOP DETECTED: Handler was called \(callCounter.count) times")
+      print("This indicates that setting an unchanged value triggers re-execution")
+    }
+
+    // This expectation will FAIL with current implementation (infinite loop bug)
+    // It should PASS once the bug is fixed
+    #expect(callCounter.count == 1, "Setting unchanged value should not trigger re-execution, but handler was called \(callCounter.count) times indicating an infinite loop")
+
+    cancellable.cancel()
+  }
+
 }
 
 @Suite
@@ -182,6 +231,12 @@ struct ContinuousTrackingTests {
     var count1: Int = 0
     @GraphStored
     var count2: Int = 0
+  }
+
+  @Observable
+  @MainActor
+  final class ObservableTestModel {
+    var value: Int = 42
   }
 
   @Test("Use observation api")
@@ -205,6 +260,62 @@ struct ContinuousTrackingTests {
       try? await Task.sleep(for: .milliseconds(100))
 
     }
+  }
+
+  @Test("Observation API - infinite loop check")
+  @MainActor
+  func observation_api_infiniteLoopCheck() async throws {
+    let model = ObservableTestModel()
+    let callCounter = GraphTrackingGroupTests.CallCounter()
+    let maxIterations = 10
+
+    nonisolated(unsafe) var trackingSetup: (() -> Void)?
+
+    let setupTracking: @MainActor () -> Void = {
+      let currentCount = callCounter.count
+
+      // Safety guard: stop after maxIterations
+      guard currentCount < maxIterations else { return }
+
+      callCounter.increment()
+      print("=== Observation handler called, count: \(callCounter.count) ===")
+
+      withObservationTracking {
+        // Read the current value
+        let value = model.value
+        print("  Read value: \(value)")
+
+        // Set the same value back - does this trigger infinite loop?
+        model.value = value
+        print("  Set same value: \(value)")
+      } onChange: {
+        print("  onChange triggered")
+        Task { @MainActor in
+          trackingSetup?()
+        }
+      }
+    }
+
+    trackingSetup = setupTracking
+
+    setupTracking()
+
+    // Wait to see if iterations occur
+    try await Task.sleep(nanoseconds: 100_000_000)  // 100ms
+
+    print("\n=== Observation API Test Results ===")
+    print("Final count: \(callCounter.count)")
+    print("Expected: 1 (initial call only)")
+    print("Actual: \(callCounter.count)")
+
+    if callCounter.count > 1 {
+      print("❌ INFINITE LOOP DETECTED in Observation API")
+    } else {
+      print("✅ Observation API does NOT have infinite loop issue")
+    }
+
+    // This test shows whether Apple's Observation framework has the same issue
+    #expect(callCounter.count == 1, "Observation API: Setting unchanged value should not trigger re-execution, but handler was called \(callCounter.count) times")
   }
 
   @Test("tearing")

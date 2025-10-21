@@ -209,7 +209,7 @@ public final class _Stored<Value, S: Storage<Value>>: Node, Observable, CustomDe
       self.trackingRegistrations.removeAll()
 
       lock.unlock()
-
+          
       for registration in _trackingRegistrations {
         registration.perform()
       }
