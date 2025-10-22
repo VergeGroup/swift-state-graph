@@ -285,21 +285,21 @@ public func withGraphTrackingGroup(
     return
   }
         
-  let isCancelled = OSAllocatedUnfairLock(initialState: false)
+  let _handlerBox = OSAllocatedUnfairLock<(() -> Void)?>(uncheckedState: handler)
   
   withContinuousStateGraphTracking(
     apply: {
-      handler()
+      _handlerBox.withLock { $0?() }
     },
     didChange: {
-      guard !isCancelled.withLock({ $0 }) else { return .stop }
+      guard !_handlerBox.withLock({ $0 == nil }) else { return .stop }
       return .next
     },
     isolation: isolation
   )
 
   let cancellabe = AnyCancellable {
-    isCancelled.withLock { $0 = true }
+    _handlerBox.withLock { $0 = nil }
   }
 
   ThreadLocal.subscriptions.value!.append(cancellabe)
