@@ -437,34 +437,193 @@ public func withGraphTrackingMap<Projection>(
     assertionFailure("You must call withGraphTracking before calling this method.")
     return
   }
-  
-  let isCancelled = OSAllocatedUnfairLock(initialState: false)
-  
+
   var filter = filter
-    
+
+  typealias Handler = () -> Void
+  let _handlerBox = OSAllocatedUnfairLock<Handler?>(uncheckedState: {
+    let result = applier()
+    let filtered = filter.send(value: result)
+    if let filtered {
+      onChange(filtered)
+    }
+  })
+
   withContinuousStateGraphTracking(
-    apply: { 
-      let result = applier()
-      let filtered = filter.send(value: result)
-      if let filtered {
-        onChange(filtered)
-      }
+    apply: {
+      _handlerBox.withLock { $0?() }
     },
     didChange: {
-      guard !isCancelled.withLock({ $0 }) else { return .stop }        
+      guard !_handlerBox.withLock({ $0 == nil }) else { return .stop }
       return .next
     },
     isolation: isolation
   )
-  
+
   let cancellabe = AnyCancellable {
-    isCancelled.withLock { $0 = true }
+    _handlerBox.withLock { $0 = nil }
   }
 
   ThreadLocal.subscriptions.value!.append(cancellabe)
 
 }
 
+/**
+ Tracks graph nodes accessed during dependency projection with automatic distinct filtering.
+
+ This variant automatically uses `DistinctFilter` for Equatable projections, only triggering
+ onChange when the projected value actually changes.
+
+ ## Example
+ ```swift
+ class ViewModel {
+   let node = Stored(wrappedValue: 42)
+ }
+
+ let viewModel = ViewModel()
+
+ withGraphTracking {
+   withGraphTrackingMap(
+     from: viewModel,
+     map: { vm in vm.node.wrappedValue }
+   ) { value in
+     print("Value changed: \(value)")
+   }
+ }
+ ```
+
+ - Parameter from: The dependency object to observe (held weakly)
+ - Parameter map: Closure that projects a value from the dependency
+ - Parameter onChange: Handler called when the projected value changes
+ - Parameter isolation: Actor isolation context for execution
+
+ - Note: Tracking automatically stops when the dependency is deallocated
+ */
+public func withGraphTrackingMap<Dependency: AnyObject, Projection>(
+  from: Dependency,
+  map: @escaping (Dependency) -> Projection,
+  onChange: @escaping (Projection) -> Void,
+  isolation: isolated (any Actor)? = #isolation
+) where Projection: Equatable {
+  withGraphTrackingMap(
+    from: from,
+    map: map,
+    filter: DistinctFilter(),
+    onChange: onChange,
+    isolation: isolation
+  )
+}
+
+/**
+ Tracks graph nodes accessed during dependency projection with custom filtering.
+
+ This function enables reactive processing where you project (compute) a derived value from
+ nodes accessed through a dependency object. The dependency is held weakly, and tracking
+ automatically stops when the dependency is deallocated.
+
+ ## Behavior
+ - Must be called within a `withGraphTracking` scope
+ - The `map` closure is only executed when the dependency exists
+ - Only nodes accessed during `map` execution are tracked
+ - Tracking stops automatically when the dependency is deallocated
+ - The projected value is passed through the provided filter
+ - `onChange` is only called when the filtered value passes through
+
+ ## Example with Custom Filter
+ ```swift
+ struct ThresholdFilter: Filter {
+   private var lastValue: Int?
+   private let threshold: Int = 5
+
+   mutating func send(value: Int) -> Int? {
+     guard let last = lastValue else {
+       lastValue = value
+       return value
+     }
+     if abs(value - last) >= threshold {
+       lastValue = value
+       return value
+     }
+     return nil
+   }
+ }
+
+ class ViewModel {
+   let counter = Stored(wrappedValue: 0)
+ }
+
+ let viewModel = ViewModel()
+
+ withGraphTracking {
+   withGraphTrackingMap(
+     from: viewModel,
+     map: { vm in vm.counter.wrappedValue },
+     filter: ThresholdFilter()
+   ) { value in
+     print("Significant change: \(value)")
+   }
+ }
+ ```
+
+ - Parameter from: The dependency object to observe (held weakly)
+ - Parameter map: Closure that projects a value from the dependency
+ - Parameter filter: Custom filter to control when onChange is triggered
+ - Parameter onChange: Handler called with the filtered projected value
+ - Parameter isolation: Actor isolation context for execution
+
+ - Note: Tracking automatically stops when the dependency is deallocated
+ */
+public func withGraphTrackingMap<Dependency: AnyObject, Projection>(
+  from: Dependency,
+  map: @escaping (Dependency) -> Projection,
+  filter: consuming some Filter<Projection>,
+  onChange: @escaping (Projection) -> Void,
+  isolation: isolated (any Actor)? = #isolation
+) {
+
+  guard ThreadLocal.subscriptions.value != nil else {
+    assertionFailure("You must call withGraphTracking before calling this method.")
+    return
+  }
+
+  weak var weakDependency = from
+
+  var filter = filter
+
+  typealias Handler = () -> Void
+  let _handlerBox = OSAllocatedUnfairLock<Handler?>(uncheckedState: {
+    guard let dependency = weakDependency else {
+      return
+    }
+    let result = map(dependency)
+    let filtered = filter.send(value: result)
+    if let filtered {
+      onChange(filtered)
+    }
+  })
+
+  withContinuousStateGraphTracking(
+    apply: {
+      guard weakDependency != nil else {
+        _handlerBox.withLock { $0 = nil }
+        return
+      }
+      _handlerBox.withLock { $0?() }
+    },
+    didChange: {
+      guard !_handlerBox.withLock({ $0 == nil }) else { return .stop }
+      guard weakDependency != nil else { return .stop }
+      return .next
+    },
+    isolation: isolation
+  )
+
+  let cancellable = AnyCancellable {
+    _handlerBox.withLock { $0 = nil }
+  }
+
+  ThreadLocal.subscriptions.value!.append(cancellable)
+}
 
 // MARK: - Internals
 
