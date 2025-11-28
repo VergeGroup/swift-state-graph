@@ -545,7 +545,7 @@ struct StreamTests {
           _ = model.counter
         })
         
-        Task.detached {
+        await Task.detached {
           for await _ in stream {
             print(model.counter)
             #expect(model.counter == expectation.withLock { $0 })
@@ -555,6 +555,7 @@ struct StreamTests {
             }
           }
         }
+        .value        
         
       }
 
