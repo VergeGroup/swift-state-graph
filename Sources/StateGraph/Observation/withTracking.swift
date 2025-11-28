@@ -61,6 +61,73 @@ func withContinuousStateGraphTracking<R>(
   }
 }
 
+/// Creates an `AsyncStream` that emits projected values whenever tracked StateGraph nodes change.
+///
+/// This function provides a convenient way to observe StateGraph node changes using Swift's
+/// async/await concurrency model. The stream emits the current value immediately upon iteration,
+/// then emits new values whenever any accessed node changes.
+///
+/// ## Basic Usage
+/// ```swift
+/// let counter = Stored(wrappedValue: 0)
+///
+/// for await value in withStateGraphTrackingStream(apply: {
+///   counter.wrappedValue
+/// }) {
+///   print("Counter: \(value)")
+/// }
+/// ```
+///
+/// ## Important: Single-Consumer Stream
+///
+/// This function returns an `AsyncStream`, which is **single-consumer**.
+/// When multiple iterators consume the same stream, values are distributed between them
+/// in a racing manner rather than being duplicated to each iterator.
+///
+/// ```swift
+/// let stream = withStateGraphTrackingStream { model.counter }
+///
+/// // ⚠️ Values are NOT duplicated - they compete for values
+/// let taskA = Task { for await v in stream { print("A: \(v)") } }
+/// let taskB = Task { for await v in stream { print("B: \(v)") } }
+/// // Output might be: A: 0, B: 1, A: 2 (racing behavior)
+/// ```
+///
+/// ## Multi-Consumer Alternative
+///
+/// If you need multiple independent consumers that each receive all values,
+/// use ``GraphTrackings`` instead (available on iOS 18+):
+///
+/// ```swift
+/// // Each iterator gets its own independent stream of all values
+/// let trackings = GraphTrackings { model.counter }
+///
+/// let taskA = Task { for await v in trackings { print("A: \(v)") } }
+/// let taskB = Task { for await v in trackings { print("B: \(v)") } }
+/// // Output: A: 0, B: 0, A: 1, B: 1, A: 2, B: 2 (both receive all values)
+/// ```
+///
+/// ## Comparison Table
+///
+/// | Feature | `withStateGraphTrackingStream` | `GraphTrackings` |
+/// |---------|-------------------------------|------------------|
+/// | Return Type | `AsyncStream<T>` | `AsyncSequence` |
+/// | Consumer Model | Single-consumer | Multi-consumer |
+/// | Value Distribution | Racing (values split) | Duplicated (all receive) |
+/// | iOS Availability | iOS 13+ | iOS 18+ |
+///
+/// - Parameters:
+///   - apply: A closure that accesses StateGraph nodes and returns a projected value.
+///            This closure is called initially and whenever tracked nodes change.
+///   - isolation: The actor isolation context for the tracking. Defaults to the caller's isolation.
+///
+/// - Returns: An `AsyncStream` that emits the projected value from `apply` whenever tracked nodes change.
+///
+/// - Note: The stream automatically handles cancellation. When the consuming task is cancelled,
+///         the internal tracking stops.
+///
+/// - SeeAlso: ``GraphTrackings`` for multi-consumer scenarios
+/// - SeeAlso: ``withContinuousStateGraphTracking(_:didChange:isolation:)`` for callback-based tracking
 public func withStateGraphTrackingStream<T>(
   apply: @escaping () -> T,
   isolation: isolated (any Actor)? = #isolation
