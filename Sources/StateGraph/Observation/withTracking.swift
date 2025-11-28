@@ -61,25 +61,33 @@ func withContinuousStateGraphTracking<R>(
   }
 }
 
-func withStateGraphTrackingStream(
-  apply: @escaping () -> Void
-) -> AsyncStream<Void> {
-
-  AsyncStream<Void> { (continuation: AsyncStream<Void>.Continuation) in
-
+public func withStateGraphTrackingStream<T>(
+  apply: @escaping () -> T,
+  isolation: isolated (any Actor)? = #isolation
+) -> AsyncStream<T> {
+  
+  AsyncStream<T> { (continuation: AsyncStream<T>.Continuation) in
+    
     let isCancelled = OSAllocatedUnfairLock(initialState: false)
-
+    
     continuation.onTermination = { termination in
       isCancelled.withLock { $0 = true }
     }
+    
+    withContinuousStateGraphTracking(
+      apply: {
+        let value = apply()
+        continuation.yield(value)
+      },
+      didChange: {
+        if isCancelled.withLock({ $0 }) {
+          return .stop
+        }
+        return .next
+      },
+      isolation: isolation
+    )
 
-    withContinuousStateGraphTracking(apply: apply) {
-      continuation.yield()
-      if isCancelled.withLock({ $0 }) {
-        return .stop
-      }
-      return .next
-    }
   }
 }
 

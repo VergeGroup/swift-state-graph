@@ -372,41 +372,42 @@ struct StateGraphTrackingTests {
   }
 }
 
+
+final class NestedModel: Sendable {
+
+  @GraphStored
+  var counter: Int = 0
+
+  @GraphStored
+  var subModel: SubModel?
+
+  init() {
+    self.subModel = nil
+  }
+
+  func incrementCounter() {
+    counter += 1
+  }
+
+  func createSubModel() {
+    subModel = SubModel()
+  }
+}
+
+final class SubModel: Sendable {
+  @GraphStored
+  var value: String = "default"
+
+  init() {}
+
+  func updateValue(_ newValue: String) {
+    value = newValue
+  }
+}
+
 @Suite
 struct GraphViewAdvancedTests {
-
-  final class NestedModel: Sendable {
-
-    @GraphStored
-    var counter: Int = 0
-
-    @GraphStored
-    var subModel: SubModel?
-
-    init() {
-      self.subModel = nil
-    }
-
-    func incrementCounter() {
-      counter += 1
-    }
-
-    func createSubModel() {
-      subModel = SubModel()
-    }
-  }
-
-  final class SubModel: Sendable {
-    @GraphStored
-    var value: String = "default"
-
-    init() {}
-
-    func updateValue(_ newValue: String) {
-      value = newValue
-    }
-  }
-
+  
   @Test func nested_model_tracking() async {
     let model = NestedModel()
     model.createSubModel()
@@ -444,12 +445,56 @@ struct GraphViewAdvancedTests {
     }
   }
 
+}
+
+import Foundation
+
+@Suite
+struct StreamTests {
+    
+  @Test func projection_tracking() async {
+    let model = NestedModel()
+
+    await confirmation(expectedCount: 4) { c in
+      let receivedValues = OSAllocatedUnfairLock<[Int]>(initialState: [])
+
+      let task = Task {
+        // Test that withStateGraphTrackingStream now returns projected values directly
+        for await value in withStateGraphTrackingStream(apply: {
+          model.counter  // Returns Int directly
+        }) {
+          receivedValues.withLock { $0.append(value) }
+          c.confirm()
+          if value == 3 {
+            break
+          }
+        }
+      }
+
+      try! await Task.sleep(for: .milliseconds(100))
+
+      model.counter = 1
+      try! await Task.sleep(for: .milliseconds(100))
+
+      model.counter = 2
+      try! await Task.sleep(for: .milliseconds(100))
+
+      model.counter = 3
+      try! await Task.sleep(for: .milliseconds(100))
+
+      await task.value
+
+      // Verify we received the projected values: initial (0) + 3 changes
+      #expect(receivedValues.withLock { $0 } == [0, 1, 2, 3])
+    }
+  }  
+    
   @Test func continuous_tracking() async {
     let model = NestedModel()
 
-    await confirmation(expectedCount: 3) { c in
+    await confirmation(expectedCount: 4) { c in
 
-      let expectation = OSAllocatedUnfairLock<Int>(initialState: -1)
+      let expectation = OSAllocatedUnfairLock<Int>(initialState: 0)
 
       let task = Task {
         for await _ in withStateGraphTrackingStream(apply: {
@@ -485,5 +530,54 @@ struct GraphViewAdvancedTests {
     }
 
   }
-}
+  
+  @Test func continuous_tracking_main() async {
+    let model = NestedModel()
 
+    await confirmation(expectedCount: 4) { c in
+
+      let expectation = OSAllocatedUnfairLock<Int>(initialState: 0)
+
+      let task = Task { @MainActor in
+        
+        let stream = withStateGraphTrackingStream(apply: {
+          assert(Thread.isMainThread, "Because this stream has been created on MainActor.")
+          _ = model.counter
+        })
+        
+        Task.detached {
+          for await _ in stream {
+            print(model.counter)
+            #expect(model.counter == expectation.withLock { $0 })
+            c.confirm()
+            if model.counter == 3 {
+              break
+            }
+          }
+        }
+        
+      }
+
+      try! await Task.sleep(for: .milliseconds(100))
+
+      // Trigger updates
+      expectation.withLock { $0 = 1 }
+      model.counter = expectation.withLock { $0 }
+
+      try! await Task.sleep(for: .milliseconds(100))
+
+      expectation.withLock { $0 = 2 }
+      model.counter =  expectation.withLock { $0 }
+      try! await Task.sleep(for: .milliseconds(100))
+
+      expectation.withLock { $0 = 3 }
+      model.counter =  expectation.withLock { $0 }
+
+      try! await Task.sleep(for: .milliseconds(100))
+
+      await task.value
+    }
+
+  }
+
+}
