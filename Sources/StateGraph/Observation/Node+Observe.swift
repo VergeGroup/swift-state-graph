@@ -93,17 +93,8 @@ extension Node {
    - Note: The sequence starts with the current value, then emits subsequent changes
    - Note: The sequence continues indefinitely until cancelled or the node is deallocated
    */
-  public func observe() -> AsyncStartWithSequence<AsyncMapSequence<AsyncStream<Void>, Self.Value>> {
-    
-    let stream = withStateGraphTrackingStream {
-      _ = self.wrappedValue
-    }
-      .map { 
-        self.wrappedValue
-      }
-      .startWith(self.wrappedValue)
-    
-    return stream
+  public func observe() -> AsyncStream<Self.Value> {
+    withStateGraphTrackingStream { self.wrappedValue }
   }
   
 }
