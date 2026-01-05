@@ -8,3 +8,4 @@ DerivedData/
 .netrc
 Derived
 settings.local.json
+swift-state-graph.xcodeproj
