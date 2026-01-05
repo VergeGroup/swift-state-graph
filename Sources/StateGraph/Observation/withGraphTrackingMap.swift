@@ -133,18 +133,19 @@ public func withGraphTrackingMap<Projection>(
 
   var filter = filter
 
-  typealias Handler = () -> Void
-  let _handlerBox = OSAllocatedUnfairLock<Handler?>(uncheckedState: {
-    let result = applier()
-    let filtered = filter.send(value: result)
-    if let filtered {
-      onChange(filtered)
-    }
-  })
+  let _handlerBox = OSAllocatedUnfairLock<ClosureBox?>(
+    uncheckedState: .init(handler: {
+      let result = applier()
+      let filtered = filter.send(value: result)
+      if let filtered {
+        onChange(filtered)
+      }
+    })
+  )
 
   withContinuousStateGraphTracking(
     apply: {
-      _handlerBox.withLock { $0?() }
+      _handlerBox.withLock { $0?.handler() }
     },
     didChange: {
       guard !_handlerBox.withLock({ $0 == nil }) else { return .stop }
@@ -283,17 +284,18 @@ public func withGraphTrackingMap<Dependency: AnyObject, Projection>(
 
   var filter = filter
 
-  typealias Handler = () -> Void
-  let _handlerBox = OSAllocatedUnfairLock<Handler?>(uncheckedState: {
-    guard let dependency = weakDependency else {
-      return
-    }
-    let result = map(dependency)
-    let filtered = filter.send(value: result)
-    if let filtered {
-      onChange(filtered)
-    }
-  })
+  let _handlerBox = OSAllocatedUnfairLock<ClosureBox?>(
+    uncheckedState: .init(handler: {
+      guard let dependency = weakDependency else {
+        return
+      }
+      let result = map(dependency)
+      let filtered = filter.send(value: result)
+      if let filtered {
+        onChange(filtered)
+      }
+    })
+  )
 
   withContinuousStateGraphTracking(
     apply: {
@@ -301,7 +303,7 @@ public func withGraphTrackingMap<Dependency: AnyObject, Projection>(
         _handlerBox.withLock { $0 = nil }
         return
       }
-      _handlerBox.withLock { $0?() }
+      _handlerBox.withLock { $0?.handler() }
     },
     didChange: {
       guard !_handlerBox.withLock({ $0 == nil }) else { return .stop }
@@ -316,4 +318,12 @@ public func withGraphTrackingMap<Dependency: AnyObject, Projection>(
   }
 
   ThreadLocal.subscriptions.value!.append(cancellable)
+}
+
+private struct ClosureBox {
+  let handler: () -> Void
+
+  init(handler: @escaping () -> Void) {
+    self.handler = handler
+  }
 }
