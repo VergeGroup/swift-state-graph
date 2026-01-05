@@ -56,11 +56,15 @@ public func withGraphTrackingGroup(
    return
  }
        
- let _handlerBox = OSAllocatedUnfairLock<(() -> Void)?>(uncheckedState: handler)
+  let _handlerBox = OSAllocatedUnfairLock<ClosureBox?>(
+    uncheckedState: .init(handler: handler)
+  )
  
  withContinuousStateGraphTracking(
    apply: {
-     _handlerBox.withLock { $0?() }
+     _handlerBox.withLock {
+       $0?.handler()
+     }
    },
    didChange: {
      guard !_handlerBox.withLock({ $0 == nil }) else { return .stop }
@@ -75,4 +79,12 @@ public func withGraphTrackingGroup(
 
  ThreadLocal.subscriptions.value!.append(cancellabe)
  
+}
+
+private struct ClosureBox {
+  let handler: () -> Void
+  
+  init(handler: @escaping () -> Void) {
+    self.handler = handler
+  }
 }
