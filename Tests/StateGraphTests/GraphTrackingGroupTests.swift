@@ -481,6 +481,164 @@ struct GraphTrackingGroupTests {
     cancellable.cancel()
   }
 
+  // MARK: - onTrace Tests
+
+  @Test
+  func onTraceReceivesAllAccessedNodes() async throws {
+    let node1 = Stored(wrappedValue: 10)
+    let node2 = Stored(wrappedValue: 20)
+    let node3 = Stored(wrappedValue: 30)
+
+    var tracedNodes: [any TypeErasedNode] = []
+
+    let cancellable = withGraphTracking {
+      withGraphTrackingGroup({
+        _ = node1.wrappedValue
+        _ = node2.wrappedValue
+        // node3 はアクセスしない
+      }, onTrace: { nodes in
+        tracedNodes = nodes
+      })
+    }
+
+    #expect(tracedNodes.count == 2)
+    #expect(tracedNodes[0] === node1)
+    #expect(tracedNodes[1] === node2)
+
+    cancellable.cancel()
+  }
+
+  @Test
+  func onTraceIncludesDuplicateAccesses() async throws {
+    let node = Stored(wrappedValue: 10)
+
+    var tracedNodes: [any TypeErasedNode] = []
+
+    let cancellable = withGraphTracking {
+      withGraphTrackingGroup({
+        _ = node.wrappedValue
+        _ = node.wrappedValue  // 同じノードを2回アクセス
+      }, onTrace: { nodes in
+        tracedNodes = nodes
+      })
+    }
+
+    // 同じノードでも2回アクセスしたら2つ含まれる
+    #expect(tracedNodes.count == 2)
+
+    cancellable.cancel()
+  }
+
+  @Test
+  func onTraceIsOptional() async throws {
+    let node = Stored(wrappedValue: 10)
+
+    // onTrace なしでも動作する（既存の動作を壊さない）
+    let cancellable = withGraphTracking {
+      withGraphTrackingGroup {
+        _ = node.wrappedValue
+      }
+    }
+
+    // エラーなく実行できればOK
+    cancellable.cancel()
+  }
+
+  @Test
+  func onTraceCalledOnReExecution() async throws {
+    let trigger = Stored(wrappedValue: 0)
+
+    var traceCallCount = 0
+    var lastTracedNodes: [any TypeErasedNode] = []
+
+    let cancellable = withGraphTracking {
+      withGraphTrackingGroup({
+        _ = trigger.wrappedValue
+      }, onTrace: { nodes in
+        traceCallCount += 1
+        lastTracedNodes = nodes
+      })
+    }
+
+    #expect(traceCallCount == 1)
+    #expect(lastTracedNodes.count == 1)
+
+    // triggerを更新するとhandlerが再実行され、onTraceも再度呼ばれる
+    trigger.wrappedValue = 1
+
+    try await Task.sleep(nanoseconds: 100_000_000)  // 100ms
+
+    // 再実行後
+    #expect(traceCallCount == 2)
+    #expect(lastTracedNodes.count == 1)
+
+    cancellable.cancel()
+  }
+
+  @Test
+  func onTraceWithConditionalAccess() async throws {
+    let condition = Stored(wrappedValue: false)
+    let nodeA = Stored(wrappedValue: 10)
+    let nodeB = Stored(wrappedValue: 20)
+
+    var tracedNodes: [any TypeErasedNode] = []
+
+    let cancellable = withGraphTracking {
+      withGraphTrackingGroup({
+        // conditionを1回だけ読み取って変数に保存
+        let cond = condition.wrappedValue
+        if cond {
+          _ = nodeA.wrappedValue
+        } else {
+          _ = nodeB.wrappedValue
+        }
+      }, onTrace: { nodes in
+        tracedNodes = nodes
+      })
+    }
+
+    // condition=false なので condition と nodeB がトレースされる
+    #expect(tracedNodes.count == 2)
+    #expect(tracedNodes.contains(where: { $0 === condition }))
+    #expect(tracedNodes.contains(where: { $0 === nodeB }))
+    #expect(!tracedNodes.contains(where: { $0 === nodeA }))
+
+    // conditionをtrueに変更
+    condition.wrappedValue = true
+
+    try await Task.sleep(nanoseconds: 100_000_000)  // 100ms
+
+    // 再実行後は condition と nodeA がトレースされる
+    #expect(tracedNodes.count == 2)
+    #expect(tracedNodes.contains(where: { $0 === condition }))
+    #expect(tracedNodes.contains(where: { $0 === nodeA }))
+    #expect(!tracedNodes.contains(where: { $0 === nodeB }))
+
+    cancellable.cancel()
+  }
+
+  @Test
+  func onTraceWithComputedNode() async throws {
+    let stored = Stored(wrappedValue: 10)
+    let computed = Computed { stored.wrappedValue * 2 }
+
+    var tracedNodes: [any TypeErasedNode] = []
+
+    let cancellable = withGraphTracking {
+      withGraphTrackingGroup({
+        _ = computed.wrappedValue
+      }, onTrace: { nodes in
+        tracedNodes = nodes
+      })
+    }
+
+    // computed ノードがトレースされる
+    #expect(tracedNodes.count == 1)
+    #expect(tracedNodes[0] === computed)
+
+    cancellable.cancel()
+  }
+
 }
 
 @Suite
