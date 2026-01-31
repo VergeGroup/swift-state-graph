@@ -133,19 +133,21 @@ public final class UserDefaultsStorage<Value: UserDefaultsStorable>: Storage, Se
 // MARK: - Base Stored Node
 
 public final class _Stored<Value, S: Storage<Value>>: Node, Observable, CustomDebugStringConvertible {
-  
+
   public let lock: NodeLock
-  
+
   nonisolated(unsafe)
   private var storage: S
-  
+
+  private let shouldNotify: @Sendable (Value, Value) -> Bool
+
 #if canImport(Observation)
   @available(macOS 14.0, iOS 17.0, watchOS 10.0, tvOS 17.0, *)
   private var observationRegistrar: ObservationRegistrar {
     return .shared
   }
 #endif
-  
+
   public var potentiallyDirty: Bool {
     get {
       return false
@@ -154,18 +156,18 @@ public final class _Stored<Value, S: Storage<Value>>: Node, Observable, CustomDe
       fatalError()
     }
   }
-  
+
   public let info: NodeInfo
-  
+
   public var wrappedValue: Value {
     get {
-      
+
 #if canImport(Observation)
       if #available(macOS 14.0, iOS 17.0, watchOS 10.0, tvOS 17.0, *) {
-        observationRegistrar.access(PointerKeyPathRoot.shared, keyPath: _keyPath(self))        
+        observationRegistrar.access(PointerKeyPathRoot.shared, keyPath: _keyPath(self))
       }
 #endif
-      
+
       lock.lock()
       defer { lock.unlock() }
 
@@ -183,24 +185,32 @@ public final class _Stored<Value, S: Storage<Value>>: Node, Observable, CustomDe
       return storage.value
     }
     set {
-      
+      lock.lock()
+
+      let oldValue = storage.value
+
+      // Skip notification if value hasn't changed (like Observation.framework)
+      guard shouldNotify(oldValue, newValue) else {
+        storage.value = newValue
+        lock.unlock()
+        return
+      }
+
 #if canImport(Observation)
-      if #available(macOS 14.0, iOS 17.0, watchOS 10.0, tvOS 17.0, *) { 
-        withMainActor { [observationRegistrar, keyPath = _keyPath(self)] in     
-          observationRegistrar.willSet(PointerKeyPathRoot.shared, keyPath: keyPath)   
+      if #available(macOS 14.0, iOS 17.0, watchOS 10.0, tvOS 17.0, *) {
+        withMainActor { [observationRegistrar, keyPath = _keyPath(self)] in
+          observationRegistrar.willSet(PointerKeyPathRoot.shared, keyPath: keyPath)
         }
       }
-      
+
       defer {
         if #available(macOS 14.0, iOS 17.0, watchOS 10.0, tvOS 17.0, *) {
-          withMainActor { [observationRegistrar, keyPath = _keyPath(self)] in     
+          withMainActor { [observationRegistrar, keyPath = _keyPath(self)] in
             observationRegistrar.didSet(PointerKeyPathRoot.shared, keyPath: keyPath)
           }
         }
       }
 #endif
-      
-      lock.lock()
 
       storage.value = newValue
 
@@ -209,7 +219,7 @@ public final class _Stored<Value, S: Storage<Value>>: Node, Observable, CustomDe
       self.trackingRegistrations.removeAll()
 
       lock.unlock()
-          
+
       for registration in _trackingRegistrations {
         registration.perform()
       }
@@ -271,7 +281,8 @@ public final class _Stored<Value, S: Storage<Value>>: Node, Observable, CustomDe
     _ line: UInt = #line,
     _ column: UInt = #column,
     name: StaticString? = nil,
-    storage: consuming S
+    storage: consuming S,
+    shouldNotify: @Sendable @escaping (Value, Value) -> Bool = { _, _ in true }
   ) {
     self.info = .init(
       name: name,
@@ -279,11 +290,12 @@ public final class _Stored<Value, S: Storage<Value>>: Node, Observable, CustomDe
     )
     self.lock = .init()
     self.storage = storage
-           
-    self.storage.loaded(context: .init(onStorageUpdated: { [weak self] in      
-      self?.notifyStorageUpdated()      
+    self.shouldNotify = shouldNotify
+
+    self.storage.loaded(context: .init(onStorageUpdated: { [weak self] in
+      self?.notifyStorageUpdated()
     }))
-    
+
 #if DEBUG
     Task {
       await NodeStore.shared.register(node: self)
@@ -324,5 +336,59 @@ public final class _Stored<Value, S: Storage<Value>>: Node, Observable, CustomDe
     let result = try body(&storage.value)
     return result
   }
-  
+
+}
+
+// MARK: - Equatable convenience initializer
+
+extension _Stored where Value: Equatable {
+
+  /// Convenience initializer for Equatable types that automatically skips
+  /// notifications when the value hasn't changed.
+  public convenience init(
+    _ file: StaticString = #fileID,
+    _ line: UInt = #line,
+    _ column: UInt = #column,
+    name: StaticString? = nil,
+    storage: consuming S
+  ) {
+    self.init(file, line, column, name: name, storage: storage, shouldNotify: { $0 != $1 })
+  }
+
+}
+
+// MARK: - AnyObject convenience initializer (for non-Equatable reference types)
+
+extension _Stored where Value: AnyObject {
+
+  /// Convenience initializer for reference types that automatically skips
+  /// notifications when the reference identity hasn't changed.
+  public convenience init(
+    _ file: StaticString = #fileID,
+    _ line: UInt = #line,
+    _ column: UInt = #column,
+    name: StaticString? = nil,
+    storage: consuming S
+  ) {
+    self.init(file, line, column, name: name, storage: storage, shouldNotify: { $0 !== $1 })
+  }
+
+}
+
+// MARK: - Equatable & AnyObject convenience initializer (resolve ambiguity)
+
+extension _Stored where Value: Equatable & AnyObject {
+
+  /// Convenience initializer for Equatable reference types.
+  /// Uses value equality (Equatable) rather than reference identity.
+  public convenience init(
+    _ file: StaticString = #fileID,
+    _ line: UInt = #line,
+    _ column: UInt = #column,
+    name: StaticString? = nil,
+    storage: consuming S
+  ) {
+    self.init(file, line, column, name: name, storage: storage, shouldNotify: { $0 != $1 })
+  }
+
 } 
