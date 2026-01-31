@@ -179,6 +179,10 @@ public final class _Stored<Value, S: Storage<Value>>: Node, Observable, CustomDe
       if let registration = ThreadLocal.registration.value {
         self.trackingRegistrations.insert(registration)
       }
+      // record trace
+      if let collector = ThreadLocal.traceCollector.value {
+        collector.append(self)
+      }
 
       return storage.value
     }

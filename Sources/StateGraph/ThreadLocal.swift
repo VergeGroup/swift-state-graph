@@ -39,5 +39,6 @@ enum ThreadLocal: Sendable {
   static let registration: ThreadLocalValue<TrackingRegistration> = .init(key: "org.vergegroup.state-graph.registration")
   static let subscriptions: ThreadLocalValue<Subscriptions> = .init(key: "org.vergegroup.state-graph.subscriptions")
   static let currentNode: ThreadLocalValue<any TypeErasedNode> = .init(key: "org.vergegroup.state-graph.currentNode")
+  static let traceCollector: ThreadLocalValue<NodeTraceCollector> = .init(key: "org.vergegroup.state-graph.traceCollector")
 
 }

@@ -397,6 +397,10 @@ public final class Computed<Value>: Node, Observable, CustomDebugStringConvertib
     if let registration = ThreadLocal.registration.value {
       self.trackingRegistrations.insert(registration)
     }
+    // record trace
+    if let collector = ThreadLocal.traceCollector.value {
+      collector.append(self)
+    }
 
     if !_potentiallyDirty && _cachedValue != nil { return }
 
