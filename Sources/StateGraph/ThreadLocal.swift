@@ -41,3 +41,10 @@ enum ThreadLocal: Sendable {
   static let currentNode: ThreadLocalValue<any TypeErasedNode> = .init(key: "org.vergegroup.state-graph.currentNode")
 
 }
+
+/// Context for tracking which node triggered a change.
+/// Uses TaskLocal to propagate the changing node through Task boundaries.
+public enum ChangingNodeContext {
+  @TaskLocal
+  public static var current: (any TypeErasedNode)?
+}

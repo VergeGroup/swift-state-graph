@@ -6,6 +6,145 @@ import Testing
 @Suite("GraphTrackingGroup Tests")
 struct GraphTrackingGroupTests {
 
+  @Test
+  @MainActor
+  func multipleSimultaneousChanges() async throws {
+    let node1 = Stored(name: "node1", wrappedValue: 10)
+    let node2 = Stored(name: "node2", wrappedValue: 20)
+    let node3 = Stored(name: "node3", wrappedValue: 30)
+
+    var capturedNodeNames: [String] = []
+    var callCount = 0
+
+    let cancellable = withGraphTracking {
+      withGraphTrackingGroup {
+        callCount += 1
+
+        if let info = currentChangingNodeInfo() {
+          let name = info.name.map(String.init) ?? "unknown"
+          capturedNodeNames.append(name)
+          print("[\(callCount)] Change triggered by: \(name)")
+        } else {
+          print("[\(callCount)] Initial run")
+        }
+
+        _ = node1.wrappedValue
+        _ = node2.wrappedValue
+        _ = node3.wrappedValue
+      }
+    }
+
+    try await Task.sleep(nanoseconds: 50_000_000)
+    #expect(callCount == 1)
+    print("--- Now changing node1, node2, node3 simultaneously ---")
+
+    // 同時に3つ変更
+    node1.wrappedValue = 100
+    node2.wrappedValue = 200
+    node3.wrappedValue = 300
+
+    try await Task.sleep(nanoseconds: 100_000_000)
+
+    print("Call count: \(callCount)")
+    print("Captured nodes: \(capturedNodeNames)")
+
+    // 結果を確認: 最初の1つだけが捕捉されるはず
+    #expect(callCount == 2, "Should only trigger once due to invalidation")
+    #expect(capturedNodeNames.count == 1, "Only first change should be captured")
+    #expect(capturedNodeNames.first == "node1", "First changed node should be captured")
+
+    cancellable.cancel()
+  }
+
+  @Test
+  @MainActor
+  func currentChangingNodeTracking() async throws {
+    let node1 = Stored(name: "node1", wrappedValue: 10)
+    let node2 = Stored(name: "node2", wrappedValue: 20)
+
+    var capturedNodeName: String?
+    var callCount = 0
+
+    let cancellable = withGraphTracking {
+      withGraphTrackingGroup {
+        callCount += 1
+
+        // On initial run, no change triggered, so should be nil
+        // On subsequent runs, should have the node that triggered the change
+        if let info = currentChangingNodeInfo() {
+          capturedNodeName = info.name.map(String.init)
+          print("Change triggered by: \(capturedNodeName ?? "unknown")")
+        } else {
+          print("Initial run (no change triggered)")
+        }
+
+        _ = node1.wrappedValue
+        _ = node2.wrappedValue
+      }
+    }
+
+    // Initial run - no change source
+    try await Task.sleep(nanoseconds: 50_000_000)
+    #expect(callCount == 1)
+    #expect(capturedNodeName == nil, "Initial run should have no changing node")
+
+    // Change node1 - should capture node1 as the source
+    node1.wrappedValue = 100
+    try await Task.sleep(nanoseconds: 100_000_000)
+    #expect(callCount == 2)
+    #expect(capturedNodeName == "node1", "Should capture node1 as change source")
+
+    // Change node2 - should capture node2 as the source
+    capturedNodeName = nil
+    node2.wrappedValue = 200
+    try await Task.sleep(nanoseconds: 100_000_000)
+    #expect(callCount == 3)
+    #expect(capturedNodeName == "node2", "Should capture node2 as change source")
+
+    cancellable.cancel()
+  }
+
+  @Test
+  @MainActor
+  func currentChangingNodeWithComputed() async throws {
+    let stored = Stored(name: "stored", wrappedValue: 10)
+    let computed = Computed(name: "computed") { _ in
+      stored.wrappedValue * 2
+    }
+
+    var capturedNodeName: String?
+    var callCount = 0
+
+    let cancellable = withGraphTracking {
+      withGraphTrackingGroup {
+        callCount += 1
+
+        if let info = currentChangingNodeInfo() {
+          capturedNodeName = info.name.map(String.init)
+          print("Change triggered by: \(capturedNodeName ?? "unknown")")
+        } else {
+          print("Initial run")
+        }
+
+        _ = computed.wrappedValue
+      }
+    }
+
+    try await Task.sleep(nanoseconds: 50_000_000)
+    #expect(callCount == 1)
+    #expect(capturedNodeName == nil)
+
+    // Change stored node - computed becomes dirty and triggers callback
+    // The changing node should be the computed (as it's what we're tracking)
+    stored.wrappedValue = 20
+    try await Task.sleep(nanoseconds: 100_000_000)
+    #expect(callCount == 2)
+    // The computed node triggers the callback when it becomes potentially dirty
+    #expect(capturedNodeName == "computed", "Should capture computed as change source")
+
+    cancellable.cancel()
+  }
+
   final class CallCounter: @unchecked Sendable {
     private let lock = NSLock()
     private var _count = 0
