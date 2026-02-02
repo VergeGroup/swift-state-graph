@@ -536,45 +536,46 @@ struct StreamTests {
 
     await confirmation(expectedCount: 4) { c in
 
-      let expectation = OSAllocatedUnfairLock<Int>(initialState: 0)
+      let (valueStream, valueContinuation) = AsyncStream<Int>.makeStream()
 
       let task = Task { @MainActor in
-        
-        let stream = withStateGraphTrackingStream(apply: {
+
+        let stream: AsyncStream<Int> = withStateGraphTrackingStream(apply: {
           assert(Thread.isMainThread, "Because this stream has been created on MainActor.")
-          _ = model.counter
+          return model.counter
         })
-        
+
         await Task.detached {
-          for await _ in stream {
-            print(model.counter)
-            #expect(model.counter == expectation.withLock { $0 })
+          for await value in stream {
+            valueContinuation.yield(value)
             c.confirm()
-            if model.counter == 3 {
+            if value == 3 {
               break
             }
           }
-        }
-        .value        
-        
+          valueContinuation.finish()
+        }.value
+
       }
 
-      try! await Task.sleep(for: .milliseconds(100))
+      var iterator = valueStream.makeAsyncIterator()
 
-      // Trigger updates
-      expectation.withLock { $0 = 1 }
-      model.counter = expectation.withLock { $0 }
+      // Wait for initial value - confirms stream consumer is ready
+      let v0 = await iterator.next()
+      #expect(v0 == 0)
 
-      try! await Task.sleep(for: .milliseconds(100))
+      // Trigger updates, waiting for each to be received
+      model.counter = 1
+      let v1 = await iterator.next()
+      #expect(v1 == 1)
 
-      expectation.withLock { $0 = 2 }
-      model.counter =  expectation.withLock { $0 }
-      try! await Task.sleep(for: .milliseconds(100))
+      model.counter = 2
+      let v2 = await iterator.next()
+      #expect(v2 == 2)
 
-      expectation.withLock { $0 = 3 }
-      model.counter =  expectation.withLock { $0 }
-
-      try! await Task.sleep(for: .milliseconds(100))
+      model.counter = 3
+      let v3 = await iterator.next()
+      #expect(v3 == 3)
 
       await task.value
     }
