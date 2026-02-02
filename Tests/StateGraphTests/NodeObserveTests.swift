@@ -145,5 +145,79 @@ struct NodeObserveTests {
     task1.cancel()
     task2.cancel()
   }
- 
+
+}
+
+@Suite("Stored.onDidSet()")
+struct StoredDidSetTests {
+
+  @Test("didSet is called on value change")
+  func testDidSetCalledOnValueChange() {
+    let node = Stored(wrappedValue: 0)
+    var captured: (Int, Int)?
+
+    node.onDidSet { old, new in
+      captured = (old, new)
+    }
+
+    node.wrappedValue = 42
+
+    #expect(captured?.0 == 0)
+    #expect(captured?.1 == 42)
+  }
+
+  @Test("didSet is called for multiple changes")
+  func testDidSetMultipleChanges() {
+    let node = Stored(wrappedValue: "initial")
+    var history: [(String, String)] = []
+
+    node.onDidSet { old, new in
+      history.append((old, new))
+    }
+
+    node.wrappedValue = "second"
+    node.wrappedValue = "third"
+
+    #expect(history.count == 2)
+    #expect(history[0].0 == "initial")
+    #expect(history[0].1 == "second")
+    #expect(history[1].0 == "second")
+    #expect(history[1].1 == "third")
+  }
+
+  @Test("didSet is called even when value is the same")
+  func testDidSetCalledForSameValue() {
+    let node = Stored(wrappedValue: 10)
+    var callCount = 0
+
+    node.onDidSet { _, _ in
+      callCount += 1
+    }
+
+    node.wrappedValue = 10
+    node.wrappedValue = 10
+
+    #expect(callCount == 2)
+  }
+
+  @Test("didSet handler can be replaced")
+  func testDidSetHandlerReplacement() {
+    let node = Stored(wrappedValue: 0)
+    var firstHandlerCalled = false
+    var secondHandlerCalled = false
+
+    node.onDidSet { _, _ in
+      firstHandlerCalled = true
+    }
+
+    node.onDidSet { _, _ in
+      secondHandlerCalled = true
+    }
+
+    node.wrappedValue = 1
+
+    #expect(firstHandlerCalled == false)
+    #expect(secondHandlerCalled == true)
+  }
+
 } 
