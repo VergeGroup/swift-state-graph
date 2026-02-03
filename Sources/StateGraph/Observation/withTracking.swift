@@ -32,6 +32,49 @@ public enum StateGraphTrackingContinuation: Sendable {
   case next
 }
 
+// MARK: - Internal Types
+
+struct UnsafeSendable<V>: ~Copyable, @unchecked Sendable {
+
+  let _value: V
+
+  init(_ value: consuming V) {
+    _value = value
+  }
+
+}
+
+/// A box that wraps a closure to prevent thunk stack growing during recursive calls.
+/// By wrapping closures in this struct and passing the struct instead of the raw closure,
+/// we avoid the overhead of repeatedly wrapping/unwrapping closure types.
+struct ClosureBox<R> {
+  let closure: () -> R
+
+  init(_ closure: @escaping () -> R) {
+    self.closure = closure
+  }
+
+  func callAsFunction() -> R {
+    closure()
+  }
+}
+
+func perform<Return>(
+  _ closure: () -> Return,
+  isolation: isolated (any Actor)? = #isolation
+) -> Return {
+  closure()
+}
+
+func perform<Return>(
+  _ box: ClosureBox<Return>,
+  isolation: isolated (any Actor)? = #isolation
+) -> Return {
+  box()
+}
+
+// MARK: - Continuous Tracking
+
 /// Tracks access to the properties of StoredNode or Computed.
 /// Continuously tracks until `didChange` returns `.stop`.
 /// It does not provides update of the properties granurarly. some frequency of updates may be aggregated into single event.
@@ -40,21 +83,37 @@ func withContinuousStateGraphTracking<R>(
   didChange: @escaping () -> StateGraphTrackingContinuation,
   isolation: isolated (any Actor)? = #isolation
 ) {
+  // Wrap closures in ClosureBox to prevent thunk stack growing during recursive calls.
+  // The boxes are created once here and passed through all recursive iterations.
+  let applyBox = ClosureBox(apply)
+  let didChangeBox = ClosureBox(didChange)
+  _withContinuousStateGraphTracking(
+    apply: applyBox,
+    didChange: didChangeBox,
+    isolation: isolation
+  )
+}
 
-  let applyBox = UnsafeSendable(apply)
-  let didChangeBox = UnsafeSendable(didChange)
-
-  withStateGraphTracking(apply: apply) {
-    let continuation = perform(didChangeBox._value, isolation: isolation)
+/// Private implementation that receives pre-wrapped closures to prevent thunk stack growing.
+/// By passing ClosureBox<...> directly in recursive calls, we avoid
+/// the cost of re-wrapping/unwrapping closure types on each iteration.
+private func _withContinuousStateGraphTracking<R>(
+  apply: ClosureBox<R>,
+  didChange: ClosureBox<StateGraphTrackingContinuation>,
+  isolation: isolated (any Actor)? = #isolation
+) {
+  withStateGraphTracking(apply: apply.closure) {
+    let continuation = perform(didChange, isolation: isolation)
     switch continuation {
     case .stop:
       break
     case .next:
       // continue tracking on next event loop.
       // It uses isolation and task dispatching to ensure apply closure is called on the same actor.
-      withContinuousStateGraphTracking(
-        apply: applyBox._value,
-        didChange: didChangeBox._value,
+      // Pass the already-wrapped closures directly to avoid thunk stack growing.
+      _withContinuousStateGraphTracking(
+        apply: apply,
+        didChange: didChange,
         isolation: isolation
       )
     }
@@ -239,23 +298,3 @@ public final class TrackingRegistration: Sendable, Hashable {
   }
 
 }
-
-struct UnsafeSendable<V>: ~Copyable, @unchecked Sendable {
-
-  let _value: V
-
-  init(_ value: consuming V) {
-    _value = value
-  }
-
-}
-
-func perform<Return>(
-  _ closure: () -> Return,
-  isolation: isolated (any Actor)? = #isolation
-)
-  -> Return
-{
-  closure()
-}
-

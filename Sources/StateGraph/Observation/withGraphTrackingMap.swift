@@ -137,8 +137,8 @@ public func withGraphTrackingMap<Projection>(
 
   var filter = filter
 
-  let _handlerBox = OSAllocatedUnfairLock<ClosureBox?>(
-    uncheckedState: .init(handler: {
+  let _handlerBox = OSAllocatedUnfairLock<ClosureBox<Void>?>(
+    uncheckedState: ClosureBox({
       let result = applier()
       let filtered = filter.send(value: result)
       if let filtered {
@@ -160,7 +160,7 @@ public func withGraphTrackingMap<Projection>(
       // Set this scope's cancellable as the current parent for nested tracking
       // Nested groups/maps will register with this parent via addChild()
       ThreadLocal.currentCancellable.withValue(scopeCancellable) {
-        _handlerBox.withLock { $0?.handler() }
+        _handlerBox.withLock { $0?() }
       }
     },
     didChange: {
@@ -305,8 +305,8 @@ public func withGraphTrackingMap<Dependency: AnyObject, Projection>(
 
   var filter = filter
 
-  let _handlerBox = OSAllocatedUnfairLock<ClosureBox?>(
-    uncheckedState: .init(handler: {
+  let _handlerBox = OSAllocatedUnfairLock<ClosureBox<Void>?>(
+    uncheckedState: ClosureBox({
       guard let dependency = weakDependency else {
         return
       }
@@ -335,7 +335,7 @@ public func withGraphTrackingMap<Dependency: AnyObject, Projection>(
       // Set this scope's cancellable as the current parent for nested tracking
       // Nested groups/maps will register with this parent via addChild()
       ThreadLocal.currentCancellable.withValue(scopeCancellable) {
-        _handlerBox.withLock { $0?.handler() }
+        _handlerBox.withLock { $0?() }
       }
     },
     didChange: {
@@ -351,13 +351,5 @@ public func withGraphTrackingMap<Dependency: AnyObject, Projection>(
     parent.addChild(scopeCancellable)
   } else {
     subscriptions!.append(AnyCancellable(scopeCancellable))
-  }
-}
-
-private struct ClosureBox {
-  let handler: () -> Void
-
-  init(handler: @escaping () -> Void) {
-    self.handler = handler
   }
 }
