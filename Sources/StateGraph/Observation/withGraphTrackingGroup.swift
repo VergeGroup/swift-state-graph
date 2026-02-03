@@ -95,8 +95,8 @@ public func withGraphTrackingGroup(
     return
   }
 
-  let _handlerBox = OSAllocatedUnfairLock<ClosureBox?>(
-    uncheckedState: .init(handler: handler)
+  let _handlerBox = OSAllocatedUnfairLock<ClosureBox<Void>?>(
+    uncheckedState: ClosureBox(handler)
   )
 
   // Create a cancellable for this scope that manages nested tracking
@@ -113,7 +113,7 @@ public func withGraphTrackingGroup(
       // Nested groups/maps will register with this parent via addChild()
       ThreadLocal.currentCancellable.withValue(scopeCancellable) {
         _handlerBox.withLock {
-          $0?.handler()
+          $0?()
         }
       }
     },
@@ -131,12 +131,4 @@ public func withGraphTrackingGroup(
     subscriptions!.append(AnyCancellable(scopeCancellable))
   }
 
-}
-
-private struct ClosureBox {
-  let handler: () -> Void
-  
-  init(handler: @escaping () -> Void) {
-    self.handler = handler
-  }
 }
