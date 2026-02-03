@@ -791,7 +791,7 @@ let subscription = withGraphTracking {
 
 **Use Cases:**
 - Feature flag-based conditional logic
-- User permission-dependent operations  
+- User permission-dependent operations
 - Dynamic UI updates based on complex state combinations
 - Performance-sensitive reactive processing where you want to avoid tracking expensive computations when not needed
 
@@ -799,6 +799,68 @@ let subscription = withGraphTracking {
 - Always call within a `withGraphTracking` block (will assert in debug mode if not)
 - The handler should be side-effect focused rather than returning values (use `Computed` for value derivation)
 - Supports proper actor isolation for concurrent environments
+
+### Nested Tracking
+
+Groups and Maps can be nested within each other. When a parent group re-executes, all nested children are automatically cancelled and recreated. This enables powerful conditional tracking patterns:
+
+```swift
+final class FeatureFlagsViewModel {
+  @GraphStored var enableA: Bool = true
+  @GraphStored var enableB: Bool = false
+  @GraphStored var enableC: Bool = true
+
+  @GraphStored var valueA: Int = 1
+  @GraphStored var valueB: Int = 2
+  @GraphStored var valueC: Int = 3
+}
+
+let viewModel = FeatureFlagsViewModel()
+
+let subscription = withGraphTracking {
+  withGraphTrackingGroup {
+    // Conditionally create nested tracking based on feature flags
+    if viewModel.enableA {
+      withGraphTrackingGroup {
+        // This nested group is created/destroyed based on enableA
+        print("Feature A: \(viewModel.valueA)")
+      }
+    }
+
+    if viewModel.enableB {
+      withGraphTrackingGroup {
+        print("Feature B: \(viewModel.valueB)")
+      }
+    }
+
+    if viewModel.enableC {
+      withGraphTrackingGroup {
+        print("Feature C: \(viewModel.valueC)")
+      }
+    }
+  }
+}
+
+// When enableA is true: changes to valueA trigger the nested group
+// When enableA becomes false: the nested group is destroyed (no longer tracking valueA)
+// When enableA becomes true again: a new nested group is created
+
+viewModel.enableA = false  // Destroys Feature A's nested tracking
+viewModel.valueA = 100     // No effect - Feature A is not being tracked
+viewModel.enableA = true   // Recreates Feature A's nested tracking
+```
+
+**Key Features:**
+- **Automatic Lifecycle Management**: Nested tracking is automatically cancelled when its parent re-executes
+- **Conditional Subscriptions**: Create/destroy tracking based on runtime conditions (feature flags, user permissions, etc.)
+- **No Memory Leaks**: Old nested subscriptions are properly cleaned up before new ones are created
+- **Flexible Nesting**: Mix `withGraphTrackingGroup` and `withGraphTrackingMap` at any depth
+
+**Use Cases:**
+- Feature flags: Only track relevant state when features are enabled
+- Tab/Screen management: Track state only for the active view
+- Permission-based UI: Show/hide reactive components based on user permissions
+- Dynamic lists: Create per-item tracking that updates when the list changes
 
 ## Comparing with Swift's Observable Protocol
 
