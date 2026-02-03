@@ -126,7 +126,11 @@ public func withGraphTrackingMap<Projection>(
   isolation: isolated (any Actor)? = #isolation
 ) {
 
-  guard ThreadLocal.subscriptions.value != nil else {
+  let subscriptions = ThreadLocal.subscriptions.value
+  let parentCancellable = ThreadLocal.currentCancellable.value
+
+  // Either subscriptions (root level) or parentCancellable (nested level) must exist
+  guard subscriptions != nil || parentCancellable != nil else {
     assertionFailure("You must call withGraphTracking before calling this method.")
     return
   }
@@ -143,9 +147,21 @@ public func withGraphTrackingMap<Projection>(
     })
   )
 
+  // Create a cancellable for this scope that manages nested tracking
+  let scopeCancellable = GraphTrackingCancellable {
+    _handlerBox.withLock { $0 = nil }
+  }
+
   withContinuousStateGraphTracking(
     apply: {
-      _handlerBox.withLock { $0?.handler() }
+      // Cancel all children before re-executing (cleans up nested subscriptions)
+      scopeCancellable.cancelChildren()
+
+      // Set this scope's cancellable as the current parent for nested tracking
+      // Nested groups/maps will register with this parent via addChild()
+      ThreadLocal.currentCancellable.withValue(scopeCancellable) {
+        _handlerBox.withLock { $0?.handler() }
+      }
     },
     didChange: {
       guard !_handlerBox.withLock({ $0 == nil }) else { return .stop }
@@ -154,11 +170,12 @@ public func withGraphTrackingMap<Projection>(
     isolation: isolation
   )
 
-  let cancellabe = AnyCancellable {
-    _handlerBox.withLock { $0 = nil }
+  // Register with parent cancellable (nested) or root subscriptions (top-level)
+  if let parent = parentCancellable {
+    parent.addChild(scopeCancellable)
+  } else {
+    subscriptions!.append(AnyCancellable(scopeCancellable))
   }
-
-  ThreadLocal.subscriptions.value!.append(cancellabe)
 
 }
 
@@ -275,7 +292,11 @@ public func withGraphTrackingMap<Dependency: AnyObject, Projection>(
   isolation: isolated (any Actor)? = #isolation
 ) {
 
-  guard ThreadLocal.subscriptions.value != nil else {
+  let subscriptions = ThreadLocal.subscriptions.value
+  let parentCancellable = ThreadLocal.currentCancellable.value
+
+  // Either subscriptions (root level) or parentCancellable (nested level) must exist
+  guard subscriptions != nil || parentCancellable != nil else {
     assertionFailure("You must call withGraphTracking before calling this method.")
     return
   }
@@ -297,13 +318,25 @@ public func withGraphTrackingMap<Dependency: AnyObject, Projection>(
     })
   )
 
+  // Create a cancellable for this scope that manages nested tracking
+  let scopeCancellable = GraphTrackingCancellable {
+    _handlerBox.withLock { $0 = nil }
+  }
+
   withContinuousStateGraphTracking(
     apply: {
       guard weakDependency != nil else {
         _handlerBox.withLock { $0 = nil }
         return
       }
-      _handlerBox.withLock { $0?.handler() }
+      // Cancel all children before re-executing (cleans up nested subscriptions)
+      scopeCancellable.cancelChildren()
+
+      // Set this scope's cancellable as the current parent for nested tracking
+      // Nested groups/maps will register with this parent via addChild()
+      ThreadLocal.currentCancellable.withValue(scopeCancellable) {
+        _handlerBox.withLock { $0?.handler() }
+      }
     },
     didChange: {
       guard !_handlerBox.withLock({ $0 == nil }) else { return .stop }
@@ -313,11 +346,12 @@ public func withGraphTrackingMap<Dependency: AnyObject, Projection>(
     isolation: isolation
   )
 
-  let cancellable = AnyCancellable {
-    _handlerBox.withLock { $0 = nil }
+  // Register with parent cancellable (nested) or root subscriptions (top-level)
+  if let parent = parentCancellable {
+    parent.addChild(scopeCancellable)
+  } else {
+    subscriptions!.append(AnyCancellable(scopeCancellable))
   }
-
-  ThreadLocal.subscriptions.value!.append(cancellable)
 }
 
 private struct ClosureBox {
