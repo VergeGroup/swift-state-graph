@@ -56,7 +56,10 @@
 public func withGraphTracking(_ scope: () -> Void) -> AnyCancellable {
 
   let subscriptions = ThreadLocal.subscriptions.withValue(.init()) {
-    scope()
+    
+    ThreadLocal.currentCancellable.withValue(nil) {
+      scope()
+    }
 
     return ThreadLocal.subscriptions.value!
   }
