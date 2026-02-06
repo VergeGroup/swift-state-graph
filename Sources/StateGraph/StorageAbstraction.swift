@@ -183,33 +183,35 @@ public final class _Stored<Value, S: Storage<Value>>: Node, Observable, CustomDe
       return storage.value
     }
     set {
-      
+
 #if canImport(Observation)
-      if #available(macOS 14.0, iOS 17.0, watchOS 10.0, tvOS 17.0, *) { 
-        withMainActor { [observationRegistrar, keyPath = _keyPath(self)] in     
-          observationRegistrar.willSet(PointerKeyPathRoot.shared, keyPath: keyPath)   
+      if #available(macOS 14.0, iOS 17.0, watchOS 10.0, tvOS 17.0, *) {
+        withMainActor { [observationRegistrar, keyPath = _keyPath(self)] in
+          observationRegistrar.willSet(PointerKeyPathRoot.shared, keyPath: keyPath)
         }
       }
-      
+
       defer {
         if #available(macOS 14.0, iOS 17.0, watchOS 10.0, tvOS 17.0, *) {
-          withMainActor { [observationRegistrar, keyPath = _keyPath(self)] in     
+          withMainActor { [observationRegistrar, keyPath = _keyPath(self)] in
             observationRegistrar.didSet(PointerKeyPathRoot.shared, keyPath: keyPath)
           }
         }
       }
 #endif
-      
+
       lock.lock()
 
+      let oldValue = storage.value
       storage.value = newValue
 
       let _outgoingEdges = outgoingEdges
       let _trackingRegistrations = trackingRegistrations
+      let _didSetHandler = didSetHandler
       self.trackingRegistrations.removeAll()
 
       lock.unlock()
-          
+
       for registration in _trackingRegistrations {
         registration.perform()
       }
@@ -218,6 +220,8 @@ public final class _Stored<Value, S: Storage<Value>>: Node, Observable, CustomDe
         edge.isPending = true
         edge.to.potentiallyDirty = true
       }
+
+      _didSetHandler?(oldValue, newValue)
     }
   }
   
@@ -265,6 +269,9 @@ public final class _Stored<Value, S: Storage<Value>>: Node, Observable, CustomDe
 
   nonisolated(unsafe)
   public var trackingRegistrations: Set<TrackingRegistration> = []
+
+  nonisolated(unsafe)
+  private var didSetHandler: ((Value, Value) -> Void)?
 
   public init(
     _ file: StaticString = #fileID,
@@ -324,5 +331,14 @@ public final class _Stored<Value, S: Storage<Value>>: Node, Observable, CustomDe
     let result = try body(&storage.value)
     return result
   }
-  
+
+  /// Sets a closure to be called after the value changes via wrappedValue setter.
+  /// - Parameter handler: Closure receiving (oldValue, newValue)
+  /// - Note: Not called for external storage updates (e.g., UserDefaults changes)
+  public func onDidSet(_ handler: @escaping (Value, Value) -> Void) {
+    lock.lock()
+    defer { lock.unlock() }
+    self.didSetHandler = handler
+  }
+
 } 
