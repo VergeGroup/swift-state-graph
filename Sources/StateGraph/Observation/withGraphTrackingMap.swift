@@ -47,11 +47,21 @@
  - Important: This variant automatically uses `DistinctFilter`, only triggering for distinct values
  */
 public func withGraphTrackingMap<Projection>(
+  file: StaticString = #fileID,
+  line: UInt = #line,
+  function: StaticString = #function,
   _ applier: @escaping () -> Projection,
   onChange: @escaping (Projection) -> Void,
   isolation: isolated (any Actor)? = #isolation
 ) where Projection : Equatable {
-  withGraphTrackingMap(applier, filter: DistinctFilter(), onChange: onChange)
+  withGraphTrackingMap(
+    file: file,
+    line: line,
+    function: function,
+    applier,
+    filter: DistinctFilter(),
+    onChange: onChange
+  )
 }
 
 /**
@@ -120,6 +130,9 @@ public func withGraphTrackingMap<Projection>(
  - Parameter isolation: Actor isolation context for execution
  */
 public func withGraphTrackingMap<Projection>(
+  file: StaticString = #fileID,
+  line: UInt = #line,
+  function: StaticString = #function,
   _ applier: @escaping () -> Projection,
   filter: consuming some Filter<Projection>,
   onChange: @escaping (Projection) -> Void,
@@ -153,6 +166,9 @@ public func withGraphTrackingMap<Projection>(
   }
 
   withContinuousStateGraphTracking(
+    file: file,
+    line: line,
+    function: function,
     apply: {
       // Cancel all children before re-executing (cleans up nested subscriptions)
       scopeCancellable.cancelChildren()
@@ -211,12 +227,18 @@ public func withGraphTrackingMap<Projection>(
  - Note: Tracking automatically stops when the dependency is deallocated
  */
 public func withGraphTrackingMap<Dependency: AnyObject, Projection>(
+  file: StaticString = #fileID,
+  line: UInt = #line,
+  function: StaticString = #function,
   from: Dependency,
   map: @escaping (Dependency) -> Projection,
   onChange: @escaping (Projection) -> Void,
   isolation: isolated (any Actor)? = #isolation
 ) where Projection: Equatable {
   withGraphTrackingMap(
+    file: file,
+    line: line,
+    function: function,
     from: from,
     map: map,
     filter: DistinctFilter(),
@@ -285,6 +307,9 @@ public func withGraphTrackingMap<Dependency: AnyObject, Projection>(
  - Note: Tracking automatically stops when the dependency is deallocated
  */
 public func withGraphTrackingMap<Dependency: AnyObject, Projection>(
+  file: StaticString = #fileID,
+  line: UInt = #line,
+  function: StaticString = #function,
   from: Dependency,
   map: @escaping (Dependency) -> Projection,
   filter: consuming some Filter<Projection>,
@@ -324,6 +349,9 @@ public func withGraphTrackingMap<Dependency: AnyObject, Projection>(
   }
 
   withContinuousStateGraphTracking(
+    file: file,
+    line: line,
+    function: function,
     apply: {
       guard weakDependency != nil else {
         _handlerBox.withLock { $0 = nil }

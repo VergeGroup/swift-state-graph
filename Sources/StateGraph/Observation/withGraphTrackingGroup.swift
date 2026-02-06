@@ -82,6 +82,9 @@
  - Parameter isolation: Actor isolation context for execution
  */
 public func withGraphTrackingGroup(
+  file: StaticString = #fileID,
+  line: UInt = #line,
+  function: StaticString = #function,
   _ handler: @escaping () -> Void,
   isolation: isolated (any Actor)? = #isolation
 ) {
@@ -100,11 +103,14 @@ public func withGraphTrackingGroup(
   )
 
   // Create a cancellable for this scope that manages nested tracking
-  let scopeCancellable = GraphTrackingCancellable {
+  let scopeCancellable = GraphTrackingCancellable { [file, line, function] in
     _handlerBox.withLock { $0 = nil }
   }
 
   withContinuousStateGraphTracking(
+    file: file,
+    line: line,
+    function: function,
     apply: {
       // Cancel all children before re-executing (cleans up nested subscriptions)
       scopeCancellable.cancelChildren()

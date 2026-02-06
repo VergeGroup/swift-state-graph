@@ -5,6 +5,9 @@ import Observation
 /// To observe properties continuously, use ``withContinuousStateGraphTracking``.
 @discardableResult
 func withStateGraphTracking<R>(
+  file: StaticString = #fileID,
+  line: UInt = #line,
+  function: StaticString = #function,
   apply: () -> R,
   @_inheritActorContext didChange: @escaping @isolated(any) @Sendable () -> Void
 ) -> R {
@@ -19,7 +22,12 @@ func withStateGraphTracking<R>(
     )
   #else
     /// Need this for now as https://github.com/VergeGroup/swift-state-graph/pull/79
-    let registration = TrackingRegistration(didChange: didChange)
+    let registration = TrackingRegistration(
+      file: file,
+      line: line,
+      function: function,
+      didChange: didChange
+    )
     return ThreadLocal.registration.withValue(registration) {
       apply()
     }
@@ -79,6 +87,9 @@ func perform<Return>(
 /// Continuously tracks until `didChange` returns `.stop`.
 /// It does not provides update of the properties granurarly. some frequency of updates may be aggregated into single event.
 func withContinuousStateGraphTracking<R>(
+  file: StaticString = #fileID,
+  line: UInt = #line,
+  function: StaticString = #function,
   apply: @escaping () -> R,
   didChange: @escaping () -> StateGraphTrackingContinuation,
   isolation: isolated (any Actor)? = #isolation
@@ -88,6 +99,9 @@ func withContinuousStateGraphTracking<R>(
   let applyBox = ClosureBox(apply)
   let didChangeBox = ClosureBox(didChange)
   _withContinuousStateGraphTracking(
+    file: file,
+    line: line,
+    function: function,
     apply: applyBox,
     didChange: didChangeBox,
     isolation: isolation
@@ -98,11 +112,14 @@ func withContinuousStateGraphTracking<R>(
 /// By passing ClosureBox<...> directly in recursive calls, we avoid
 /// the cost of re-wrapping/unwrapping closure types on each iteration.
 private func _withContinuousStateGraphTracking<R>(
+  file: StaticString,
+  line: UInt,
+  function: StaticString,
   apply: ClosureBox<R>,
   didChange: ClosureBox<StateGraphTrackingContinuation>,
   isolation: isolated (any Actor)? = #isolation
 ) {
-  withStateGraphTracking(apply: apply.closure) {
+  withStateGraphTracking(file: file, line: line, function: function, apply: apply.closure) {
     let continuation = perform(didChange, isolation: isolation)
     switch continuation {
     case .stop:
@@ -112,6 +129,9 @@ private func _withContinuousStateGraphTracking<R>(
       // It uses isolation and task dispatching to ensure apply closure is called on the same actor.
       // Pass the already-wrapped closures directly to avoid thunk stack growing.
       _withContinuousStateGraphTracking(
+        file: file,
+        line: line,
+        function: function,
         apply: apply,
         didChange: didChange,
         isolation: isolation
@@ -188,19 +208,25 @@ private func _withContinuousStateGraphTracking<R>(
 /// - SeeAlso: ``GraphTrackings`` for multi-consumer scenarios
 /// - SeeAlso: ``withContinuousStateGraphTracking(_:didChange:isolation:)`` for callback-based tracking
 public func withStateGraphTrackingStream<T>(
+  file: StaticString = #fileID,
+  line: UInt = #line,
+  function: StaticString = #function,
   apply: @escaping () -> T,
   isolation: isolated (any Actor)? = #isolation
 ) -> AsyncStream<T> {
-  
+
   AsyncStream<T> { (continuation: AsyncStream<T>.Continuation) in
-    
+
     let isCancelled = OSAllocatedUnfairLock(initialState: false)
-    
+
     continuation.onTermination = { termination in
       isCancelled.withLock { $0 = true }
     }
-    
+
     withContinuousStateGraphTracking(
+      file: file,
+      line: line,
+      function: function,
       apply: {
         let value = apply()
         continuation.yield(value)
@@ -221,6 +247,11 @@ public func withStateGraphTrackingStream<T>(
 
 public final class TrackingRegistration: Sendable, Hashable {
 
+  // Source location info for debugging (immutable, no lock needed)
+  public let file: StaticString
+  public let line: UInt
+  public let function: StaticString
+
   private struct State: Sendable {
     var isInvalidated: Bool = false
     let didChange: @isolated(any) @Sendable () -> Void
@@ -236,12 +267,25 @@ public final class TrackingRegistration: Sendable, Hashable {
 
   private let state: OSAllocatedUnfairLock<State>
 
-  init(didChange: @escaping @isolated(any) @Sendable () -> Void) {
+  init(
+    file: StaticString = #fileID,
+    line: UInt = #line,
+    function: StaticString = #function,
+    didChange: @escaping @isolated(any) @Sendable () -> Void
+  ) {
+    self.file = file
+    self.line = line
+    self.function = function
     self.state = .init(uncheckedState:
       .init(
         didChange: didChange
       )
     )
+  }
+
+  /// A description of the source location where this tracking was created, for debugging purposes.
+  public var sourceDescription: String {
+    "\(file):\(line) \(function)"
   }
 
   func perform() {
