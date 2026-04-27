@@ -231,7 +231,7 @@ public final class Computed<Value>: Node, Observable, CustomDebugStringConvertib
 #if canImport(Observation)
       if #available(macOS 14.0, iOS 17.0, watchOS 10.0, tvOS 17.0, *) {
         withMainActor { [observationRegistrar, keyPath = _keyPath(self)] in   
-          observationRegistrar.willSet(PointerKeyPathRoot.shared, keyPath: keyPath)
+          observationRegistrar.willSet(PointerKeyPathRoot<Computed<Value>>.shared, keyPath: keyPath)
         }
       }
 #endif
@@ -256,7 +256,7 @@ public final class Computed<Value>: Node, Observable, CustomDebugStringConvertib
     get {
       #if canImport(Observation)
         if #available(macOS 14.0, iOS 17.0, watchOS 10.0, tvOS 17.0, *) {
-          observationRegistrar.access(PointerKeyPathRoot.shared, keyPath: _keyPath(self))   
+          observationRegistrar.access(PointerKeyPathRoot<Computed<Value>>.shared, keyPath: _keyPath(self))   
         }
       #endif
       recomputeIfNeeded()

@@ -1,8 +1,10 @@
 import Observation
 
-struct PointerKeyPathRoot: Observable, Sendable {
+struct PointerKeyPathRoot<Object: AnyObject>: Observable, Sendable {
   
-  static let shared = PointerKeyPathRoot()
+  static var shared: PointerKeyPathRoot<Object> {
+    PointerKeyPathRoot<Object>()
+  }
   
   subscript(pointer pointer: UnsafeMutableRawPointer) -> Never {
     fatalError()
@@ -11,9 +13,11 @@ struct PointerKeyPathRoot: Observable, Sendable {
 }
 
 @inline(__always) 
-func _keyPath(_ object: AnyObject) -> any KeyPath<PointerKeyPathRoot, Never> & Sendable {
+func _keyPath<Object: AnyObject>(
+  _ object: Object
+) -> any KeyPath<PointerKeyPathRoot<Object>, Never> & Sendable {
   let p = Unmanaged.passUnretained(object).toOpaque()
-  let keyPath = \PointerKeyPathRoot[pointer: p]
+  let keyPath = \PointerKeyPathRoot<Object>[pointer: p]
   return keyPath
 }
 
