@@ -1,5 +1,7 @@
 import Foundation
 
+// MARK: - withMainActor
+
 func withMainActor(_ closure: sending @escaping @MainActor () -> Void) {
   
   if #available(iOS 26, macOS 26, watchOS 26, tvOS 26, *) {
