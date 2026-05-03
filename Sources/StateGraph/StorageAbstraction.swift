@@ -224,7 +224,9 @@ public final class _Stored<Value, S: Storage<Value>>: Node, Observable, CustomDe
       lock.unlock()
 
       for registration in _trackingRegistrations {
-        registration.perform()
+        ChangingNodeContext.$current.withValue(self) {
+          registration.perform()
+        }
       }
 
       for edge in _outgoingEdges {
@@ -235,7 +237,7 @@ public final class _Stored<Value, S: Storage<Value>>: Node, Observable, CustomDe
       _didSetHandler?(oldValue, newValue)
     }
   }
-  
+
   private func notifyStorageUpdated() {
 #if canImport(Observation)
     if #available(macOS 14.0, iOS 17.0, watchOS 10.0, tvOS 17.0, *) {
@@ -257,7 +259,9 @@ public final class _Stored<Value, S: Storage<Value>>: Node, Observable, CustomDe
     lock.unlock()
 
     for registration in _trackingRegistrations {
-      registration.perform()
+      ChangingNodeContext.$current.withValue(self) {
+        registration.perform()
+      }
     }
 
     for edge in _outgoingEdges {
@@ -265,7 +269,7 @@ public final class _Stored<Value, S: Storage<Value>>: Node, Observable, CustomDe
       edge.to.potentiallyDirty = true
     }
   }
-  
+
   public var incomingEdges: ContiguousArray<Edge> {
     get {
       fatalError()

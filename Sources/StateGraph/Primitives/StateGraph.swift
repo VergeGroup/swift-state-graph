@@ -305,9 +305,11 @@ public final class Computed<Value>: Node, Observable, CustomDebugStringConvertib
       }
 
       for registration in _trackingRegistrations {
-        registration.perform()
+        ChangingNodeContext.$current.withValue(self) {
+          registration.perform()
+        }
       }
-            
+
     }
   }
 

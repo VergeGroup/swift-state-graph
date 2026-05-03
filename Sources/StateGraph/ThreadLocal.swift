@@ -42,3 +42,10 @@ enum ThreadLocal: Sendable {
   static let currentCancellable: ThreadLocalValue<GraphTrackingCancellable> = .init(key: "org.vergegroup.state-graph.currentCancellable")
 
 }
+
+/// Context for tracking which node triggered a change.
+/// Uses TaskLocal to propagate the changing node through Task boundaries.
+public enum ChangingNodeContext {
+  @TaskLocal
+  public static var current: (any TypeErasedNode)?
+}
