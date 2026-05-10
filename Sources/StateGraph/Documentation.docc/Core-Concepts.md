@@ -172,6 +172,22 @@ self.$computed = .init { _ in
 }
 ```
 
+Capture the node itself, not the current wrapped value. Dependency edges are recorded
+when the computation reads another node's `wrappedValue`; a capture list that reads
+`self.property` captures only the value available at that moment.
+
+```swift
+// ✅ Correct: capture the stored node and read it inside the computation
+self.$displayValue = .init { [items = self.$items] _ in
+  makeDisplayValue(from: items.wrappedValue)
+}
+
+// ❌ Incorrect: captures a snapshot of the current value, so later changes are not tracked
+self.$displayValue = .init { [items = self.items] _ in
+  makeDisplayValue(from: items)
+}
+```
+
 ### Cascade Updates
 
 Dependencies form a graph, and changes cascade through it automatically:
@@ -333,4 +349,4 @@ Now that you understand the core concepts:
 
 - <doc:Describing-Models> - Learn to build complex reactive models
 - <doc:Advanced-Patterns> - Explore advanced usage patterns
-- <doc:Performance-Optimization> - Optimize your state graphs for performance 
+- <doc:Performance-Optimization> - Optimize your state graphs for performance
