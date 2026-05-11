@@ -27,8 +27,10 @@ let package = Package(
   ],
   dependencies: [
     .package(url: "https://github.com/VergeGroup/swift-typed-identifier.git", from: "2.0.4"),
-    .package(url: "https://github.com/swiftlang/swift-syntax.git", "600.0.0"..<"603.0.0"),
-    .package(url: "https://github.com/pointfreeco/swift-macro-testing.git", from: "0.5.2"),
+    // Needed for body macros on computed properties. Replace with a tagged release once swift-syntax includes
+    // https://github.com/swiftlang/swift-syntax/pull/3298.
+    .package(url: "https://github.com/swiftlang/swift-syntax.git", revision: "3b21f71cac439edc7295843b96c76ebf6a6d47c0"),
+    .package(url: "https://github.com/pointfreeco/swift-macro-testing.git", from: "0.6.5"),
   ],
   targets: [
     .macro(

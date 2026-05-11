@@ -503,6 +503,82 @@ extension Computed {
   
 }
 
+public struct GraphComputedBacking<Owner: AnyObject, Value>: ~Copyable, @unchecked Sendable {
+
+  private let name: StaticString
+  private let rule: @Sendable (Owner, inout Computed<Value>.Context) -> Value
+  private let cachedNode: OSAllocatedUnfairLock<Computed<Value>?>
+
+  public init(
+    name: StaticString,
+    ownerType: Owner.Type,
+    rule: @escaping @Sendable (Owner, inout Computed<Value>.Context) -> Value
+  ) {
+    self.name = name
+    self.rule = rule
+    self.cachedNode = .init(uncheckedState: nil)
+  }
+
+  public func node(owner: Owner) -> Computed<Value> {
+    cachedNode.withLockUnchecked { cachedNode in
+      if let cachedNode {
+        return cachedNode
+      }
+
+      let owner = GraphComputedWeakOwner(owner)
+      let rule = self.rule
+      let node = Computed<Value>(name: name) { context in
+        guard let owner = owner.value else {
+          fatalError("GraphComputed owner was released before its computed node")
+        }
+        return rule(owner, &context)
+      }
+      cachedNode = node
+      return node
+    }
+  }
+}
+
+private struct GraphComputedWeakOwner<Owner: AnyObject>: ~Copyable, @unchecked Sendable {
+
+  weak var value: Owner?
+
+  init(_ value: Owner) {
+    self.value = value
+  }
+}
+
+public struct GraphComputedGlobalBacking<Value>: ~Copyable, @unchecked Sendable {
+
+  private let name: StaticString
+  private let rule: @Sendable (inout Computed<Value>.Context) -> Value
+  private let cachedNode: OSAllocatedUnfairLock<Computed<Value>?>
+
+  public init(
+    name: StaticString,
+    rule: @escaping @Sendable (inout Computed<Value>.Context) -> Value
+  ) {
+    self.name = name
+    self.rule = rule
+    self.cachedNode = .init(uncheckedState: nil)
+  }
+
+  public func node() -> Computed<Value> {
+    cachedNode.withLockUnchecked { cachedNode in
+      if let cachedNode {
+        return cachedNode
+      }
+
+      let rule = self.rule
+      let node = Computed<Value>(name: name) { context in
+        rule(&context)
+      }
+      cachedNode = node
+      return node
+    }
+  }
+}
+
 @DebugDescription
 public final class Edge: CustomDebugStringConvertible {
 

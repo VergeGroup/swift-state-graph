@@ -154,6 +154,7 @@ private struct ObjectEdge<O>: DynamicProperty {
 
 #endif
 
+#if canImport(DeveloperToolsSupport) && !SWIFT_PACKAGE
 @available(iOS 17, *)
 #Preview {
   
@@ -196,5 +197,6 @@ private struct ObjectEdge<O>: DynamicProperty {
   return ParentView()
   
 }
+#endif
 
 #endif
