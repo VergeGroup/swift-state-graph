@@ -9,8 +9,6 @@ public struct UnifiedStoredMacro {
     case constantVariableIsNotSupported
     case computedVariableIsNotSupported
     case needsTypeAnnotation
-    case didSetNotSupported
-    case willSetNotSupported
     case userDefaultsRequiresDefaultValue
     case invalidBackingArgument
     case weakVariableNotSupported
@@ -51,10 +49,6 @@ extension UnifiedStoredMacro.Error: DiagnosticMessage {
       return "Computed variables are not supported with @GraphStored"
     case .needsTypeAnnotation:
       return "@GraphStored requires explicit type annotation"
-    case .didSetNotSupported:
-      return "didSet is not supported with @GraphStored"
-    case .willSetNotSupported:
-      return "willSet is not supported with @GraphStored"
     case .userDefaultsRequiresDefaultValue:
       return "@GraphStored with UserDefaults backing requires a default value"
     case .invalidBackingArgument:
@@ -92,17 +86,6 @@ extension UnifiedStoredMacro {
       return false
     }
 
-    // Check didSet/willSet
-    if variableDecl.didSetBlock != nil {
-      context.addDiagnostics(from: Error.didSetNotSupported, node: node)
-      return false
-    }
-
-    if variableDecl.willSetBlock != nil {
-      context.addDiagnostics(from: Error.willSetNotSupported, node: node)
-      return false
-    }
-
     // UserDefaults specific validation
     if case .userDefaults = backingType {
       if !variableDecl.hasInitializer {
@@ -128,9 +111,7 @@ extension UnifiedStoredMacro {
 
   /// Checks if any binding has computed property accessors
   private static func hasComputedProperties(_ variableDecl: VariableDeclSyntax) -> Bool {
-    return variableDecl.bindings.contains { binding in
-      binding.accessorBlock != nil
-    }
+    return variableDecl.isComputed
   }
 }
 
@@ -578,7 +559,7 @@ extension UnifiedStoredMacro: AccessorMacro {
 
     // Add getter and setter
     accessors.append(createSimpleGetAccessor(propertyName: propertyName))
-    accessors.append(createSimpleSetAccessor(propertyName: propertyName))
+    accessors.append(createSimpleSetAccessor(propertyName: propertyName, variableDecl: variableDecl))
 
     return accessors
   }
@@ -614,14 +595,12 @@ extension UnifiedStoredMacro: AccessorMacro {
   }
   
   private static func createSimpleSetAccessor(
-    propertyName: String
+    propertyName: String,
+    variableDecl: VariableDeclSyntax
   ) -> AccessorDeclSyntax {
-    return AccessorDeclSyntax(
-      """
-      set { 
-        $\(raw: propertyName).wrappedValue = newValue
-      }
-      """
+    createSetAccessor(
+      assignmentTarget: "$\(propertyName).wrappedValue",
+      variableDecl: variableDecl
     )
   }
 
@@ -744,13 +723,78 @@ extension UnifiedStoredMacro: AccessorMacro {
     propertyName: String, variableDecl: VariableDeclSyntax
   ) -> AccessorDeclSyntax {
     let assignmentTarget = "$\(propertyName).wrappedValue"
-    
+    return createSetAccessor(assignmentTarget: assignmentTarget, variableDecl: variableDecl)
+  }
+
+  private static func createSetAccessor(
+    assignmentTarget: String,
+    variableDecl: VariableDeclSyntax
+  ) -> AccessorDeclSyntax {
+    guard variableDecl.willSetBlock != nil || variableDecl.didSetBlock != nil else {
+      return AccessorDeclSyntax(
+        """
+        set {
+          \(raw: assignmentTarget) = newValue
+        }
+        """
+      )
+    }
+
+    let typeAnnotation = variableDecl.typeSyntax.map { ": \($0.trimmed)" } ?? ""
+    var statements: [String] = []
+
+    if let willSetBlock = variableDecl.willSetBlock {
+      let newValueName = variableDecl.willSetParameterName
+      let observerStatements = makeObserverStatements(from: willSetBlock)
+      statements.append(
+        """
+        do {
+        \(indent("let \(newValueName)\(typeAnnotation) = __graphStoredNewValue\n\(observerStatements)", by: 2))
+        }
+        """
+      )
+    }
+
+    if variableDecl.didSetBlock != nil {
+      let oldValueName = variableDecl.didSetParameterName
+      statements.append("let \(oldValueName)\(typeAnnotation) = \(assignmentTarget)")
+    }
+
+    statements.append("\(assignmentTarget) = __graphStoredNewValue")
+
+    if let didSetBlock = variableDecl.didSetBlock {
+      let observerStatements = makeObserverStatements(from: didSetBlock)
+      statements.append(
+        """
+        do {
+        \(indent(observerStatements, by: 2))
+        }
+        """
+      )
+    }
+
     return AccessorDeclSyntax(
       """
-      set { 
-        \(raw: assignmentTarget) = newValue
+      set(__graphStoredNewValue) {
+      \(raw: indent(statements.joined(separator: "\n"), by: 2))
       }
       """
     )
+  }
+
+  private static func makeObserverStatements(from block: CodeBlockSyntax) -> String {
+    block.trimmed.statements
+      .map { $0.trimmed.description }
+      .joined(separator: "\n")
+  }
+
+  private static func indent(_ string: String, by spaces: Int) -> String {
+    let indentation = String(repeating: " ", count: spaces)
+    return string
+      .split(separator: "\n", omittingEmptySubsequences: false)
+      .map { line in
+        line.isEmpty ? "" : "\(indentation)\(line)"
+      }
+      .joined(separator: "\n")
   }
 }
