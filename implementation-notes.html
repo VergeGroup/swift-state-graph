@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <title>Implementation Notes</title>
+</head>
+<body>
+  <h1>Implementation Notes</h1>
+
+  <section>
+    <h2>2026-05-23: @GraphStored didSet support</h2>
+    <h3>Design Decisions</h3>
+    <ul>
+      <li><code>@GraphStored</code> already expands into explicit <code>get</code>/<code>set</code> accessors backed by the generated <code>$property</code> node. Supporting <code>didSet</code> is therefore being interpreted as preserving the user's observer body and running it from the generated setter after assigning <code>newValue</code>.</li>
+      <li><code>willSet</code> support is being implemented in the same generated setter. The observer body runs before writing to <code>$property.wrappedValue</code>, with Swift's default <code>newValue</code> binding or the custom <code>willSet(customName)</code> binding.</li>
+      <li>When both observers are present, generated code should run <code>willSet</code>, capture <code>oldValue</code>, assign the new value, then run <code>didSet</code>.</li>
+      <li>The generated setter should capture the old value before assignment and expose it as Swift's normal <code>oldValue</code> name, or as the custom observer parameter name when the source uses <code>didSet(customName)</code>.</li>
+      <li>Initialization accessors remain observer-free, matching Swift's stored-property behavior where <code>didSet</code> is not called during initialization.</li>
+      <li>Macro expansion coverage is kept at the accessor-expansion level by calling <code>UnifiedStoredMacro.expansion(...providingAccessorsOf:)</code> directly. This verifies generated <code>get</code>/<code>set</code> accessors without snapshotting an invalid-looking full property body.</li>
+    </ul>
+    <h3>Deviations</h3>
+    <ul>
+      <li>No intentional deviations for <code>willSet</code> are planned. External storage notifications from UserDefaults still follow the existing storage update path and do not synthesize property observer calls.</li>
+    </ul>
+    <h3>Trade-offs</h3>
+    <ul>
+      <li>Using the generated setter keeps behavior local to macro expansion and avoids adding a new runtime hook just for property observer syntax.</li>
+      <li>The lower-level <code>Stored.onDidSet</code> remains available, but macro-level <code>didSet</code> gives source compatibility with normal Swift property observers.</li>
+      <li>Swift accessor macro expansion keeps the original <code>didSet</code> observer syntax visible in macro snapshots. The implementation does not rely on that observer being invoked; it explicitly runs the observer body from the generated setter so runtime behavior is covered by tests.</li>
+      <li>Because handwritten Swift does not allow <code>didSet</code> and <code>get</code> to coexist in the same accessor block, macro snapshot tests should not assert that invalid-looking expanded form. The meaningful coverage is compile/runtime behavior for memory and UserDefaults backed properties.</li>
+    </ul>
+    <h3>Open Questions</h3>
+    <ul>
+      <li>Confirm whether property observers should ever run for external storage updates, such as UserDefaults changes made outside the generated setter.</li>
+    </ul>
+  </section>
+</body>
+</html>

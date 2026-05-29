@@ -1,4 +1,7 @@
 import MacroTesting
+import SwiftParser
+import SwiftSyntax
+import SwiftSyntaxMacroExpansion
 import SwiftSyntaxMacros
 import SwiftSyntaxMacrosTestSupport
 import XCTest
@@ -119,7 +122,238 @@ final class UnifiedStoredMacroTests: XCTestCase {
       """
     }
   }
-  
+
+  func test_memory_storage_didSet_accessor_expansion() throws {
+    let accessors = try expandGraphStoredAccessors(
+      from: parseVariableDecl(
+        """
+        @GraphStored
+        var count: Int = 0 {
+          didSet {
+            history.append((oldValue, count))
+          }
+        }
+        """
+      )
+    )
+
+    XCTAssertEqual(
+      accessors.map(\.trimmed.description).joined(separator: "\n\n"),
+      """
+      get {
+        return $count.wrappedValue
+      }
+
+      set(__graphStoredNewValue) {
+        let oldValue: Int = $count.wrappedValue
+        $count.wrappedValue = __graphStoredNewValue
+        do {
+          history.append((oldValue, count))
+        }
+      }
+      """
+    )
+  }
+
+  func test_memory_storage_willSet_accessor_expansion() throws {
+    let accessors = try expandGraphStoredAccessors(
+      from: parseVariableDecl(
+        """
+        @GraphStored
+        var count: Int = 0 {
+          willSet {
+            history.append((count, newValue))
+          }
+        }
+        """
+      )
+    )
+
+    XCTAssertEqual(
+      accessors.map(\.trimmed.description).joined(separator: "\n\n"),
+      """
+      get {
+        return $count.wrappedValue
+      }
+
+      set(__graphStoredNewValue) {
+        do {
+          let newValue: Int = __graphStoredNewValue
+          history.append((count, newValue))
+        }
+        $count.wrappedValue = __graphStoredNewValue
+      }
+      """
+    )
+  }
+
+  func test_memory_storage_willSet_accessor_expansion_with_custom_new_value_name() throws {
+    let accessors = try expandGraphStoredAccessors(
+      from: parseVariableDecl(
+        """
+        @GraphStored
+        var count: Int = 0 {
+          willSet(nextValue) {
+            history.append((count, nextValue))
+          }
+        }
+        """
+      )
+    )
+
+    XCTAssertEqual(
+      accessors.map(\.trimmed.description).joined(separator: "\n\n"),
+      """
+      get {
+        return $count.wrappedValue
+      }
+
+      set(__graphStoredNewValue) {
+        do {
+          let nextValue: Int = __graphStoredNewValue
+          history.append((count, nextValue))
+        }
+        $count.wrappedValue = __graphStoredNewValue
+      }
+      """
+    )
+  }
+
+  func test_memory_storage_willSet_and_didSet_accessor_expansion() throws {
+    let accessors = try expandGraphStoredAccessors(
+      from: parseVariableDecl(
+        """
+        @GraphStored
+        var count: Int = 0 {
+          willSet {
+            history.append(("will", count, newValue))
+          }
+          didSet {
+            history.append(("did", oldValue, count))
+          }
+        }
+        """
+      )
+    )
+
+    XCTAssertEqual(
+      accessors.map(\.trimmed.description).joined(separator: "\n\n"),
+      """
+      get {
+        return $count.wrappedValue
+      }
+
+      set(__graphStoredNewValue) {
+        do {
+          let newValue: Int = __graphStoredNewValue
+          history.append(("will", count, newValue))
+        }
+        let oldValue: Int = $count.wrappedValue
+        $count.wrappedValue = __graphStoredNewValue
+        do {
+          history.append(("did", oldValue, count))
+        }
+      }
+      """
+    )
+  }
+
+  func test_memory_storage_didSet_accessor_expansion_with_custom_old_value_name() throws {
+    let accessors = try expandGraphStoredAccessors(
+      from: parseVariableDecl(
+        """
+        @GraphStored
+        var count: Int = 0 {
+          didSet(previousValue) {
+            history.append((previousValue, count))
+          }
+        }
+        """
+      )
+    )
+
+    XCTAssertEqual(
+      accessors.map(\.trimmed.description).joined(separator: "\n\n"),
+      """
+      get {
+        return $count.wrappedValue
+      }
+
+      set(__graphStoredNewValue) {
+        let previousValue: Int = $count.wrappedValue
+        $count.wrappedValue = __graphStoredNewValue
+        do {
+          history.append((previousValue, count))
+        }
+      }
+      """
+    )
+  }
+
+  func test_userdefaults_storage_didSet_accessor_expansion() throws {
+    let accessors = try expandGraphStoredAccessors(
+      from: parseVariableDecl(
+        #"""
+        @GraphStored(backed: .userDefaults(key: "username"))
+        var username: String = "anonymous" {
+          didSet {
+            history.append((oldValue, username))
+          }
+        }
+        """#
+      )
+    )
+
+    XCTAssertEqual(
+      accessors.map(\.trimmed.description).joined(separator: "\n\n"),
+      """
+      get {
+        return $username.wrappedValue
+      }
+
+      set(__graphStoredNewValue) {
+        let oldValue: String = $username.wrappedValue
+        $username.wrappedValue = __graphStoredNewValue
+        do {
+          history.append((oldValue, username))
+        }
+      }
+      """
+    )
+  }
+
+  func test_userdefaults_storage_willSet_accessor_expansion() throws {
+    let accessors = try expandGraphStoredAccessors(
+      from: parseVariableDecl(
+        #"""
+        @GraphStored(backed: .userDefaults(key: "username"))
+        var username: String = "anonymous" {
+          willSet {
+            history.append((username, newValue))
+          }
+        }
+        """#
+      )
+    )
+
+    XCTAssertEqual(
+      accessors.map(\.trimmed.description).joined(separator: "\n\n"),
+      """
+      get {
+        return $username.wrappedValue
+      }
+
+      set(__graphStoredNewValue) {
+        do {
+          let newValue: String = __graphStoredNewValue
+          history.append((username, newValue))
+        }
+        $username.wrappedValue = __graphStoredNewValue
+      }
+      """
+    )
+  }
+
   func test_memory_storage_explicit() {
     assertMacro {
       """
@@ -220,7 +454,7 @@ final class UnifiedStoredMacroTests: XCTestCase {
       """
     }
   }
-  
+
   func test_userdefaults_storage_with_suite() {
     assertMacro {
       """
@@ -808,5 +1042,34 @@ final class UnifiedStoredMacroTests: XCTestCase {
       }
       """
     } 
+  }
+
+  private func expandGraphStoredAccessors(
+    from variableDecl: VariableDeclSyntax
+  ) throws -> [AccessorDeclSyntax] {
+    let attribute = try XCTUnwrap(
+      variableDecl.attributes.compactMap { attribute -> AttributeSyntax? in
+        guard case .attribute(let attributeSyntax) = attribute else {
+          return nil
+        }
+        return attributeSyntax
+      }.first
+    )
+
+    return try UnifiedStoredMacro.expansion(
+      of: attribute,
+      providingAccessorsOf: variableDecl,
+      in: BasicMacroExpansionContext(lexicalContext: [])
+    )
+  }
+
+  private func parseVariableDecl(_ source: String) throws -> VariableDeclSyntax {
+    let sourceFile = Parser.parse(source: source)
+
+    return try XCTUnwrap(
+      sourceFile.statements.compactMap { statement in
+        statement.item.as(VariableDeclSyntax.self)
+      }.first
+    )
   }
 } 

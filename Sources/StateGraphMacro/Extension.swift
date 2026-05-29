@@ -213,12 +213,30 @@ extension VariableDeclSyntax {
               return accessor.body
             }
           }
-        case .getter(let _):
+        case .getter:
           return nil
         }
       }
     }
     return nil
+  }
+
+  var didSetParameterName: String {
+    for binding in self.bindings {
+      if let accessorBlock = binding.accessorBlock {
+        switch accessorBlock.accessors {
+        case .accessors(let accessors):
+          for accessor in accessors {
+            if accessor.accessorSpecifier.tokenKind == .keyword(.didSet) {
+              return accessor.parameters?.name.text ?? "oldValue"
+            }
+          }
+        case .getter:
+          return "oldValue"
+        }
+      }
+    }
+    return "oldValue"
   }
 
   var willSetBlock: CodeBlockSyntax? {
@@ -231,12 +249,30 @@ extension VariableDeclSyntax {
               return accessor.body
             }
           }
-        case .getter(let _):
+        case .getter:
           return nil
         }
       }
     }
     return nil
+  }
+
+  var willSetParameterName: String {
+    for binding in self.bindings {
+      if let accessorBlock = binding.accessorBlock {
+        switch accessorBlock.accessors {
+        case .accessors(let accessors):
+          for accessor in accessors {
+            if accessor.accessorSpecifier.tokenKind == .keyword(.willSet) {
+              return accessor.parameters?.name.text ?? "newValue"
+            }
+          }
+        case .getter:
+          return "newValue"
+        }
+      }
+    }
+    return "newValue"
   }
 
   var isComputed: Bool {
