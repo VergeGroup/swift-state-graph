@@ -20,7 +20,7 @@ import Foundation.NSLock
 public typealias Stored<Value> = _Stored<Value, InMemoryStorage<Value>>
 
 extension _Stored where S == InMemoryStorage<Value> {
-  /// 便利な初期化メソッド（wrappedValue指定）
+  /// Convenience initializer with wrappedValue (non-Equatable types)
   public convenience init(
     _ file: StaticString = #fileID,
     _ line: UInt = #line,
@@ -35,6 +35,70 @@ extension _Stored where S == InMemoryStorage<Value> {
       column,
       name: name,
       storage: storage
+    )
+  }
+}
+
+extension _Stored where S == InMemoryStorage<Value>, Value: Equatable {
+  /// Convenience initializer with wrappedValue for Equatable types
+  /// Automatically skips notifications when the value hasn't changed.
+  public convenience init(
+    _ file: StaticString = #fileID,
+    _ line: UInt = #line,
+    _ column: UInt = #column,
+    name: StaticString? = nil,
+    wrappedValue: Value
+  ) {
+    let storage = InMemoryStorage(initialValue: wrappedValue)
+    self.init(
+      file,
+      line,
+      column,
+      name: name,
+      storage: storage
+    )
+  }
+}
+
+extension _Stored where S == InMemoryStorage<Value>, Value: AnyObject {
+  /// Convenience initializer with wrappedValue for reference types
+  /// Automatically skips notifications when the reference identity hasn't changed.
+  public convenience init(
+    _ file: StaticString = #fileID,
+    _ line: UInt = #line,
+    _ column: UInt = #column,
+    name: StaticString? = nil,
+    wrappedValue: Value
+  ) {
+    let storage = InMemoryStorage(initialValue: wrappedValue)
+    self.init(
+      file,
+      line,
+      column,
+      name: name,
+      storage: storage
+    )
+  }
+}
+
+extension _Stored where S == InMemoryStorage<Value>, Value: Equatable & AnyObject {
+  /// Convenience initializer with wrappedValue for Equatable reference types
+  /// Uses value equality (Equatable) rather than reference identity.
+  public convenience init(
+    _ file: StaticString = #fileID,
+    _ line: UInt = #line,
+    _ column: UInt = #column,
+    name: StaticString? = nil,
+    wrappedValue: Value
+  ) {
+    let storage = InMemoryStorage(initialValue: wrappedValue)
+    self.init(
+      file,
+      line,
+      column,
+      name: name,
+      storage: storage,
+      shouldNotify: { $0 != $1 }
     )
   }
 }
@@ -231,7 +295,7 @@ public final class Computed<Value>: Node, Observable, CustomDebugStringConvertib
 #if canImport(Observation)
       if #available(macOS 14.0, iOS 17.0, watchOS 10.0, tvOS 17.0, *) {
         withMainActor { [observationRegistrar, keyPath = _keyPath(self)] in   
-          observationRegistrar.willSet(PointerKeyPathRoot.shared, keyPath: keyPath)
+          observationRegistrar.willSet(PointerKeyPathRoot<Computed<Value>>.shared, keyPath: keyPath)
         }
       }
 #endif
@@ -256,7 +320,7 @@ public final class Computed<Value>: Node, Observable, CustomDebugStringConvertib
     get {
       #if canImport(Observation)
         if #available(macOS 14.0, iOS 17.0, watchOS 10.0, tvOS 17.0, *) {
-          observationRegistrar.access(PointerKeyPathRoot.shared, keyPath: _keyPath(self))   
+          observationRegistrar.access(PointerKeyPathRoot<Computed<Value>>.shared, keyPath: _keyPath(self))   
         }
       #endif
       recomputeIfNeeded()
