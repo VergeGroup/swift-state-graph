@@ -172,6 +172,32 @@ struct ItemListView: View {
 }
 ```
 
+### Lifecycle Tracking
+
+Use `.graphTracking` when a SwiftUI view needs to keep a `withGraphTracking`
+subscription alive only while the view is visible:
+
+```swift
+struct AutoRefreshView: View {
+  let model: RefreshModel
+
+  var body: some View {
+    Toggle("Auto Refresh", isOn: model.$isEnabled.binding)
+      .graphTracking {
+        withGraphTrackingMap {
+          model.isEnabled
+        } onChange: { isEnabled in
+          if isEnabled {
+            model.start()
+          } else {
+            model.stop()
+          }
+        }
+      }
+  }
+}
+```
+
 ### Environment Integration
 
 Use `GraphObject` protocol for environment propagation:

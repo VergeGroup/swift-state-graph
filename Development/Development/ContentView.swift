@@ -132,7 +132,6 @@ struct Observe_specific: View {
 private struct Book_StateView: View {
     
   let model: Model
-  @State var subscription: AnyCancellable?
   
   init(entity: Model) {
     self.model = entity
@@ -158,32 +157,24 @@ private struct Book_StateView: View {
         model.count2 += 1
       }
     }
-    .onAppear {
-      
+    .graphTracking {
       print("onAppear")
-                
-      subscription = withGraphTracking {
 
-        withGraphTrackingGroup {
-          print("☁️", model.count1, model.count2)
-        }
-
-        withGraphTrackingMap {
-          model.count1 + model.count2
-        } onChange: { value in
-          print("computed", value)
-        }
-
-        withGraphTrackingMap {
-          model.$count1.wrappedValue
-        } onChange: { value in
-          print("count", value)
-        }
+      withGraphTrackingGroup {
+        print("☁️", model.count1, model.count2)
       }
-      
-    }
-    .onDisappear {
-      subscription?.cancel()      
+
+      withGraphTrackingMap {
+        model.count1 + model.count2
+      } onChange: { value in
+        print("computed", value)
+      }
+
+      withGraphTrackingMap {
+        model.$count1.wrappedValue
+      } onChange: { value in
+        print("count", value)
+      }
     }
   }
 }
