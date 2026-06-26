@@ -72,6 +72,14 @@ extension UnifiedStoredMacro.Error: DiagnosticMessage {
 // MARK: - Validation Helpers
 
 extension UnifiedStoredMacro {
+  /// Describes the declaration kind that lexically contains an expanded stored property.
+  private enum ContainingTypeKind {
+    case `actor`
+    case `class`
+    case `enum`
+    case `protocol`
+    case `struct`
+  }
 
   /// Validates that the variable declaration is suitable for @GraphStored
   private static func validateDeclaration(
@@ -112,6 +120,49 @@ extension UnifiedStoredMacro {
   /// Checks if any binding has computed property accessors
   private static func hasComputedProperties(_ variableDecl: VariableDeclSyntax) -> Bool {
     return variableDecl.isComputed
+  }
+
+  /// Returns whether the accessor is expanded for an instance property on a value type.
+  private static func shouldUseNonmutatingSetter(
+    for variableDecl: VariableDeclSyntax,
+    context: some MacroExpansionContext
+  ) -> Bool {
+    guard !variableDecl.isStatic else {
+      return false
+    }
+
+    switch nearestContainingTypeKind(context: context) {
+    case .enum, .struct:
+      return true
+    case .actor, .class, .protocol, nil:
+      return false
+    }
+  }
+
+  /// Finds the nearest type declaration that contains the macro expansion.
+  private static func nearestContainingTypeKind(
+    context: some MacroExpansionContext
+  ) -> ContainingTypeKind? {
+    // SwiftSyntax exposes lexical contexts from innermost to outermost.
+    for syntax in context.lexicalContext {
+      if syntax.is(ActorDeclSyntax.self) {
+        return .actor
+      }
+      if syntax.is(ClassDeclSyntax.self) {
+        return .class
+      }
+      if syntax.is(EnumDeclSyntax.self) {
+        return .enum
+      }
+      if syntax.is(ProtocolDeclSyntax.self) {
+        return .protocol
+      }
+      if syntax.is(StructDeclSyntax.self) {
+        return .struct
+      }
+    }
+
+    return nil
   }
 }
 
@@ -513,7 +564,7 @@ extension UnifiedStoredMacro: AccessorMacro {
     case .memory:
       return createMemoryAccessors(propertyName: propertyName, variableDecl: variableDecl, context: context)
     case .userDefaults:
-      return createUserDefaultsAccessors(propertyName: propertyName, variableDecl: variableDecl)
+      return createUserDefaultsAccessors(propertyName: propertyName, variableDecl: variableDecl, context: context)
     }
   }
 
@@ -537,7 +588,7 @@ extension UnifiedStoredMacro: AccessorMacro {
     accessors.append(
       createMemoryGetAccessor(propertyName: propertyName, variableDecl: variableDecl))
     accessors.append(
-      createMemorySetAccessor(propertyName: propertyName, variableDecl: variableDecl))
+      createMemorySetAccessor(propertyName: propertyName, variableDecl: variableDecl, context: context))
 
     return accessors
   }
@@ -545,7 +596,8 @@ extension UnifiedStoredMacro: AccessorMacro {
   /// Creates accessor declarations for UserDefaults storage
   private static func createUserDefaultsAccessors(
     propertyName: String,
-    variableDecl: VariableDeclSyntax
+    variableDecl: VariableDeclSyntax,
+    context: some MacroExpansionContext
   ) -> [AccessorDeclSyntax] {
     var accessors: [AccessorDeclSyntax] = []
 
@@ -559,7 +611,7 @@ extension UnifiedStoredMacro: AccessorMacro {
 
     // Add getter and setter
     accessors.append(createSimpleGetAccessor(propertyName: propertyName))
-    accessors.append(createSimpleSetAccessor(propertyName: propertyName, variableDecl: variableDecl))
+    accessors.append(createSimpleSetAccessor(propertyName: propertyName, variableDecl: variableDecl, context: context))
 
     return accessors
   }
@@ -596,11 +648,13 @@ extension UnifiedStoredMacro: AccessorMacro {
   
   private static func createSimpleSetAccessor(
     propertyName: String,
-    variableDecl: VariableDeclSyntax
+    variableDecl: VariableDeclSyntax,
+    context: some MacroExpansionContext
   ) -> AccessorDeclSyntax {
     createSetAccessor(
       assignmentTarget: "$\(propertyName).wrappedValue",
-      variableDecl: variableDecl
+      variableDecl: variableDecl,
+      context: context
     )
   }
 
@@ -720,20 +774,27 @@ extension UnifiedStoredMacro: AccessorMacro {
   }
 
   private static func createMemorySetAccessor(
-    propertyName: String, variableDecl: VariableDeclSyntax
+    propertyName: String,
+    variableDecl: VariableDeclSyntax,
+    context: some MacroExpansionContext
   ) -> AccessorDeclSyntax {
     let assignmentTarget = "$\(propertyName).wrappedValue"
-    return createSetAccessor(assignmentTarget: assignmentTarget, variableDecl: variableDecl)
+    return createSetAccessor(assignmentTarget: assignmentTarget, variableDecl: variableDecl, context: context)
   }
 
   private static func createSetAccessor(
     assignmentTarget: String,
-    variableDecl: VariableDeclSyntax
+    variableDecl: VariableDeclSyntax,
+    context: some MacroExpansionContext
   ) -> AccessorDeclSyntax {
+    let setterKeyword = shouldUseNonmutatingSetter(for: variableDecl, context: context)
+      ? "nonmutating set"
+      : "set"
+
     guard variableDecl.willSetBlock != nil || variableDecl.didSetBlock != nil else {
       return AccessorDeclSyntax(
         """
-        set {
+        \(raw: setterKeyword) {
           \(raw: assignmentTarget) = newValue
         }
         """
@@ -775,7 +836,7 @@ extension UnifiedStoredMacro: AccessorMacro {
 
     return AccessorDeclSyntax(
       """
-      set(__graphStoredNewValue) {
+      \(raw: setterKeyword)(__graphStoredNewValue) {
       \(raw: indent(statements.joined(separator: "\n"), by: 2))
       }
       """
