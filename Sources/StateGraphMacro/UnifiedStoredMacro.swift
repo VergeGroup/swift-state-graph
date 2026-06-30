@@ -9,8 +9,6 @@ public struct UnifiedStoredMacro {
     case constantVariableIsNotSupported
     case computedVariableIsNotSupported
     case needsTypeAnnotation
-    case didSetNotSupported
-    case willSetNotSupported
     case userDefaultsRequiresDefaultValue
     case invalidBackingArgument
     case weakVariableNotSupported
@@ -51,10 +49,6 @@ extension UnifiedStoredMacro.Error: DiagnosticMessage {
       return "Computed variables are not supported with @GraphStored"
     case .needsTypeAnnotation:
       return "@GraphStored requires explicit type annotation"
-    case .didSetNotSupported:
-      return "didSet is not supported with @GraphStored"
-    case .willSetNotSupported:
-      return "willSet is not supported with @GraphStored"
     case .userDefaultsRequiresDefaultValue:
       return "@GraphStored with UserDefaults backing requires a default value"
     case .invalidBackingArgument:
@@ -78,6 +72,14 @@ extension UnifiedStoredMacro.Error: DiagnosticMessage {
 // MARK: - Validation Helpers
 
 extension UnifiedStoredMacro {
+  /// Describes the declaration kind that lexically contains an expanded stored property.
+  private enum ContainingTypeKind {
+    case `actor`
+    case `class`
+    case `enum`
+    case `protocol`
+    case `struct`
+  }
 
   /// Validates that the variable declaration is suitable for @GraphStored
   private static func validateDeclaration(
@@ -89,17 +91,6 @@ extension UnifiedStoredMacro {
     // Check type annotation
     guard variableDecl.typeSyntax != nil else {
       context.addDiagnostics(from: Error.needsTypeAnnotation, node: node)
-      return false
-    }
-
-    // Check didSet/willSet
-    if variableDecl.didSetBlock != nil {
-      context.addDiagnostics(from: Error.didSetNotSupported, node: node)
-      return false
-    }
-
-    if variableDecl.willSetBlock != nil {
-      context.addDiagnostics(from: Error.willSetNotSupported, node: node)
       return false
     }
 
@@ -128,9 +119,50 @@ extension UnifiedStoredMacro {
 
   /// Checks if any binding has computed property accessors
   private static func hasComputedProperties(_ variableDecl: VariableDeclSyntax) -> Bool {
-    return variableDecl.bindings.contains { binding in
-      binding.accessorBlock != nil
+    return variableDecl.isComputed
+  }
+
+  /// Returns whether the accessor is expanded for an instance property on a value type.
+  private static func shouldUseNonmutatingSetter(
+    for variableDecl: VariableDeclSyntax,
+    context: some MacroExpansionContext
+  ) -> Bool {
+    guard !variableDecl.isStatic else {
+      return false
     }
+
+    switch nearestContainingTypeKind(context: context) {
+    case .enum, .struct:
+      return true
+    case .actor, .class, .protocol, nil:
+      return false
+    }
+  }
+
+  /// Finds the nearest type declaration that contains the macro expansion.
+  private static func nearestContainingTypeKind(
+    context: some MacroExpansionContext
+  ) -> ContainingTypeKind? {
+    // SwiftSyntax exposes lexical contexts from innermost to outermost.
+    for syntax in context.lexicalContext {
+      if syntax.is(ActorDeclSyntax.self) {
+        return .actor
+      }
+      if syntax.is(ClassDeclSyntax.self) {
+        return .class
+      }
+      if syntax.is(EnumDeclSyntax.self) {
+        return .enum
+      }
+      if syntax.is(ProtocolDeclSyntax.self) {
+        return .protocol
+      }
+      if syntax.is(StructDeclSyntax.self) {
+        return .struct
+      }
+    }
+
+    return nil
   }
 }
 
@@ -532,7 +564,7 @@ extension UnifiedStoredMacro: AccessorMacro {
     case .memory:
       return createMemoryAccessors(propertyName: propertyName, variableDecl: variableDecl, context: context)
     case .userDefaults:
-      return createUserDefaultsAccessors(propertyName: propertyName, variableDecl: variableDecl)
+      return createUserDefaultsAccessors(propertyName: propertyName, variableDecl: variableDecl, context: context)
     }
   }
 
@@ -556,7 +588,7 @@ extension UnifiedStoredMacro: AccessorMacro {
     accessors.append(
       createMemoryGetAccessor(propertyName: propertyName, variableDecl: variableDecl))
     accessors.append(
-      createMemorySetAccessor(propertyName: propertyName, variableDecl: variableDecl))
+      createMemorySetAccessor(propertyName: propertyName, variableDecl: variableDecl, context: context))
 
     return accessors
   }
@@ -564,7 +596,8 @@ extension UnifiedStoredMacro: AccessorMacro {
   /// Creates accessor declarations for UserDefaults storage
   private static func createUserDefaultsAccessors(
     propertyName: String,
-    variableDecl: VariableDeclSyntax
+    variableDecl: VariableDeclSyntax,
+    context: some MacroExpansionContext
   ) -> [AccessorDeclSyntax] {
     var accessors: [AccessorDeclSyntax] = []
 
@@ -578,7 +611,7 @@ extension UnifiedStoredMacro: AccessorMacro {
 
     // Add getter and setter
     accessors.append(createSimpleGetAccessor(propertyName: propertyName))
-    accessors.append(createSimpleSetAccessor(propertyName: propertyName))
+    accessors.append(createSimpleSetAccessor(propertyName: propertyName, variableDecl: variableDecl, context: context))
 
     return accessors
   }
@@ -614,14 +647,14 @@ extension UnifiedStoredMacro: AccessorMacro {
   }
   
   private static func createSimpleSetAccessor(
-    propertyName: String
+    propertyName: String,
+    variableDecl: VariableDeclSyntax,
+    context: some MacroExpansionContext
   ) -> AccessorDeclSyntax {
-    return AccessorDeclSyntax(
-      """
-      set { 
-        $\(raw: propertyName).wrappedValue = newValue
-      }
-      """
+    createSetAccessor(
+      assignmentTarget: "$\(propertyName).wrappedValue",
+      variableDecl: variableDecl,
+      context: context
     )
   }
 
@@ -741,16 +774,88 @@ extension UnifiedStoredMacro: AccessorMacro {
   }
 
   private static func createMemorySetAccessor(
-    propertyName: String, variableDecl: VariableDeclSyntax
+    propertyName: String,
+    variableDecl: VariableDeclSyntax,
+    context: some MacroExpansionContext
   ) -> AccessorDeclSyntax {
     let assignmentTarget = "$\(propertyName).wrappedValue"
-    
+    return createSetAccessor(assignmentTarget: assignmentTarget, variableDecl: variableDecl, context: context)
+  }
+
+  private static func createSetAccessor(
+    assignmentTarget: String,
+    variableDecl: VariableDeclSyntax,
+    context: some MacroExpansionContext
+  ) -> AccessorDeclSyntax {
+    let setterKeyword = shouldUseNonmutatingSetter(for: variableDecl, context: context)
+      ? "nonmutating set"
+      : "set"
+
+    guard variableDecl.willSetBlock != nil || variableDecl.didSetBlock != nil else {
+      return AccessorDeclSyntax(
+        """
+        \(raw: setterKeyword) {
+          \(raw: assignmentTarget) = newValue
+        }
+        """
+      )
+    }
+
+    let typeAnnotation = variableDecl.typeSyntax.map { ": \($0.trimmed)" } ?? ""
+    var statements: [String] = []
+
+    if let willSetBlock = variableDecl.willSetBlock {
+      let newValueName = variableDecl.willSetParameterName
+      let observerStatements = makeObserverStatements(from: willSetBlock)
+      statements.append(
+        """
+        do {
+        \(indent("let \(newValueName)\(typeAnnotation) = __graphStoredNewValue\n\(observerStatements)", by: 2))
+        }
+        """
+      )
+    }
+
+    if variableDecl.didSetBlock != nil {
+      let oldValueName = variableDecl.didSetParameterName
+      statements.append("let \(oldValueName)\(typeAnnotation) = \(assignmentTarget)")
+    }
+
+    statements.append("\(assignmentTarget) = __graphStoredNewValue")
+
+    if let didSetBlock = variableDecl.didSetBlock {
+      let observerStatements = makeObserverStatements(from: didSetBlock)
+      statements.append(
+        """
+        do {
+        \(indent(observerStatements, by: 2))
+        }
+        """
+      )
+    }
+
     return AccessorDeclSyntax(
       """
-      set { 
-        \(raw: assignmentTarget) = newValue
+      \(raw: setterKeyword)(__graphStoredNewValue) {
+      \(raw: indent(statements.joined(separator: "\n"), by: 2))
       }
       """
     )
+  }
+
+  private static func makeObserverStatements(from block: CodeBlockSyntax) -> String {
+    block.trimmed.statements
+      .map { $0.trimmed.description }
+      .joined(separator: "\n")
+  }
+
+  private static func indent(_ string: String, by spaces: Int) -> String {
+    let indentation = String(repeating: " ", count: spaces)
+    return string
+      .split(separator: "\n", omittingEmptySubsequences: false)
+      .map { line in
+        line.isEmpty ? "" : "\(indentation)\(line)"
+      }
+      .joined(separator: "\n")
   }
 }

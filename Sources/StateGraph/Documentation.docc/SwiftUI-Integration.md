@@ -115,6 +115,45 @@ struct FormView: View {
 }
 ```
 
+## Lifecycle Tracking
+
+Use `.graphTracking` when a SwiftUI view needs to host a StateGraph subscription
+for side effects. The modifier starts the tracking scope when the view appears
+and cancels it when the view disappears.
+
+```swift
+struct AutoRefreshView: View {
+  let viewModel: AutoRefreshViewModel
+
+  var body: some View {
+    Toggle("Auto Refresh", isOn: viewModel.$isEnabled.binding)
+      .graphTracking {
+        withGraphTrackingMap {
+          viewModel.isEnabled
+        } onChange: { isEnabled in
+          if isEnabled {
+            viewModel.start()
+          } else {
+            viewModel.stop()
+          }
+        }
+      }
+  }
+}
+```
+
+When the tracking closure captures a replaceable dependency, pass an identity so
+the subscription is rebuilt only when that dependency changes:
+
+```swift
+content
+  .graphTracking(id: ObjectIdentifier(viewModel)) {
+    withGraphTrackingGroup {
+      syncExternalState(viewModel.status)
+    }
+  }
+```
+
 ## Observable Conformance
 
 Swift State Graph nodes automatically conform to SwiftUI's `Observable` protocol when available, enabling direct use with SwiftUI's observation system:
@@ -511,4 +550,4 @@ enum ViewState {
 }
 ```
 
-Swift State Graph provides a natural, reactive approach to SwiftUI development, eliminating boilerplate while maintaining full type safety and performance. 
+Swift State Graph provides a natural, reactive approach to SwiftUI development, eliminating boilerplate while maintaining full type safety and performance.
