@@ -10,14 +10,16 @@ struct NodeObserveTests {
     let stream = node.observe()
 
     await confirmation(expectedCount: 2) { c in
-      Task {
-        for try await _ in stream {
+      let task = Task {
+        for await _ in stream {
           c.confirm()
         }
       }
+      try? await Task.sleep(for: .milliseconds(100))
       node.wrappedValue = 1
 
       try? await Task.sleep(for: .milliseconds(100))
+      task.cancel()
 
     }
 
@@ -30,7 +32,7 @@ struct NodeObserveTests {
 
     let results = OSAllocatedUnfairLock.init(initialState: [Int]())
     let task = Task {
-      for try await value in stream {
+      for await value in stream {
         print(value)
         results.withLock { $0.append(value) }
       }
@@ -62,7 +64,7 @@ struct NodeObserveTests {
 
   @Test("Can observe complex type value changes")
   func testObserveWithComplexType() async throws {
-    struct TestStruct: Equatable {
+    struct TestStruct: Equatable, Sendable {
       var value: Int
     }
 
@@ -71,7 +73,7 @@ struct NodeObserveTests {
 
     let results = OSAllocatedUnfairLock.init(initialState: [TestStruct]())
     let task = Task {
-      for try await value in stream {
+      for await value in stream {
         results.withLock { $0.append(value) }
       }
     }
@@ -106,13 +108,13 @@ struct NodeObserveTests {
     let results2 = OSAllocatedUnfairLock.init(initialState: [Int]())
 
     let task1 = Task {
-      for try await value in node.observe() {
+      for await value in node.observe() {
         results1.withLock { $0.append(value) }
       }
     }
 
     let task2 = Task {
-      for try await value in node.observe() {
+      for await value in node.observe() {
         results2.withLock { $0.append(value) }
       }
     }
@@ -157,7 +159,7 @@ struct NodeObserveTests {
 
     let results = OSAllocatedUnfairLock.init(initialState: [Int]())
     let task = Task {
-      for try await value in stream {
+      for await value in stream {
         results.withLock { $0.append(value.value) }
       }
     }
@@ -193,7 +195,7 @@ struct NodeObserveTests {
 
     let results = OSAllocatedUnfairLock.init(initialState: [Int]())
     let task = Task {
-      for try await value in stream {
+      for await value in stream {
         results.withLock { $0.append(value.value) }
       }
     }
@@ -233,7 +235,7 @@ struct NodeObserveTests {
 
     let results = OSAllocatedUnfairLock.init(initialState: [Int]())
     let task = Task {
-      for try await value in stream {
+      for await value in stream {
         results.withLock { $0.append(value.value) }
       }
     }

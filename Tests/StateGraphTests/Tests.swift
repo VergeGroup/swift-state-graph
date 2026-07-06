@@ -459,8 +459,8 @@ struct StreamTests {
       let receivedValues = OSAllocatedUnfairLock<[Int]>(initialState: [])
 
       let task = Task {
-        // Test that withStateGraphTrackingStream now returns projected values directly
-        for await value in withStateGraphTrackingStream(apply: {
+        // Test that GraphObservation returns projected values directly.
+        for await value in GraphObservation({
           model.counter  // Returns Int directly
         }) {
           receivedValues.withLock { $0.append(value) }
@@ -497,7 +497,7 @@ struct StreamTests {
       let expectation = OSAllocatedUnfairLock<Int>(initialState: 0)
 
       let task = Task {
-        for await _ in withStateGraphTrackingStream(apply: {
+        for await _ in GraphObservation({
           _ = model.counter
         }) {
           print(model.counter)
@@ -540,13 +540,13 @@ struct StreamTests {
 
       let task = Task { @MainActor in
 
-        let stream: AsyncStream<Int> = withStateGraphTrackingStream(apply: {
+        let observation = GraphObservation {
           assert(Thread.isMainThread, "Because this stream has been created on MainActor.")
           return model.counter
-        })
+        }
 
         await Task.detached {
-          for await value in stream {
+          for await value in observation {
             valueContinuation.yield(value)
             c.confirm()
             if value == 3 {
@@ -582,22 +582,19 @@ struct StreamTests {
 
   }
 
-  /// Test that AsyncStream from withStateGraphTrackingStream is single-consumer.
-  /// Only the first iterator receives values, the second iterator gets nothing.
-  @Test func single_consumer_stream() async {
+  /// Test that each GraphObservation iterator receives the same observed values.
+  @Test func multiple_consumers_receive_all_observation_values() async {
     let model = NestedModel()
 
     let receivedByA = OSAllocatedUnfairLock<[Int]>(initialState: [])
     let receivedByB = OSAllocatedUnfairLock<[Int]>(initialState: [])
 
-    // Create a single stream
-    let stream = withStateGraphTrackingStream(apply: {
+    let observation = GraphObservation {
       model.counter
-    })
+    }
 
-    // Iterator A - will receive values
     let taskA = Task {
-      for await value in stream {
+      for await value in observation {
         receivedByA.withLock { $0.append(value) }
         if value == 2 {
           break
@@ -605,9 +602,8 @@ struct StreamTests {
       }
     }
 
-    // Iterator B - trying to consume the same stream
     let taskB = Task {
-      for await value in stream {
+      for await value in observation {
         receivedByB.withLock { $0.append(value) }
         if value == 2 {
           break
@@ -623,13 +619,8 @@ struct StreamTests {
     model.counter = 2
     try! await Task.sleep(for: .milliseconds(100))
 
-    // Cancel tasks after a short wait to prevent hanging
-    // (one iterator will never receive value 2 because AsyncStream is single-consumer)
-    taskA.cancel()
-    taskB.cancel()
-
-    // Wait a bit for cancellation to propagate
-    try! await Task.sleep(for: .milliseconds(50))
+    await taskA.value
+    await taskB.value
 
     let valuesA = receivedByA.withLock { $0 }
     let valuesB = receivedByB.withLock { $0 }
@@ -637,24 +628,8 @@ struct StreamTests {
     print("Iterator A received: \(valuesA)")
     print("Iterator B received: \(valuesB)")
 
-    // AsyncStream is single-consumer: values are NOT duplicated
-    // Multiple iterators compete for values (racing behavior)
-    #expect(valuesA.count > 0 || valuesB.count > 0, "At least one iterator should receive values")
-
-    // Verify single-consumer behavior:
-    // 1. Values are NOT duplicated (each value goes to exactly one iterator)
-    // 2. Together, both iterators receive all values
-    let allReceivedValues = Set(valuesA + valuesB)
-    let expectedValues = Set([0, 1, 2])
-    #expect(allReceivedValues == expectedValues, "Together, iterators should receive all values: \(allReceivedValues)")
-
-    // Verify NO duplication - if values were duplicated, combined count would be > 3
-    let combinedCount = valuesA.count + valuesB.count
-    #expect(combinedCount == 3, "Each value should be delivered exactly once (no duplication): combined=\(combinedCount)")
-
-    // This demonstrates that AsyncStream is single-consumer:
-    // - Values are NOT duplicated between iterators (unlike GraphTrackings)
-    // - Multiple iterators compete for values in a racing manner
+    #expect(valuesA == [0, 1, 2])
+    #expect(valuesB == [0, 1, 2])
   }
 
 }

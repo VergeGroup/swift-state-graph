@@ -3,8 +3,8 @@ import Testing
 
 @testable import StateGraph
 
-@Suite("GraphTrackings Tests")
-struct GraphTrackingsTests {
+@Suite("GraphObservation Tests")
+struct GraphObservationTests {
 
   final class ValueCollector<T>: @unchecked Sendable {
     private let lock = NSLock()
@@ -29,7 +29,6 @@ struct GraphTrackingsTests {
     }
   }
 
-  @available(macOS 15.0, iOS 18.0, watchOS 11.0, tvOS 18.0, visionOS 2.0, *)
   @Test
   func basicAsyncSequence() async throws {
     let firstName = Stored(wrappedValue: "John")
@@ -37,7 +36,7 @@ struct GraphTrackingsTests {
     let collector = ValueCollector<String>()
 
     let task = Task {
-      for await fullName in GraphTrackings({
+      for await fullName in GraphObservation({
         "\(firstName.wrappedValue) \(lastName.wrappedValue)"
       }) {
         collector.append(fullName)
@@ -55,30 +54,28 @@ struct GraphTrackingsTests {
     lastName.wrappedValue = "Smith"
     try await Task.sleep(nanoseconds: 100_000_000)
 
-    try await task.value
+    await task.value
 
     #expect(collector.values == ["John Doe", "Jane Doe", "Jane Smith"])
   }
 
-  @available(macOS 15.0, iOS 18.0, watchOS 11.0, tvOS 18.0, visionOS 2.0, *)
   @Test
   func startWithBehavior() async throws {
     let value = Stored(wrappedValue: 42)
     let collector = ValueCollector<Int>()
 
     let task = Task {
-      for await v in GraphTrackings({ value.wrappedValue }) {
+      for await v in GraphObservation({ value.wrappedValue }) {
         collector.append(v)
         break
       }
     }
 
-    try await task.value
+    await task.value
 
     #expect(collector.values == [42])
   }
 
-  @available(macOS 15.0, iOS 18.0, watchOS 11.0, tvOS 18.0, visionOS 2.0, *)
   @Test
   func dynamicTracking() async throws {
     let useA = Stored(wrappedValue: true)
@@ -87,7 +84,7 @@ struct GraphTrackingsTests {
     let collector = ValueCollector<String>()
 
     let task = Task {
-      for await v in GraphTrackings({
+      for await v in GraphObservation({
         useA.wrappedValue ? valueA.wrappedValue : valueB.wrappedValue
       }) {
         collector.append(v)
@@ -111,19 +108,18 @@ struct GraphTrackingsTests {
     valueB.wrappedValue = "B3"
     try await Task.sleep(nanoseconds: 100_000_000)
 
-    try await task.value
+    await task.value
 
     #expect(collector.values == ["A", "B2", "B3"])
   }
 
-  @available(macOS 15.0, iOS 18.0, watchOS 11.0, tvOS 18.0, visionOS 2.0, *)
   @Test
   func taskCancellation() async throws {
     let value = Stored(wrappedValue: 0)
     let collector = ValueCollector<Int>()
 
     let task = Task {
-      for await v in GraphTrackings({ value.wrappedValue }) {
+      for await v in GraphObservation({ value.wrappedValue }) {
         collector.append(v)
       }
     }
@@ -142,7 +138,6 @@ struct GraphTrackingsTests {
     #expect(collector.count <= 2)
   }
 
-  @available(macOS 15.0, iOS 18.0, watchOS 11.0, tvOS 18.0, visionOS 2.0, *)
   @Test
   func untilFinished() async throws {
     let iterationCounter = Stored(wrappedValue: 0)
@@ -150,7 +145,7 @@ struct GraphTrackingsTests {
     let collector = ValueCollector<Int>()
 
     let task = Task {
-      for await v in GraphTrackings<Int, Never>.untilFinished({
+      for await v in GraphObservation<Int>.untilFinished({
         iterationCounter.wrappedValue += 1
         if iterationCounter.wrappedValue > 3 {
           return .finish
@@ -172,12 +167,11 @@ struct GraphTrackingsTests {
     value.wrappedValue = 30
     try await Task.sleep(nanoseconds: 100_000_000)
 
-    try await task.value
+    await task.value
 
     #expect(collector.values == [0, 10, 20])
   }
 
-  @available(macOS 15.0, iOS 18.0, watchOS 11.0, tvOS 18.0, visionOS 2.0, *)
   @Test
   func multipleNodes() async throws {
     let x = Stored(wrappedValue: 1)
@@ -186,7 +180,7 @@ struct GraphTrackingsTests {
     let collector = ValueCollector<Int>()
 
     let task = Task {
-      for await sum in GraphTrackings({ x.wrappedValue + y.wrappedValue }) {
+      for await sum in GraphObservation({ x.wrappedValue + y.wrappedValue }) {
         collector.append(sum)
         if collector.count >= 3 {
           break
@@ -206,32 +200,8 @@ struct GraphTrackingsTests {
     y.wrappedValue = 10
     try await Task.sleep(nanoseconds: 100_000_000)
 
-    try await task.value
+    await task.value
 
     #expect(collector.values == [3, 7, 15])
   }
-
-  
-}
-
-import Observation
-
-@available(macOS 26, iOS 26, tvOS 26, watchOS 26, *)
-struct Syntax {
-  
-  
-  func basic() {
-    
-    let s = Observations {
-      
-    }
-    
-    Task {
-      for await e in s {
-        
-      }
-    }
-    
-  }
-  
 }
