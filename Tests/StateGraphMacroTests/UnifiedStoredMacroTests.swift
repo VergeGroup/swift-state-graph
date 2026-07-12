@@ -354,6 +354,41 @@ final class UnifiedStoredMacroTests: XCTestCase {
     )
   }
 
+  func test_memory_storage_in_struct_uses_nonmutating_set() {
+    assertMacro {
+      """
+      struct ViewState {
+
+        @GraphStored
+        var count: Int = 0
+
+      }
+      """
+    } expansion: {
+      """
+      struct ViewState {
+        var count: Int {
+          @storageRestrictions(
+            accesses: $count
+          )
+          init(initialValue) {
+            $count.wrappedValue = initialValue
+          }
+          get {
+            return $count.wrappedValue
+          }
+          nonmutating set {
+            $count.wrappedValue = newValue
+          }
+        }
+
+        @GraphIgnored let $count: Stored<Int> = .init(name: "count", wrappedValue: 0)
+
+      }
+      """
+    }
+  }
+
   func test_memory_storage_explicit() {
     assertMacro {
       """
@@ -737,7 +772,7 @@ final class UnifiedStoredMacroTests: XCTestCase {
           get {
             return $setting.wrappedValue
           }
-          set {
+          nonmutating set {
             $setting.wrappedValue = newValue
           }
         }
