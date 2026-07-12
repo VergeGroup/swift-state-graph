@@ -2,6 +2,7 @@ import Testing
 @testable import StateGraphNormalization
 import StateGraph
 import Foundation
+import os
 
 extension ComputedEnvironmentValues {
   
@@ -130,19 +131,194 @@ final class Comment: TypedIdentifiable, Sendable {
 final class NormalizedStore: ComputedEnvironmentKey, Sendable {
   
   typealias Value = NormalizedStore
-  
-  @GraphStored
-  var users: EntityStore<User> = .init()  
-  @GraphStored
-  var posts: EntityStore<Post> = .init()
-  @GraphStored
-  var comments: EntityStore<Comment> = .init()
-  
-  
+
+  let users: EntityStore<User>
+  let posts: EntityStore<Post>
+  let comments: EntityStore<Comment>
+
+  init() {
+    let mutationCoordinator = EntityStoreMutationCoordinator()
+    self.users = .init(mutationCoordinator: mutationCoordinator)
+    self.posts = .init(mutationCoordinator: mutationCoordinator)
+    self.comments = .init(mutationCoordinator: mutationCoordinator)
+  }
+}
+
+private final class ConcurrentEntity: TypedIdentifiable, Sendable {
+
+  typealias TypedIdentifierRawValue = Int
+
+  let typedID: TypedID
+
+  init(id: Int) {
+    self.typedID = .init(id)
+  }
+}
+
+private struct ValueEntity: TypedIdentifiable, Sendable {
+
+  typealias TypedIdentifierRawValue = Int
+
+  let typedID: TypedID
+  var value: Int
+
+  init(id: Int, value: Int) {
+    self.typedID = .init(id)
+    self.value = value
+  }
+}
+
+private enum MutationError: Error {
+  case expected
+}
+
+private actor ConcurrentStartGate {
+
+  private let participantCount: Int
+  private var continuations: [CheckedContinuation<Void, Never>] = []
+
+  init(participantCount: Int) {
+    self.participantCount = participantCount
+  }
+
+  func wait() async {
+    if continuations.count + 1 == participantCount {
+      let continuations = self.continuations
+      self.continuations.removeAll()
+      continuations.forEach { $0.resume() }
+      return
+    }
+
+    await withCheckedContinuation { continuation in
+      continuations.append(continuation)
+    }
+  }
 }
 
 @Suite
 struct NormalizationTests {
+
+  @Test func concurrentDistinctIDInsertionsAreNotLost() async {
+    let participantCount = 250
+    let gate = ConcurrentStartGate(participantCount: participantCount)
+    let store = EntityStore<ConcurrentEntity>()
+
+    await withTaskGroup(of: Void.self) { group in
+      for id in 0..<participantCount {
+        group.addTask {
+          await gate.wait()
+          store.add(.init(id: id))
+        }
+      }
+    }
+
+    #expect(store.count == participantCount)
+    for id in 0..<participantCount {
+      #expect(store.contains(.init(id)))
+    }
+  }
+
+  @Test func concurrentSameIDUpdatesReturnOneCanonicalReference() async {
+    let participantCount = 100
+    let gate = ConcurrentStartGate(participantCount: participantCount)
+    let store = EntityStore<ConcurrentEntity>()
+
+    let returnedEntities = await withTaskGroup(
+      of: ConcurrentEntity.self,
+      returning: [ConcurrentEntity].self
+    ) { group in
+      for _ in 0..<participantCount {
+        group.addTask {
+          await gate.wait()
+          return store.updateOrCreate(
+            id: .init(1),
+            update: { _ in },
+            create: { .init(id: 1) }
+          )
+        }
+      }
+
+      return await group.reduce(into: []) { result, entity in
+        result.append(entity)
+      }
+    }
+
+    let canonicalEntity = try! #require(store.get(by: .init(1)))
+    #expect(returnedEntities.allSatisfy { $0 === canonicalEntity })
+  }
+
+  @Test func batchMutationPublishesOneGraphUpdate() async {
+    let store = EntityStore<ValueEntity>()
+    let observedCounts = OSAllocatedUnfairLock(initialState: [Int]())
+
+    await confirmation(expectedCount: 2) { updates in
+      let stream = withStateGraphTrackingStream(apply: { store.count })
+      let trackingTask = Task {
+        for await count in stream {
+          observedCounts.withLock { $0.append(count) }
+          updates.confirm()
+          if count == 2 {
+            break
+          }
+        }
+      }
+
+      store.add([
+        .init(id: 1, value: 1),
+        .init(id: 2, value: 2),
+      ])
+      await trackingTask.value
+    }
+
+    #expect(observedCounts.withLock { $0 } == [0, 2])
+  }
+
+  @Test func failedValueUpdateDoesNotCommitOrPublish() {
+    let store = EntityStore<ValueEntity>(
+      entities: [.init(1): .init(id: 1, value: 1)]
+    )
+    let computationCount = OSAllocatedUnfairLock(initialState: 0)
+    let value = Computed { _ in
+      computationCount.withLock { $0 += 1 }
+      return store.get(by: .init(1))?.value
+    }
+
+    #expect(value.wrappedValue == 1)
+    #expect(throws: MutationError.self) {
+      try store.updateOrCreate(
+        id: .init(1),
+        update: { entity throws(MutationError) in
+          entity.value = 2
+          throw .expected
+        },
+        create: { () throws(MutationError) -> ValueEntity in
+          .init(id: 1, value: 2)
+        }
+      )
+    }
+
+    #expect(store.get(by: .init(1))?.value == 1)
+    #expect(value.wrappedValue == 1)
+    #expect(computationCount.withLock { $0 } == 1)
+  }
+
+  @Test func sharedCoordinatorSupportsNestedStoreMutation() {
+    let mutationCoordinator = EntityStoreMutationCoordinator()
+    let parentStore = EntityStore<ValueEntity>(mutationCoordinator: mutationCoordinator)
+    let childStore = EntityStore<ValueEntity>(mutationCoordinator: mutationCoordinator)
+
+    parentStore.updateOrCreate(
+      id: .init(1),
+      update: { _ in },
+      create: {
+        childStore.add(.init(id: 2, value: 2))
+        return .init(id: 1, value: 1)
+      }
+    )
+
+    #expect(parentStore.contains(.init(1)))
+    #expect(childStore.contains(.init(2)))
+  }
 
   @MainActor
   @Test func basic() async {
