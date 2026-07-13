@@ -330,19 +330,36 @@ public final class _Stored<Value, S: Storage<Value>>: Node, Observable, CustomDe
     return "\(typeName)(name=\(info.name.map(String.init) ?? "noname"), value=\(String(describing: value)))"
   }
   
-  /// Accesses the value with thread-safe locking.
+  /// Mutates the stored value while holding the node's internal lock.
   ///
-  /// - Parameter body: A closure that takes an inout parameter of the value
-  /// - Returns: The result of the closure
+  /// This method bypasses the node's mutation pipeline. It does not emit StateGraph
+  /// or Observation notifications, invalidate dependent nodes, or call the
+  /// `onDidSet(_:)` handler.
+  ///
+  /// - Important: The mutation executes while the same lock that protects graph
+  ///   bookkeeping is held. Calling node APIs or acquiring another node's lock from
+  ///   `mutation` is unsupported and can introduce lock-order deadlocks.
+  ///
+  /// Prefer assigning `wrappedValue`. Use this method only when the caller owns the
+  /// lock ordering and intentionally does not require notifications.
+  ///
+  /// - Parameter mutation: A closure that receives the stored value as an `inout`
+  ///   parameter.
+  /// - Returns: The result returned by `mutation`.
+  public borrowing func unsafeModify<Result, E>(
+    _ mutation: (inout Value) throws(E) -> Result
+  ) throws(E) -> Result where E : Error {
+    lock.lock()
+    defer { lock.unlock() }
+    return try mutation(&storage.value)
+  }
+
+  /// Use `unsafeModify(_:)`; its name makes the notification and locking risks explicit.
+  @available(*, deprecated, renamed: "unsafeModify")
   public borrowing func withLock<Result, E>(
     _ body: (inout Value) throws(E) -> Result
   ) throws(E) -> Result where E : Error {
-    lock.lock()
-    defer {
-      lock.unlock()
-    }
-    let result = try body(&storage.value)
-    return result
+    try unsafeModify(body)
   }
 
   /// Sets a closure to be called after the value changes via wrappedValue setter.
