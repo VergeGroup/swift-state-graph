@@ -23,6 +23,10 @@ struct NodeLifecycleTests {
 
     #expect(weakUpstream == nil)
 
+    // A computed node cannot observe upstream deallocation as an invalidation event,
+    // so it keeps serving its cached value until another dependency changes.
+    #expect(downstream.wrappedValue == 10)
+
     trigger.wrappedValue = 1
     #expect(downstream.wrappedValue == 1)
   }
