@@ -4,119 +4,188 @@
 import Foundation
 import TypedIdentifier
 
-/// Coordinates mutations across a related set of entity stores.
+/// Serializes access across a related set of entity stores.
 ///
-/// Give every ``EntityStore`` in one database the same coordinator to serialize
-/// canonical entity selection across tables. The lock is recursive so a store
-/// mutation may synchronously import relationships into another coordinated
-/// store.
-public final class EntityStoreMutationCoordinator: @unchecked Sendable {
+/// Give every ``EntityStore`` in one database the same coordinator to protect
+/// canonical entity lookup and mutation across tables. The lock is recursive
+/// because an entity import may synchronously access another coordinated store.
+public final class EntityStoreCoordinator: Sendable {
 
-  private let lock = NSRecursiveLock()
+  fileprivate let lock = NSRecursiveLock()
 
   public init() {}
+}
 
-  fileprivate func withLock<Result, Failure: Error>(
-    _ body: () throws(Failure) -> Result
-  ) throws(Failure) -> Result {
-    lock.lock()
-    defer { lock.unlock() }
-    return try body()
+/// A uniquely owned canonical entity table.
+///
+/// `EntityTable` is deliberately unsynchronized. ``EntityStore`` acquires its
+/// coordinator before beginning every borrow or exclusive access to this value.
+/// Keeping the dictionary inline avoids both an escaping copy and a second heap
+/// storage object.
+private struct EntityTable<T: TypedIdentifiable & Sendable>: ~Copyable {
+
+  private var entities: [T.TypedID: T]
+  private var revision: UInt64 = 0
+
+  init(entities: consuming [T.TypedID: T]) {
+    self.entities = entities
+  }
+
+  borrowing func get(by id: T.TypedID) -> T? {
+    entities[id]
+  }
+
+  borrowing func getAll() -> [T] {
+    Array(entities.values)
+  }
+
+  borrowing func filter(_ predicate: (T) -> Bool) -> [T] {
+    entities.values.filter(predicate)
+  }
+
+  var isEmpty: Bool {
+    entities.isEmpty
+  }
+
+  var count: Int {
+    entities.count
+  }
+
+  borrowing func contains(_ id: T.TypedID) -> Bool {
+    entities[id] != nil
+  }
+
+  mutating func set(_ entity: T?, for id: T.TypedID) {
+    entities[id] = entity
+  }
+
+  @discardableResult
+  mutating func advanceRevision() -> UInt64 {
+    revision &+= 1
+    return revision
   }
 }
 
 /// A graph-observable canonical entity collection.
 ///
-/// `EntityStore` has reference semantics and owns its entity dictionary. Reads
-/// observe one stable dictionary value, while mutations are serialized by the
-/// supplied ``EntityStoreMutationCoordinator`` and publish one graph update
-/// after a successful commit.
+/// `EntityStore` has reference semantics and owns one noncopyable entity table.
+/// Every table access begins after the supplied ``EntityStoreCoordinator`` is
+/// locked. Successful mutations update the table in place, end their exclusive
+/// access, and then publish one graph update.
 public final class EntityStore<T: TypedIdentifiable & Sendable>: Sendable {
 
-  private let mutationCoordinator: EntityStoreMutationCoordinator
+  private let coordinator: EntityStoreCoordinator
+  private let graphRevision: Stored<UInt64>
 
-  @GraphStored
-  private var entities: [T.TypedID: T]
+  /// Mutable table storage guarded by `coordinator`.
+  ///
+  /// Every access must begin inside ``withLock(_:)``. The unsafe annotation is
+  /// limited to this property so `EntityStore` keeps checked `Sendable`
+  /// conformance for all other state.
+  nonisolated(unsafe) private var table: EntityTable<T>
 
   /// Creates an entity store.
   ///
   /// - Parameters:
   ///   - entities: The initial canonical entities, keyed by typed identifier.
-  ///   - mutationCoordinator: The coordinator shared by related entity stores.
+  ///   - coordinator: The coordinator shared by related entity stores.
   ///     Omitting it creates an independently coordinated store.
   public init(
-    entities: [T.TypedID: T] = [:],
-    mutationCoordinator: EntityStoreMutationCoordinator = .init()
+    entities: consuming [T.TypedID: T] = [:],
+    coordinator: EntityStoreCoordinator = .init()
   ) {
-    self.mutationCoordinator = mutationCoordinator
-    self.entities = entities
+    self.coordinator = coordinator
+    self.graphRevision = .init(name: "EntityStore.revision", wrappedValue: 0)
+    self.table = .init(entities: entities)
   }
 
   public func get(by id: T.TypedID) -> T? {
-    entities[id]
+    withLock {
+      trackAccess()
+      return table.get(by: id)
+    }
   }
 
-  public func getAll() -> some Collection<T> {
-    entities.values
+  /// Returns an independent snapshot of the current canonical entities.
+  public func getAll() -> [T] {
+    withLock {
+      trackAccess()
+      return table.getAll()
+    }
   }
 
   public func add(_ entity: T) {
-    modifyEntities { entities in
-      entities[entity.id] = entity
+    mutate {
+      table.set(entity, for: entity.id)
     }
   }
 
   public func add(_ newEntities: some Sequence<T>) {
-    modifyEntities { entities in
+    mutate {
       for entity in newEntities {
-        entities[entity.id] = entity
+        table.set(entity, for: entity.id)
       }
     }
   }
 
   public func modify(_ id: T.TypedID, _ block: (inout T) -> Void) {
-    modifyEntities { entities in
-      guard var entity = entities[id] else { return }
+    mutate {
+      guard var entity = table.get(by: id) else { return }
       block(&entity)
-      entities[id] = entity
+      table.set(entity, for: id)
     }
   }
 
   public func filter(_ predicate: (T) -> Bool) -> [T] {
-    entities.values.filter(predicate)
+    withLock {
+      trackAccess()
+      return table.filter(predicate)
+    }
   }
 
   public func update(_ entity: T) {
-    modifyEntities { entities in
-      entities[entity.id] = entity
+    mutate {
+      table.set(entity, for: entity.id)
     }
   }
 
   public func delete(_ id: T.TypedID) {
-    modifyEntities { entities in
-      entities.removeValue(forKey: id)
+    mutate {
+      table.set(nil, for: id)
     }
   }
 
   public var isEmpty: Bool {
-    entities.isEmpty
+    withLock {
+      trackAccess()
+      return table.isEmpty
+    }
   }
 
   public var count: Int {
-    entities.count
+    withLock {
+      trackAccess()
+      return table.count
+    }
   }
 
   public func contains(_ id: T.TypedID) -> Bool {
-    entities[id] != nil
+    withLock {
+      trackAccess()
+      return table.contains(id)
+    }
   }
 
   public subscript(_ id: T.TypedID) -> T? {
     get {
-      entities[id]
+      withLock {
+        trackAccess()
+        return table.get(by: id)
+      }
     }
     set {
-      modifyEntities { entities in
-        entities[id] = newValue
+      mutate {
+        table.set(newValue, for: id)
       }
     }
   }
@@ -126,8 +195,8 @@ public final class EntityStore<T: TypedIdentifiable & Sendable>: Sendable {
   /// The coordinator remains locked while `update` or `create` executes, so
   /// concurrent calls for the same identifier converge on one stored entity.
   /// A successful operation publishes one store update. If either closure
-  /// throws, the candidate dictionary is not committed and the store does not
-  /// publish an update.
+  /// throws, the entity table is not mutated and the store does not publish an
+  /// update.
   ///
   /// The rollback guarantee follows `T`'s semantics. Mutations already applied
   /// to a reference-type entity are not reverted when `update` throws.
@@ -143,28 +212,45 @@ public final class EntityStore<T: TypedIdentifiable & Sendable>: Sendable {
     update: (inout T) throws(ResultError) -> Void,
     create: () throws(ResultError) -> T
   ) throws(ResultError) -> T {
-    try modifyEntities { (entities: inout [T.TypedID: T]) throws(ResultError) -> T in
-      if var entity = entities[id] {
+    try mutate { () throws(ResultError) -> T in
+      if var entity = table.get(by: id) {
         try update(&entity)
-        entities[id] = entity
+        table.set(entity, for: id)
         return entity
       }
 
       let entity = try create()
-      entities[entity.id] = entity
+      table.set(entity, for: entity.id)
       return entity
     }
   }
 
   @discardableResult
-  private func modifyEntities<Result, Failure: Error>(
-    _ body: (inout [T.TypedID: T]) throws(Failure) -> Result
+  private func withLock<Result, Failure: Error>(
+    _ body: () throws(Failure) -> Result
   ) throws(Failure) -> Result {
-    try mutationCoordinator.withLock { () throws(Failure) -> Result in
-      var candidate = entities
-      let result = try body(&candidate)
-      entities = candidate
+    coordinator.lock.lock()
+    defer { coordinator.lock.unlock() }
+    return try body()
+  }
+
+  @discardableResult
+  private func mutate<Result, Failure: Error>(
+    _ body: () throws(Failure) -> Result
+  ) throws(Failure) -> Result {
+    try withLock { () throws(Failure) -> Result in
+      let result = try body()
+      publishMutation()
       return result
     }
+  }
+
+  private func trackAccess() {
+    _ = graphRevision.wrappedValue
+  }
+
+  private func publishMutation() {
+    let revision = table.advanceRevision()
+    graphRevision.wrappedValue = revision
   }
 }

@@ -1,6 +1,7 @@
 import Testing
 @testable import StateGraphNormalization
 import StateGraph
+import Dispatch
 import Foundation
 import os
 
@@ -137,10 +138,10 @@ final class NormalizedStore: ComputedEnvironmentKey, Sendable {
   let comments: EntityStore<Comment>
 
   init() {
-    let mutationCoordinator = EntityStoreMutationCoordinator()
-    self.users = .init(mutationCoordinator: mutationCoordinator)
-    self.posts = .init(mutationCoordinator: mutationCoordinator)
-    self.comments = .init(mutationCoordinator: mutationCoordinator)
+    let coordinator = EntityStoreCoordinator()
+    self.users = .init(coordinator: coordinator)
+    self.posts = .init(coordinator: coordinator)
+    self.comments = .init(coordinator: coordinator)
   }
 }
 
@@ -303,9 +304,9 @@ struct NormalizationTests {
   }
 
   @Test func sharedCoordinatorSupportsNestedStoreMutation() {
-    let mutationCoordinator = EntityStoreMutationCoordinator()
-    let parentStore = EntityStore<ValueEntity>(mutationCoordinator: mutationCoordinator)
-    let childStore = EntityStore<ValueEntity>(mutationCoordinator: mutationCoordinator)
+    let coordinator = EntityStoreCoordinator()
+    let parentStore = EntityStore<ValueEntity>(coordinator: coordinator)
+    let childStore = EntityStore<ValueEntity>(coordinator: coordinator)
 
     parentStore.updateOrCreate(
       id: .init(1),
@@ -318,6 +319,112 @@ struct NormalizationTests {
 
     #expect(parentStore.contains(.init(1)))
     #expect(childStore.contains(.init(2)))
+  }
+
+  @Test func readWaitsForCoordinatedMutation() {
+    let coordinator = EntityStoreCoordinator()
+    let store = EntityStore<ValueEntity>(
+      entities: [.init(1): .init(id: 1, value: 1)],
+      coordinator: coordinator
+    )
+    let mutationStarted = DispatchSemaphore(value: 0)
+    let allowMutationToFinish = DispatchSemaphore(value: 0)
+    let readStarted = DispatchSemaphore(value: 0)
+    let readFinished = DispatchSemaphore(value: 0)
+    let work = DispatchGroup()
+    let readValue = OSAllocatedUnfairLock<Int?>(initialState: nil)
+
+    work.enter()
+    DispatchQueue.global().async {
+      store.updateOrCreate(
+        id: .init(1),
+        update: { entity in
+          entity.value = 2
+          mutationStarted.signal()
+          _ = allowMutationToFinish.wait(timeout: .now() + .seconds(5))
+        },
+        create: { .init(id: 1, value: 2) }
+      )
+      work.leave()
+    }
+
+    #expect(mutationStarted.wait(timeout: .now() + .seconds(5)) == .success)
+
+    work.enter()
+    DispatchQueue.global().async {
+      readStarted.signal()
+      readValue.withLock { $0 = store.get(by: .init(1))?.value }
+      readFinished.signal()
+      work.leave()
+    }
+
+    #expect(readStarted.wait(timeout: .now() + .seconds(5)) == .success)
+    #expect(readFinished.wait(timeout: .now() + .milliseconds(100)) == .timedOut)
+
+    allowMutationToFinish.signal()
+
+    #expect(readFinished.wait(timeout: .now() + .seconds(5)) == .success)
+    #expect(work.wait(timeout: .now() + .seconds(5)) == .success)
+    #expect(readValue.withLock { $0 } == 2)
+  }
+
+  @Test func sharedCoordinatorBlocksReadsAcrossStores() {
+    let coordinator = EntityStoreCoordinator()
+    let mutatingStore = EntityStore<ValueEntity>(
+      entities: [.init(1): .init(id: 1, value: 1)],
+      coordinator: coordinator
+    )
+    let readingStore = EntityStore<ValueEntity>(
+      entities: [.init(2): .init(id: 2, value: 2)],
+      coordinator: coordinator
+    )
+    let mutationStarted = DispatchSemaphore(value: 0)
+    let allowMutationToFinish = DispatchSemaphore(value: 0)
+    let readStarted = DispatchSemaphore(value: 0)
+    let readFinished = DispatchSemaphore(value: 0)
+    let work = DispatchGroup()
+
+    work.enter()
+    DispatchQueue.global().async {
+      mutatingStore.updateOrCreate(
+        id: .init(1),
+        update: { _ in
+          mutationStarted.signal()
+          _ = allowMutationToFinish.wait(timeout: .now() + .seconds(5))
+        },
+        create: { .init(id: 1, value: 1) }
+      )
+      work.leave()
+    }
+
+    #expect(mutationStarted.wait(timeout: .now() + .seconds(5)) == .success)
+
+    work.enter()
+    DispatchQueue.global().async {
+      readStarted.signal()
+      _ = readingStore.get(by: .init(2))
+      readFinished.signal()
+      work.leave()
+    }
+
+    #expect(readStarted.wait(timeout: .now() + .seconds(5)) == .success)
+    #expect(readFinished.wait(timeout: .now() + .milliseconds(100)) == .timedOut)
+
+    allowMutationToFinish.signal()
+
+    #expect(readFinished.wait(timeout: .now() + .seconds(5)) == .success)
+    #expect(work.wait(timeout: .now() + .seconds(5)) == .success)
+  }
+
+  @Test func getAllReturnsIndependentSnapshot() {
+    let store = EntityStore<ValueEntity>()
+    store.add(.init(id: 1, value: 1))
+
+    let snapshot = store.getAll()
+    store.add(.init(id: 2, value: 2))
+
+    #expect(snapshot.map(\.typedID) == [.init(1)])
+    #expect(Set(store.getAll().map(\.typedID)) == [.init(1), .init(2)])
   }
 
   @MainActor
