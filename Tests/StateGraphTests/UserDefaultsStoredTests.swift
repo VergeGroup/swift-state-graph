@@ -4,6 +4,97 @@ import Foundation
 
 @Suite
 struct UserDefaultsStoredTests {
+
+  private final class NotificationCounter: @unchecked Sendable {
+    private let value = OSAllocatedUnfairLock(initialState: 0)
+
+    var current: Int {
+      value.withLock { $0 }
+    }
+
+    func increment() {
+      value.withLock { $0 += 1 }
+    }
+  }
+
+  private final class UserDefaultsReference: @unchecked Sendable {
+    let value: UserDefaults
+
+    init(_ value: UserDefaults) {
+      self.value = value
+    }
+  }
+
+  private final class PublicationLockProbe: @unchecked Sendable {
+    private struct State {
+      var didRun = false
+      var concurrentReadCompleted = false
+    }
+
+    private let state = OSAllocatedUnfairLock(initialState: State())
+
+    var result: (didRun: Bool, concurrentReadCompleted: Bool) {
+      state.withLock { ($0.didRun, $0.concurrentReadCompleted) }
+    }
+
+    func verifyConcurrentOperation(_ operation: @escaping @Sendable () -> Void) {
+      let readFinished = DispatchSemaphore(value: 0)
+      DispatchQueue.global().async {
+        operation()
+        readFinished.signal()
+      }
+
+      let didComplete = readFinished.wait(timeout: .now() + 1) == .success
+      state.withLock {
+        $0.didRun = true
+        $0.concurrentReadCompleted = didComplete
+      }
+    }
+  }
+
+  private final class BlockingReadController: @unchecked Sendable {
+    private let shouldBlock = OSAllocatedUnfairLock(initialState: false)
+    let didStart = DispatchSemaphore(value: 0)
+    let resume = DispatchSemaphore(value: 0)
+
+    func blockNextRead() {
+      shouldBlock.withLock { $0 = true }
+    }
+
+    func load(_ value: BlockingUserDefaultsValue) -> BlockingUserDefaultsValue {
+      let shouldBlock = shouldBlock.withLock { shouldBlock in
+        defer { shouldBlock = false }
+        return shouldBlock
+      }
+
+      if shouldBlock {
+        didStart.signal()
+        resume.wait()
+      }
+
+      return value
+    }
+  }
+
+  private struct BlockingUserDefaultsValue: Equatable, Sendable, UserDefaultsStorable {
+    static let readController = BlockingReadController()
+
+    let rawValue: String
+
+    static func _getValue(
+      from userDefaults: UserDefaults,
+      forKey key: String,
+      defaultValue: Self
+    ) -> Self {
+      readController.load(
+        .init(rawValue: userDefaults.string(forKey: key) ?? defaultValue.rawValue)
+      )
+    }
+
+    func _setValue(to userDefaults: UserDefaults, forKey key: String) {
+      userDefaults.set(rawValue, forKey: key)
+    }
+  }
   
   // テスト用のユニークなキーを生成するヘルパー
   private func makeTestKey() -> String {
@@ -240,6 +331,199 @@ struct UserDefaultsStoredTests {
     #expect(weakNode == nil)
     
 
+  }
+
+  @Test
+  func userDefaultsStorage_suppressesLocalWriteNotification() async throws {
+    let key = makeTestKey()
+    let userDefaults = makeTestUserDefaults()
+    let counter = NotificationCounter()
+    let storage = UserDefaultsStorage(
+      userDefaults: userDefaults,
+      key: key,
+      defaultValue: "initial"
+    )
+    storage.loaded(context: .init(onStorageUpdated: counter.increment))
+    defer { storage.unloaded() }
+
+    storage.value = "local"
+    NotificationCenter.default.post(
+      name: UserDefaults.didChangeNotification,
+      object: userDefaults
+    )
+    try await Task.sleep(for: .milliseconds(50))
+
+    #expect(storage.value == "local")
+    #expect(counter.current == 0)
+  }
+
+  @Test
+  func userDefaultsStorage_publishesExternalWriteOnce() async throws {
+    let key = makeTestKey()
+    let userDefaults = makeTestUserDefaults()
+    let counter = NotificationCounter()
+    let storage = UserDefaultsStorage(
+      userDefaults: userDefaults,
+      key: key,
+      defaultValue: "initial"
+    )
+    storage.loaded(context: .init(onStorageUpdated: counter.increment))
+    defer { storage.unloaded() }
+
+    userDefaults.set("external", forKey: key)
+    NotificationCenter.default.post(
+      name: UserDefaults.didChangeNotification,
+      object: userDefaults
+    )
+    NotificationCenter.default.post(
+      name: UserDefaults.didChangeNotification,
+      object: userDefaults
+    )
+    try await Task.sleep(for: .milliseconds(50))
+
+    #expect(storage.value == "external")
+    #expect(counter.current == 1)
+  }
+
+  @Test
+  func userDefaultsStorage_doesNotPublishAfterUnload() async throws {
+    let key = makeTestKey()
+    let userDefaults = makeTestUserDefaults()
+    let counter = NotificationCounter()
+    let storage = UserDefaultsStorage(
+      userDefaults: userDefaults,
+      key: key,
+      defaultValue: "initial"
+    )
+    storage.loaded(context: .init(onStorageUpdated: counter.increment))
+    storage.unloaded()
+
+    userDefaults.set("external", forKey: key)
+    NotificationCenter.default.post(
+      name: UserDefaults.didChangeNotification,
+      object: userDefaults
+    )
+    try await Task.sleep(for: .milliseconds(50))
+
+    #expect(counter.current == 0)
+  }
+
+  @Test
+  func userDefaultsStorage_serializesNotificationReadWithLocalWrite() {
+    let key = makeTestKey()
+    let userDefaults = makeTestUserDefaults()
+    let counter = NotificationCounter()
+    let initialValue = BlockingUserDefaultsValue(rawValue: "persisted")
+    userDefaults.set(initialValue.rawValue, forKey: key)
+
+    let storage = UserDefaultsStorage(
+      userDefaults: userDefaults,
+      key: key,
+      defaultValue: initialValue
+    )
+    storage.loaded(context: .init(onStorageUpdated: counter.increment))
+    defer { storage.unloaded() }
+
+    let controller = BlockingUserDefaultsValue.readController
+    controller.blockNextRead()
+
+    let notificationFinished = DispatchSemaphore(value: 0)
+    let userDefaultsReference = UserDefaultsReference(userDefaults)
+    DispatchQueue.global().async {
+      NotificationCenter.default.post(
+        name: UserDefaults.didChangeNotification,
+        object: userDefaultsReference.value
+      )
+      notificationFinished.signal()
+    }
+
+    #expect(controller.didStart.wait(timeout: .now() + 1) == .success)
+
+    let setterStarted = DispatchSemaphore(value: 0)
+    let setterFinished = DispatchSemaphore(value: 0)
+    DispatchQueue.global().async {
+      setterStarted.signal()
+      storage.value = .init(rawValue: "local")
+      setterFinished.signal()
+    }
+
+    #expect(setterStarted.wait(timeout: .now() + 1) == .success)
+    #expect(setterFinished.wait(timeout: .now() + 0.05) == .timedOut)
+
+    controller.resume.signal()
+
+    #expect(notificationFinished.wait(timeout: .now() + 1) == .success)
+    #expect(setterFinished.wait(timeout: .now() + 1) == .success)
+    #expect(storage.value == .init(rawValue: "local"))
+    #expect(counter.current == 0)
+  }
+
+  @Test
+  func userDefaultsStorage_publishesAfterCoordinatorUnlocks() {
+    let key = makeTestKey()
+    let userDefaults = makeTestUserDefaults()
+    let writer = UserDefaultsStorage(
+      userDefaults: userDefaults,
+      key: key,
+      defaultValue: "initial"
+    )
+    let observer = UserDefaultsStorage(
+      userDefaults: userDefaults,
+      key: key,
+      defaultValue: "initial"
+    )
+    let probe = PublicationLockProbe()
+
+    writer.loaded(context: .init(onStorageUpdated: {}))
+    observer.loaded(
+      context: .init {
+        probe.verifyConcurrentOperation {
+          _ = writer.value
+        }
+      }
+    )
+    defer {
+      writer.unloaded()
+      observer.unloaded()
+    }
+
+    writer.value = "updated"
+
+    let result = probe.result
+    #expect(result.didRun)
+    #expect(result.concurrentReadCompleted)
+  }
+
+  @Test
+  func userDefaultsStored_publishesAfterSourceNodeUnlocks() {
+    let key = makeTestKey()
+    let userDefaults = makeTestUserDefaults()
+    let writer = makeUserDefaultsStoredNode(
+      userDefaults: userDefaults,
+      key: key,
+      defaultValue: "initial"
+    )
+    let observer = UserDefaultsStorage(
+      userDefaults: userDefaults,
+      key: key,
+      defaultValue: "initial"
+    )
+    let probe = PublicationLockProbe()
+
+    observer.loaded(
+      context: .init {
+        probe.verifyConcurrentOperation {
+          _ = writer.wrappedValue
+        }
+      }
+    )
+    defer { observer.unloaded() }
+
+    writer.wrappedValue = "updated"
+
+    let result = probe.result
+    #expect(result.didRun)
+    #expect(result.concurrentReadCompleted)
   }
   
   

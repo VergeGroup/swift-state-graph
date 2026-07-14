@@ -6,6 +6,28 @@ import Foundation
 
 // MARK: - Storage Protocol
 
+/// Collects synchronous storage callbacks until the source node releases its lock.
+///
+/// Instances are thread-confined by `ThreadLocal.deferredStorageUpdates` and must
+/// be drained by the same thread that created them.
+final class DeferredStorageUpdates {
+
+  private var updates: [@Sendable () -> Void] = []
+
+  func append(_ update: @escaping @Sendable () -> Void) {
+    updates.append(update)
+  }
+
+  func perform() {
+    let updates = self.updates
+    self.updates.removeAll()
+
+    for update in updates {
+      update()
+    }
+  }
+}
+
 public protocol Storage<Value>: Sendable {
   
   associatedtype Value
@@ -27,12 +49,69 @@ public struct StorageContext: Sendable {
   }
   
   public func notifyStorageUpdated() {
-    onStorageUpdated()
+    if let deferredUpdates = ThreadLocal.deferredStorageUpdates.value {
+      deferredUpdates.append(onStorageUpdated)
+    } else {
+      onStorageUpdated()
+    }
   }
   
 }
 
 // MARK: - Concrete Storage Implementations
+
+/// Serializes UserDefaults access and defers graph publication from synchronous write notifications.
+private final class UserDefaultsStorageCoordinator: Sendable {
+
+  private final class AccessContext {
+    var publications: [@Sendable () -> Void] = []
+  }
+
+  static let shared = UserDefaultsStorageCoordinator()
+
+  private let lock = NSRecursiveLock()
+  private let accessContextKey = "org.vergegroup.state-graph.user-defaults-access-context"
+
+  func withAccess<Result>(_ body: () -> Result) -> Result {
+    if currentAccessContext != nil {
+      lock.lock()
+      defer { lock.unlock() }
+      return body()
+    }
+
+    let context = AccessContext()
+    Thread.current.threadDictionary[accessContextKey] = context
+
+    lock.lock()
+    let result = body()
+    lock.unlock()
+
+    Thread.current.threadDictionary.removeObject(forKey: accessContextKey)
+
+    for publication in context.publications {
+      publication()
+    }
+
+    return result
+  }
+
+  func withWrite<Result>(_ body: () -> Result) -> Result {
+    withAccess(body)
+  }
+
+  func publish(_ publication: @escaping @Sendable () -> Void) {
+    guard let context = currentAccessContext else {
+      publication()
+      return
+    }
+
+    context.publications.append(publication)
+  }
+
+  private var currentAccessContext: AccessContext? {
+    Thread.current.threadDictionary[accessContextKey] as? AccessContext
+  }
+}
 
 public struct InMemoryStorage<Value>: Storage {
   
@@ -54,40 +133,71 @@ public struct InMemoryStorage<Value>: Storage {
 }
 
 public final class UserDefaultsStorage<Value: UserDefaultsStorable>: Storage, Sendable {
-  
+
+  private enum Snapshot: Sendable {
+    case missing
+    case value(Value)
+  }
+
+  /// Sendable ownership wrapper for Foundation's opaque observer token.
+  private final class ObserverToken: @unchecked Sendable {
+    let value: NSObjectProtocol
+
+    init(_ value: NSObjectProtocol) {
+      self.value = value
+    }
+  }
+
+  private struct State: Sendable {
+    var cachedValue: Snapshot = .missing
+    var previousValue: Snapshot = .missing
+    var subscription: ObserverToken?
+    var isLoaded = false
+    var lifecycleGeneration: UInt64 = 0
+  }
+
   nonisolated(unsafe)
   private let userDefaults: UserDefaults
   private let key: String
   private let defaultValue: Value
-  
-  nonisolated(unsafe)
-  private var subscription: NSObjectProtocol?
-  
-  nonisolated(unsafe)
-  private var cachedValue: Value?
-  
+
+  private let state = OSAllocatedUnfairLock(initialState: State())
+
   public var value: Value {
     get {
-      if let cachedValue {
-        return cachedValue
+      UserDefaultsStorageCoordinator.shared.withAccess {
+        if case .value(let cachedValue) = state.withLock({ $0.cachedValue }) {
+          return cachedValue
+        }
+
+        let loadedValue = Value._getValue(
+          from: userDefaults,
+          forKey: key,
+          defaultValue: defaultValue
+        )
+
+        return state.withLock { state in
+          if case .value(let cachedValue) = state.cachedValue {
+            return cachedValue
+          }
+
+          state.cachedValue = .value(loadedValue)
+          return loadedValue
+        }
       }
-      let loadedValue = Value._getValue(
-        from: userDefaults,
-        forKey: key,
-        defaultValue: defaultValue
-      )
-      cachedValue = loadedValue
-      return loadedValue
     }
     set {
-      cachedValue = newValue
-      newValue._setValue(to: userDefaults, forKey: key)
+      UserDefaultsStorageCoordinator.shared.withWrite {
+        state.withLock { state in
+          state.cachedValue = .value(newValue)
+          state.previousValue = .value(newValue)
+        }
+
+        newValue._setValue(to: userDefaults, forKey: key)
+      }
     }
   }
-  
-  nonisolated(unsafe)
-  private var previousValue: Value?
-  
+
   public init(
     userDefaults: UserDefaults,
     key: String,
@@ -97,36 +207,119 @@ public final class UserDefaultsStorage<Value: UserDefaultsStorable>: Storage, Se
     self.key = key
     self.defaultValue = defaultValue
   }
-     
+
   public func loaded(context: StorageContext) {
-    
-    previousValue = value
-    
-    subscription = NotificationCenter.default
+    let generation = state.withLock { state -> UInt64? in
+      guard !state.isLoaded else { return nil }
+
+      state.isLoaded = true
+      state.lifecycleGeneration &+= 1
+      state.cachedValue = .missing
+      state.previousValue = .missing
+      return state.lifecycleGeneration
+    }
+
+    guard let generation else { return }
+
+    let subscription = ObserverToken(
+      NotificationCenter.default
       .addObserver(
         forName: UserDefaults.didChangeNotification,
         object: userDefaults,
         queue: nil,
-        using: { [weak self] _ in                      
+        using: { [weak self] _ in
           guard let self else { return }
-          
-          // Invalidate cache and reload value
-          self.cachedValue = nil
-          let value = self.value
-          guard self.previousValue != value else {
-            return
-          }
-          
-          self.previousValue = value
-          
-          context.notifyStorageUpdated()
+          self.userDefaultsDidChange(context: context, generation: generation)
         }
       )
-  }  
-  
+    )
+
+    let didStoreSubscription = state.withLock { state in
+      guard
+        state.isLoaded,
+        state.lifecycleGeneration == generation,
+        state.subscription == nil
+      else {
+        return false
+      }
+
+      state.subscription = subscription
+      return true
+    }
+
+    if !didStoreSubscription {
+      NotificationCenter.default.removeObserver(subscription.value)
+      return
+    }
+
+    let initialValue = value
+    state.withLock { state in
+      guard state.isLoaded, state.lifecycleGeneration == generation else {
+        return
+      }
+
+      if case .missing = state.previousValue {
+        state.previousValue = .value(initialValue)
+      }
+    }
+  }
+
   public func unloaded() {
-    guard let subscription else { return }
-    NotificationCenter.default.removeObserver(subscription)
+    let subscription = state.withLock { state in
+      state.isLoaded = false
+      state.lifecycleGeneration &+= 1
+
+      let subscription = state.subscription
+      state.subscription = nil
+      return subscription
+    }
+
+    if let subscription {
+      NotificationCenter.default.removeObserver(subscription.value)
+    }
+  }
+
+  private func userDefaultsDidChange(
+    context: StorageContext,
+    generation: UInt64
+  ) {
+    guard state.withLock({ state in
+      state.isLoaded && state.lifecycleGeneration == generation
+    }) else {
+      return
+    }
+
+    let shouldNotify = UserDefaultsStorageCoordinator.shared.withAccess {
+      let loadedValue = Value._getValue(
+        from: userDefaults,
+        forKey: key,
+        defaultValue: defaultValue
+      )
+
+      return state.withLock { state in
+        guard state.isLoaded, state.lifecycleGeneration == generation else {
+          return false
+        }
+
+        let didChange: Bool
+        switch state.previousValue {
+        case .missing:
+          didChange = true
+        case .value(let previousValue):
+          didChange = previousValue != loadedValue
+        }
+
+        state.cachedValue = .value(loadedValue)
+        state.previousValue = .value(loadedValue)
+        return didChange
+      }
+    }
+
+    if shouldNotify {
+      UserDefaultsStorageCoordinator.shared.publish {
+        context.notifyStorageUpdated()
+      }
+    }
   }
 }
 
@@ -191,9 +384,10 @@ public final class _Stored<Value, S: Storage<Value>>: Node, Observable, CustomDe
 
       // Skip notification if value hasn't changed (like Observation.framework)
       guard shouldNotify(oldValue, newValue) else {
-        storage.value = newValue
+        let deferredStorageUpdates = assignStorageValue(newValue)
         let _didSetHandler = didSetHandler
         lock.unlock()
+        deferredStorageUpdates?.perform()
         _didSetHandler?(oldValue, newValue)
         return
       }
@@ -214,7 +408,7 @@ public final class _Stored<Value, S: Storage<Value>>: Node, Observable, CustomDe
       }
 #endif
 
-      storage.value = newValue
+      let deferredStorageUpdates = assignStorageValue(newValue)
 
       let _outgoingEdges = outgoingEdges
       let _trackingRegistrations = trackingRegistrations
@@ -222,6 +416,8 @@ public final class _Stored<Value, S: Storage<Value>>: Node, Observable, CustomDe
       self.trackingRegistrations.removeAll()
 
       lock.unlock()
+
+      deferredStorageUpdates?.perform()
 
       for registration in _trackingRegistrations {
         registration.perform()
@@ -234,6 +430,19 @@ public final class _Stored<Value, S: Storage<Value>>: Node, Observable, CustomDe
 
       _didSetHandler?(oldValue, newValue)
     }
+  }
+
+  private func assignStorageValue(_ newValue: Value) -> DeferredStorageUpdates? {
+    guard ThreadLocal.deferredStorageUpdates.value == nil else {
+      storage.value = newValue
+      return nil
+    }
+
+    let deferredUpdates = DeferredStorageUpdates()
+    ThreadLocal.deferredStorageUpdates.withValue(deferredUpdates) {
+      storage.value = newValue
+    }
+    return deferredUpdates
   }
   
   private func notifyStorageUpdated() {

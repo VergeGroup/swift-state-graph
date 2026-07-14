@@ -109,18 +109,13 @@ extension Date: UserDefaultsStorable {
   }
 }
 
-private enum Static {
-  static let decoder = JSONDecoder()
-  static let encoder = JSONEncoder()
-}
-
 extension UserDefaultsStorable where Self: Codable {
   public static func _getValue(from userDefaults: UserDefaults, forKey key: String, defaultValue: Self) -> Self {
     guard let data = userDefaults.data(forKey: key) else {
       return defaultValue
     }
     do {
-      return try Static.decoder.decode(Self.self, from: data)
+      return try JSONDecoder().decode(Self.self, from: data)
     } catch {
       return defaultValue
     }
@@ -128,7 +123,7 @@ extension UserDefaultsStorable where Self: Codable {
   
   public func _setValue(to userDefaults: UserDefaults, forKey key: String) {
     do {
-      let data = try Static.encoder.encode(self)
+      let data = try JSONEncoder().encode(self)
       userDefaults.set(data, forKey: key)
     } catch {
       // If encoding fails, remove the key to avoid inconsistent state
