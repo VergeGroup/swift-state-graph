@@ -310,7 +310,7 @@ public final class Computed<Value: SendableMetatype>: Node, Observable, CustomDe
 #endif
 
       for edge in _outgoingEdges {
-        edge.to.potentiallyDirty = true
+        edge.to?.potentiallyDirty = true
       }
 
       for registration in _trackingRegistrations {
@@ -377,7 +377,8 @@ public final class Computed<Value: SendableMetatype>: Node, Observable, CustomDe
     self.lock = .init()
 
 #if DEBUG
-    Task {
+    Task { [weak self] in
+      guard let self else { return }
       await NodeStore.shared.register(node: self)
     }
 #endif
@@ -409,7 +410,8 @@ public final class Computed<Value: SendableMetatype>: Node, Observable, CustomDe
     self.lock = .init()
 
 #if DEBUG
-    Task {
+    Task { [weak self] in
+      guard let self else { return }
       await NodeStore.shared.register(node: self)
     }
 #endif
@@ -441,18 +443,30 @@ public final class Computed<Value: SendableMetatype>: Node, Observable, CustomDe
     self.lock = .init()
    
 #if DEBUG
-    Task {
+    Task { [weak self] in
+      guard let self else { return }
       await NodeStore.shared.register(node: self)
     }
 #endif
   }
   
-    deinit {
-//      Log.generic.debug("Deinit Computed: \(self.info.name.map(String.init) ?? "noname")")
-      for edge in incomingEdges {
-        edge.from.outgoingEdges.removeAll(where: { $0 === edge })
-      }
+  deinit {
+//    Log.generic.debug("Deinit Computed: \(self.info.name.map(String.init) ?? "noname")")
+    lock.lock()
+    let incomingEdges = self.incomingEdges
+    let outgoingEdges = self.outgoingEdges
+    self.incomingEdges.removeAll()
+    self.outgoingEdges.removeAll()
+    lock.unlock()
+
+    for edge in incomingEdges {
+      edge.from?.removeOutgoingEdge(edge)
     }
+
+    for edge in outgoingEdges {
+      edge.to?.removeIncomingEdge(edge)
+    }
+  }
 
   public func recomputeIfNeeded() {
 
@@ -473,11 +487,15 @@ public final class Computed<Value: SendableMetatype>: Node, Observable, CustomDe
 
     if !_potentiallyDirty && _cachedValue != nil { return }
 
+    incomingEdges.removeAll(where: { $0.from == nil })
+
     for edge in incomingEdges {
-      edge.from.recomputeIfNeeded()
+      edge.from?.recomputeIfNeeded()
     }
 
-    let hasPendingIncomingEdge = incomingEdges.contains(where: \.isPending)
+    let hasPendingIncomingEdge = incomingEdges.contains {
+      $0.from != nil && $0.isPending
+    }
 
     if hasPendingIncomingEdge || _cachedValue == nil {
 
@@ -515,16 +533,20 @@ public final class Computed<Value: SendableMetatype>: Node, Observable, CustomDe
   }
 
   private func removeIncomingEdges() {
+    let incomingEdges = self.incomingEdges
+    self.incomingEdges.removeAll()
+
     for edge in incomingEdges {
-      edge.from.lock.lock()
-      edge.from.outgoingEdges.removeAll(where: { $0 === edge })
-      edge.from.lock.unlock()
+      edge.from?.removeOutgoingEdge(edge)
     }
-    incomingEdges.removeAll()
   }
    
   public var debugDescription: String {
-    "Computed<\(Value.self)>(name=\(info.name.map(String.init) ?? "noname"), value=\(String(describing: _cachedValue)))"
+    lock.lock()
+    let cachedValue = _cachedValue
+    lock.unlock()
+
+    return "Computed<\(Value.self)>(name=\(info.name.map(String.init) ?? "noname"), value=\(String(describing: cachedValue)))"
   }
   
 }
@@ -576,11 +598,11 @@ extension Computed {
   
 }
 
-@DebugDescription
+/// A dependency link whose lifetime does not keep either endpoint alive.
 public final class Edge: CustomDebugStringConvertible {
 
-  unowned let from: any TypeErasedNode
-  unowned let to: any TypeErasedNode
+  weak var from: (any TypeErasedNode)?
+  weak var to: (any TypeErasedNode)?
   
   private let lock: OSAllocatedUnfairLock<Void> = .init()
   
@@ -605,7 +627,11 @@ public final class Edge: CustomDebugStringConvertible {
   }
 
   public var debugDescription: String {
-    "\(from.debugDescription) -> \(to.debugDescription)"
+    guard let from, let to else {
+      return "Edge(deallocated endpoint)"
+    }
+
+    return "\(from.debugDescription) -> \(to.debugDescription)"
   }
 
   deinit {

@@ -236,7 +236,7 @@ public final class _Stored<
 
       for edge in _outgoingEdges {
         edge.isPending = true
-        edge.to.potentiallyDirty = true
+        edge.to?.potentiallyDirty = true
       }
 
       _didSetHandler?(oldValue, newValue)
@@ -269,7 +269,7 @@ public final class _Stored<
 
     for edge in _outgoingEdges {
       edge.isPending = true
-      edge.to.potentiallyDirty = true
+      edge.to?.potentiallyDirty = true
     }
   }
   
@@ -312,7 +312,8 @@ public final class _Stored<
     }))
 
 #if DEBUG
-    Task {
+    Task { [weak self] in
+      guard let self else { return }
       await NodeStore.shared.register(node: self)
     }
 #endif
@@ -320,10 +321,15 @@ public final class _Stored<
   
   deinit {
 //    Log.generic.debug("Deinit StoredNode: \(self.info.name.map(String.init) ?? "noname")")
+    lock.lock()
+    let outgoingEdges = self.outgoingEdges
+    self.outgoingEdges.removeAll()
+    lock.unlock()
+
     for edge in outgoingEdges {
-      edge.to.incomingEdges.removeAll(where: { $0 === edge })
+      edge.to?.removeIncomingEdge(edge)
     }
-    outgoingEdges.removeAll()
+
     storage.unloaded()
   }
   
@@ -332,7 +338,10 @@ public final class _Stored<
   }
   
   public var debugDescription: String {
+    lock.lock()
     let value = storage.value
+    lock.unlock()
+
     let typeName = _typeName(type(of: self))    
     return "\(typeName)(name=\(info.name.map(String.init) ?? "noname"), value=\(String(describing: value)))"
   }
