@@ -17,7 +17,10 @@ import Foundation.NSLock
 ///
 /// - When value changes: Changes propagate to all dependent nodes, triggering recalculations
 /// - When value is accessed: Dependencies are recorded, automatically building the graph structure
-public typealias Stored<Value> = _Stored<Value, InMemoryStorage<Value>>
+///
+/// `Value` itself does not need to conform to `Sendable`. `SendableMetatype` allows the
+/// node's isolated closures to use generic conformances safely.
+public typealias Stored<Value: SendableMetatype> = _Stored<Value, InMemoryStorage<Value>>
 
 extension _Stored where S == InMemoryStorage<Value> {
   /// Convenience initializer with wrappedValue (non-Equatable types)
@@ -103,9 +106,13 @@ extension _Stored where S == InMemoryStorage<Value>, Value: Equatable & AnyObjec
   }
 }
 
+/// Describes how a computed node produces and compares values.
+///
+/// `Value` itself does not need to conform to `Sendable`. `SendableMetatype` allows the
+/// descriptor's sendable closures to use generic conformances safely.
 public protocol ComputedDescriptor<Value>: Sendable {
   
-  associatedtype Value
+  associatedtype Value: SendableMetatype
   
   func compute(context: inout Computed<Value>.Context) -> Value
   
@@ -115,14 +122,14 @@ public protocol ComputedDescriptor<Value>: Sendable {
 extension ComputedDescriptor {
   
   @Sendable
-  public static func any<Value>(
+  public static func any<Value: SendableMetatype>(
     _ compute: @Sendable @escaping (inout Computed<Value>.Context) -> Value
   ) -> Self where Self == AnyComputedDescriptor<Value> {
     AnyComputedDescriptor(compute: compute, isEqual: { _, _ in false })
   }
   
   @Sendable
-  public static func any<Value>(
+  public static func any<Value: SendableMetatype>(
     _ compute: @Sendable @escaping (
       inout Computed<Value>.Context
     ) -> Value
@@ -132,7 +139,7 @@ extension ComputedDescriptor {
   
 }
 
-public struct AnyComputedDescriptor<Value>: ComputedDescriptor {
+public struct AnyComputedDescriptor<Value: SendableMetatype>: ComputedDescriptor {
 
   private let computeClosure: @Sendable (inout Computed<Value>.Context) -> Value
   private let isEqualClosure: @Sendable (Value, Value) -> Bool
@@ -147,7 +154,7 @@ public struct AnyComputedDescriptor<Value>: ComputedDescriptor {
   
   public init(
     compute: @escaping @Sendable (inout Computed<Value>.Context) -> Value
-  ) where Value : Equatable {
+  ) where Value: Equatable {
     self.computeClosure = compute  
     self.isEqualClosure = { $0 == $1 }
   }
@@ -209,8 +216,10 @@ public enum StateGraphGlobal {
 /// - Value is lazily computed: Calculations only occur when the value is accessed
 /// - Dependencies are tracked: The node automatically tracks which nodes it depends on
 /// - Changes propagate: When this node's value changes, downstream nodes are notified
-/// ```
-public final class Computed<Value>: Node, Observable, CustomDebugStringConvertible {
+///
+/// `Value` itself does not need to conform to `Sendable`. `SendableMetatype` allows the
+/// node's isolated closures to use generic conformances safely.
+public final class Computed<Value: SendableMetatype>: Node, Observable, CustomDebugStringConvertible {
     
   public struct Context {
     

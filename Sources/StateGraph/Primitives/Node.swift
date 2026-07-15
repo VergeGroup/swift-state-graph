@@ -48,7 +48,7 @@ extension Node {
     }
     ```
   */
-  public func map<ComputedValue>(
+  public func map<ComputedValue: SendableMetatype>(
     _ project: @escaping @Sendable (Computed<ComputedValue>.Context, Self.Value) -> ComputedValue
   ) -> Computed<ComputedValue> {
     return Computed { context in

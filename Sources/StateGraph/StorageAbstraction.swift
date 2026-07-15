@@ -132,7 +132,14 @@ public final class UserDefaultsStorage<Value: UserDefaultsStorable>: Storage, Se
 
 // MARK: - Base Stored Node
 
-public final class _Stored<Value, S: Storage<Value>>: Node, Observable, CustomDebugStringConvertible {
+/// A graph node backed by a pluggable storage implementation.
+///
+/// `Value` itself does not need to conform to `Sendable`. `SendableMetatype` allows the
+/// node's isolated closures to use generic conformances safely.
+public final class _Stored<
+  Value: SendableMetatype,
+  S: Storage<Value>
+>: Node, Observable, CustomDebugStringConvertible {
 
   public let lock: NodeLock
 
