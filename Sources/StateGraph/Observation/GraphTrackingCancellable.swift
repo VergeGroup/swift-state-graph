@@ -46,13 +46,26 @@ import Combine
 /// is automatically cancelled. When it changes back to `true`, a new nested group is created.
 final class GraphTrackingCancellable: Cancellable, @unchecked Sendable {
 
+  /// Weak parent storage accessed only while the owning cancellable state is locked.
+  private final class WeakParent {
+    weak var value: GraphTrackingCancellable?
+  }
+
   private struct State {
     var onCancel: (() -> Void)?
     var children: [GraphTrackingCancellable] = []
+    var isCancelled = false
+    let parent = WeakParent()
+  }
+
+  /// Immutable work extracted from the lock and consumed synchronously by `cancel()`.
+  private struct CancellationWork: @unchecked Sendable {
+    let parent: GraphTrackingCancellable?
+    let children: [GraphTrackingCancellable]
+    let onCancel: (() -> Void)?
   }
 
   private let state: OSAllocatedUnfairLock<State>
-  private weak var parent: GraphTrackingCancellable?
 
   init(onCancel: @escaping () -> Void = {}) {
     self.state = OSAllocatedUnfairLock(uncheckedState: State(onCancel: onCancel))
@@ -66,16 +79,48 @@ final class GraphTrackingCancellable: Cancellable, @unchecked Sendable {
   ///
   /// - Parameter child: The child cancellable to add.
   func addChild(_ child: GraphTrackingCancellable) {
-    child.parent = self
-    state.withLock { $0.children.append(child) }
+    let didAdd = state.withLock { state in
+      guard !state.isCancelled else { return false }
+      state.children.append(child)
+      return true
+    }
+
+    guard didAdd else {
+      child.cancel()
+      return
+    }
+
+    guard child.attach(to: self) else {
+      removeChild(child)
+      return
+    }
   }
 
-  /// Removes this cancellable from its parent's children list.
-  private func removeFromParent() {
-    parent?.state.withLock { state in
-      state.children.removeAll { $0 === self }
+  private func attach(to parent: GraphTrackingCancellable) -> Bool {
+    state.withLock { state in
+      guard !state.isCancelled else { return false }
+
+      if let currentParent = state.parent.value, currentParent !== parent {
+        assertionFailure("A graph tracking cancellable cannot have multiple parents.")
+        return false
+      }
+
+      state.parent.value = parent
+      return true
     }
-    parent = nil
+  }
+
+  private func detachParent(if parent: GraphTrackingCancellable) {
+    state.withLock { state in
+      guard state.parent.value === parent else { return }
+      state.parent.value = nil
+    }
+  }
+
+  private func removeChild(_ child: GraphTrackingCancellable) {
+    state.withLock { state in
+      state.children.removeAll { $0 === child }
+    }
   }
 
   /// Cancels all children without cancelling this cancellable.
@@ -85,13 +130,15 @@ final class GraphTrackingCancellable: Cancellable, @unchecked Sendable {
   ///
   /// - Note: After calling this method, children are removed from this parent.
   func cancelChildren() {
-    state.withLock { state in
-      for child in state.children {
-        // Prevent child from calling removeFromParent during cancel
-        child.parent = nil
-        child.cancel()
-      }
+    let children = state.withLock { state in
+      let children = state.children
       state.children.removeAll()
+      return children
+    }
+
+    for child in children {
+      child.detachParent(if: self)
+      child.cancel()
     }
   }
 
@@ -104,21 +151,31 @@ final class GraphTrackingCancellable: Cancellable, @unchecked Sendable {
   ///
   /// - Note: Conforms to `Cancellable` protocol.
   func cancel() {
-    // Remove from parent first
-    removeFromParent()
+    guard let work = state.withLock({ state -> CancellationWork? in
+      guard !state.isCancelled else { return nil }
 
-    state.withLock { state in
-      // Cancel all children
-      for child in state.children {
-        // Prevent child from calling removeFromParent during cancel
-        child.parent = nil
-        child.cancel()
-      }
+      state.isCancelled = true
+      let work = CancellationWork(
+        parent: state.parent.value,
+        children: state.children,
+        onCancel: state.onCancel
+      )
+
+      state.parent.value = nil
       state.children.removeAll()
-
-      // Call onCancel closure
-      state.onCancel?()
       state.onCancel = nil
+      return work
+    }) else {
+      return
     }
+
+    work.parent?.removeChild(self)
+
+    for child in work.children {
+      child.detachParent(if: self)
+      child.cancel()
+    }
+
+    work.onCancel?()
   }
 }

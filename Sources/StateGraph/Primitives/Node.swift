@@ -17,6 +17,30 @@ public protocol TypeErasedNode: Hashable, AnyObject, Sendable, CustomDebugString
   func recomputeIfNeeded()
 }
 
+extension TypeErasedNode {
+
+  /// Returns an independent snapshot of the node's outgoing dependency edges.
+  func outgoingEdgesSnapshot() -> ContiguousArray<Edge> {
+    lock.lock()
+    defer { lock.unlock() }
+    return outgoingEdges
+  }
+
+  /// Removes an outgoing edge while holding the owning node's lock.
+  func removeOutgoingEdge(_ edge: Edge) {
+    lock.lock()
+    outgoingEdges.removeAll(where: { $0 === edge })
+    lock.unlock()
+  }
+
+  /// Removes an incoming edge while holding the owning node's lock.
+  func removeIncomingEdge(_ edge: Edge) {
+    lock.lock()
+    incomingEdges.removeAll(where: { $0 === edge })
+    lock.unlock()
+  }
+}
+
 public protocol Node: TypeErasedNode {
   
   associatedtype Value
@@ -48,7 +72,7 @@ extension Node {
     }
     ```
   */
-  public func map<ComputedValue>(
+  public func map<ComputedValue: SendableMetatype>(
     _ project: @escaping @Sendable (Computed<ComputedValue>.Context, Self.Value) -> ComputedValue
   ) -> Computed<ComputedValue> {
     return Computed { context in

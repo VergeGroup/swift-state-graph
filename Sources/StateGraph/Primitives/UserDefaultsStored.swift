@@ -176,7 +176,11 @@ extension Optional: UserDefaultsStorable where Wrapped: UserDefaultsStorable {
 ///
 /// - When value changes: Changes propagate to all dependent nodes and are persisted to UserDefaults
 /// - When value is accessed: Dependencies are recorded and the value is loaded from UserDefaults if needed
-public typealias UserDefaultsStored<Value: UserDefaultsStorable> = _Stored<Value, UserDefaultsStorage<Value>>
+///
+/// `Value` itself does not need to conform to `Sendable`; only its metatype must be sendable.
+public typealias UserDefaultsStored<
+  Value: UserDefaultsStorable & SendableMetatype
+> = _Stored<Value, UserDefaultsStorage<Value>>
   
 extension _Stored where S == UserDefaultsStorage<Value> {
   /// Initializes a UserDefaultsStored node with standard UserDefaults.
