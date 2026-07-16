@@ -25,10 +25,11 @@ Data normalization involves storing entities in separate collections while maint
 ```swift
 import StateGraphNormalization
 
-// Creating entity stores for different types
-let userStore = EntityStore<User>()
-let postStore = EntityStore<Post>()
-let commentStore = EntityStore<Comment>()
+// Creating related entity stores with one consistency boundary
+let coordinator = EntityStoreCoordinator()
+let userStore = EntityStore<User>(coordinator: coordinator)
+let postStore = EntityStore<Post>(coordinator: coordinator)
+let commentStore = EntityStore<Comment>(coordinator: coordinator)
 
 // Adding entities
 userStore.add(user)
@@ -78,12 +79,12 @@ print("Total users: \(userStore.count)")
 
 ## TypedIdentifiable Protocol
 
-Entities stored in an `EntityStore` must conform to the `TypedIdentifiable` protocol, which provides type-safe identifiers:
+Entities stored in an `EntityStore` must conform to `TypedIdentifiable`, which provides type-safe identifiers, and to `Sendable`:
 
 ```swift
 import TypedIdentifier
 
-final class User: TypedIdentifiable {
+final class User: TypedIdentifiable, Sendable {
   typealias TypedIdentifierRawValue = String
   
   let typedID: TypedID
@@ -118,21 +119,22 @@ let user = userStore.get(by: userId)
 
 ## NormalizedStore
 
-`NormalizedStore` acts as a central repository for managing multiple entity types:
+`NormalizedStore` acts as a central repository for managing multiple entity types. `EntityStore` has reference semantics and publishes its own graph updates, so store properties do not need `@GraphStored`. Give related stores one shared `EntityStoreCoordinator` to serialize operations across their tables:
 
 ```swift
-final class NormalizedStore {
-  @GraphStored
-  var users: EntityStore<User> = .init()
-  
-  @GraphStored
-  var posts: EntityStore<Post> = .init()
-  
-  @GraphStored
-  var comments: EntityStore<Comment> = .init()
-  
-  @GraphStored
-  var tags: EntityStore<Tag> = .init()
+final class NormalizedStore: Sendable {
+  let users: EntityStore<User>
+  let posts: EntityStore<Post>
+  let comments: EntityStore<Comment>
+  let tags: EntityStore<Tag>
+
+  init() {
+    let coordinator = EntityStoreCoordinator()
+    self.users = .init(coordinator: coordinator)
+    self.posts = .init(coordinator: coordinator)
+    self.comments = .init(coordinator: coordinator)
+    self.tags = .init(coordinator: coordinator)
+  }
 }
 
 // Create a single store instance for your app
@@ -144,7 +146,7 @@ let store = NormalizedStore()
 ### One-to-Many Relationships
 
 ```swift
-final class Author: TypedIdentifiable {
+final class Author: TypedIdentifiable, Sendable {
   typealias TypedIdentifierRawValue = String
   let typedID: TypedID
   
@@ -154,17 +156,18 @@ final class Author: TypedIdentifiable {
   @GraphComputed var posts: [Post]
   
   init(id: String, name: String, store: NormalizedStore) {
-    self.typedID = .init(id)
+    let typedID = TypedID(id)
+    self.typedID = typedID
     self.name = name
     
     // Define the relationship
     self.$posts = .init { _ in
-      store.posts.filter { $0.authorId == self.id }
+      store.posts.filter { $0.authorId == typedID }
     }
   }
 }
 
-final class Post: TypedIdentifiable {
+final class Post: TypedIdentifiable, Sendable {
   typealias TypedIdentifierRawValue = String
   let typedID: TypedID
   
@@ -186,7 +189,7 @@ final class Post: TypedIdentifiable {
 ### Many-to-Many Relationships
 
 ```swift
-final class Post: TypedIdentifiable {
+final class Post: TypedIdentifiable, Sendable {
   typealias TypedIdentifierRawValue = String
   let typedID: TypedID
   
@@ -209,7 +212,7 @@ final class Post: TypedIdentifiable {
   }
 }
 
-final class Tag: TypedIdentifiable {
+final class Tag: TypedIdentifiable, Sendable {
   typealias TypedIdentifierRawValue = String
   let typedID: TypedID
   
@@ -219,12 +222,13 @@ final class Tag: TypedIdentifiable {
   @GraphComputed var posts: [Post]
   
   init(id: String, name: String, store: NormalizedStore) {
-    self.typedID = .init(id)
+    let typedID = TypedID(id)
+    self.typedID = typedID
     self.name = name
     
     self.$posts = .init { _ in
       store.posts.filter { post in
-        post.tagIds.contains(self.id)
+        post.tagIds.contains(typedID)
       }
     }
   }
@@ -237,7 +241,7 @@ Here's a comprehensive example of a social media application using normalization
 
 ```swift
 // Entity definitions
-final class User: TypedIdentifiable {
+final class User: TypedIdentifiable, Sendable {
   typealias TypedIdentifierRawValue = String
   let typedID: TypedID
   
@@ -250,13 +254,14 @@ final class User: TypedIdentifiable {
   @GraphComputed var followerCount: Int
   
   init(id: String, name: String, email: String, store: NormalizedStore) {
-    self.typedID = .init(id)
+    let typedID = TypedID(id)
+    self.typedID = typedID
     self.name = name
     self.email = email
     self.followerIds = []
     
     self.$posts = .init { _ in
-      store.posts.filter { $0.authorId == self.id }
+      store.posts.filter { $0.authorId == typedID }
     }
     
     self.$followers = .init { [$followerIds] _ in
@@ -271,7 +276,7 @@ final class User: TypedIdentifiable {
   }
 }
 
-final class Post: TypedIdentifiable {
+final class Post: TypedIdentifiable, Sendable {
   typealias TypedIdentifierRawValue = String
   let typedID: TypedID
   
@@ -286,18 +291,19 @@ final class Post: TypedIdentifiable {
   @GraphComputed var commentCount: Int
   
   init(id: String, title: String, content: String, authorId: User.TypedID, store: NormalizedStore) {
-    self.typedID = .init(id)
+    let typedID = TypedID(id)
+    self.typedID = typedID
     self.title = title
     self.content = content
     self.likes = 0
     self.authorId = authorId
     
     self.$author = .init { _ in
-      store.users.get(by: self.authorId)
+      store.users.get(by: authorId)
     }
     
     self.$comments = .init { _ in
-      store.comments.filter { $0.postId == self.id }
+      store.comments.filter { $0.postId == typedID }
     }
     
     self.$commentCount = .init { [$comments] _ in
@@ -306,7 +312,7 @@ final class Post: TypedIdentifiable {
   }
 }
 
-final class Comment: TypedIdentifiable {
+final class Comment: TypedIdentifiable, Sendable {
   typealias TypedIdentifierRawValue = String
   let typedID: TypedID
   
@@ -327,11 +333,11 @@ final class Comment: TypedIdentifiable {
     self.authorId = authorId
     
     self.$author = .init { _ in
-      store.users.get(by: self.authorId)
+      store.users.get(by: authorId)
     }
     
     self.$post = .init { _ in
-      store.posts.get(by: self.postId)
+      store.posts.get(by: postId)
     }
   }
 }
@@ -505,4 +511,4 @@ userIds.forEach { userId in
 }
 ```
 
-Swift State Graph's normalization module provides a powerful foundation for building applications with complex data relationships while maintaining the benefits of reactive programming. 
+Swift State Graph's normalization module provides a powerful foundation for building applications with complex data relationships while maintaining the benefits of reactive programming.
