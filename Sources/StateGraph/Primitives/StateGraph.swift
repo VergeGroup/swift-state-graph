@@ -170,7 +170,9 @@ public final class Computed<Value: SendableMetatype>: Node, Observable, CustomDe
   
   #if canImport(Observation)
     @available(macOS 14.0, iOS 17.0, watchOS 10.0, tvOS 17.0, *)
-    private let observationRegistrar = ObservationRegistrar()
+    private var observationRegistrar: ObservationRegistrar {
+      return .shared
+    }
   #endif
 
   public var potentiallyDirty: Bool {

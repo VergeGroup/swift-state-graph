@@ -23,7 +23,9 @@ public final class Stored<Value: SendableMetatype>: Node, Observable, CustomDebu
 
 #if canImport(Observation)
   @available(macOS 14.0, iOS 17.0, watchOS 10.0, tvOS 17.0, *)
-  private let observationRegistrar = ObservationRegistrar()
+  private var observationRegistrar: ObservationRegistrar {
+    .shared
+  }
 #endif
 
   public var potentiallyDirty: Bool {
