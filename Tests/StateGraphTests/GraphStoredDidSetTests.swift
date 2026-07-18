@@ -50,12 +50,12 @@ struct GraphStoredDidSetTests {
     #expect(model.history[0].1 == 12)
   }
 
-  @Test func didSet_runs_with_userDefaults_backing() {
+  @Test func didSet_runs_with_graphUserDefault() {
     let key = "GraphStoredDidSetTests.username"
     UserDefaults.standard.removeObject(forKey: key)
 
     final class Settings {
-      @GraphStored(backed: .userDefaults(key: "GraphStoredDidSetTests.username"))
+      @GraphUserDefault("GraphStoredDidSetTests.username")
       var username: String = "anonymous" {
         didSet {
           history.append((oldValue, username))
@@ -148,12 +148,12 @@ struct GraphStoredDidSetTests {
     #expect(model.history[1].2 == 4)
   }
 
-  @Test func willSet_runs_with_userDefaults_backing() {
+  @Test func willSet_runs_with_graphUserDefault() {
     let key = "GraphStoredWillSetTests.username"
     UserDefaults.standard.removeObject(forKey: key)
 
     final class Settings {
-      @GraphStored(backed: .userDefaults(key: "GraphStoredWillSetTests.username"))
+      @GraphUserDefault("GraphStoredWillSetTests.username")
       var username: String = "anonymous" {
         willSet {
           history.append((username, newValue))

@@ -116,7 +116,7 @@ struct KeyPathTests {
     let computedDescription = String(describing: _keyPath(computed))
 
     #expect(storedDescription.contains("PointerKeyPathRoot"))
-    #expect(storedDescription.contains("_Stored<Int, InMemoryStorage<Int>>"))
+    #expect(storedDescription.contains("Stored<Int>"))
     #expect(computedDescription.contains("PointerKeyPathRoot"))
     #expect(computedDescription.contains("Computed<Int>"))
     #expect(storedDescription != computedDescription)
