@@ -272,6 +272,70 @@ struct GraphTrackingGroupTests {
 
   @Test
   @MainActor
+  func infiniteLoopWhenNonEquatable() async throws {
+    
+    final class NonEquatable {}
+    
+    let node = Stored(wrappedValue: NonEquatable())
+    let readingCallCounter = CallCounter()
+    let mutatingCallCounter = CallCounter()
+    let maxIterations = 10
+    
+    let cancellable0 = withGraphTracking {
+      withGraphTrackingGroup {
+        _ = node.wrappedValue
+        let currentCount = readingCallCounter.count
+
+        // Safety guard: stop after maxIterations to prevent actual infinite loop during testing
+        guard currentCount < maxIterations else {
+          return
+        }
+
+        readingCallCounter.increment()
+      }
+    }
+
+    let cancellable1 = withGraphTracking {
+      withGraphTrackingGroup {
+        _ = node.wrappedValue
+        let currentCount = mutatingCallCounter.count
+
+        // Safety guard: stop after maxIterations to prevent actual infinite loop during testing
+        guard currentCount < maxIterations else {
+          return
+        }
+
+        mutatingCallCounter.increment()
+
+        node.wrappedValue = .init()
+      }
+    }
+
+    // Wait a short time for any potential iterations
+    try await Task.sleep(nanoseconds: 100_000_000)  // 100ms
+
+    // Expected behavior: handler should only be called once (initial setup)
+    // Setting the same value should NOT trigger re-execution
+    print("\nFinal count: \(mutatingCallCounter.count)")
+    print("Expected: 1 (initial call only)")
+    print("Actual: \(mutatingCallCounter.count)")
+
+    if mutatingCallCounter.count > 1 {
+      print("❌ INFINITE LOOP DETECTED: Handler was called \(mutatingCallCounter.count) times")
+      print("This indicates that setting an unchanged value triggers re-execution")
+    }
+
+    // This expectation will FAIL with current implementation (infinite loop bug)
+    // It should PASS once the bug is fixed
+    #expect(mutatingCallCounter.count == 1, "Setting unchanged value should not trigger re-execution, but handler was called \(mutatingCallCounter.count) times indicating an infinite loop")
+    #expect(readingCallCounter.count == 2, "Other observations that is not mutating one will get updates for all.")
+
+    cancellable0.cancel()
+    cancellable1.cancel()
+  }
+
+  @Test
+  @MainActor
   func mixedChangedAndUnchangedValues() async throws {
     let node1 = Stored(wrappedValue: 10)
     let node2 = Stored(wrappedValue: 20)
