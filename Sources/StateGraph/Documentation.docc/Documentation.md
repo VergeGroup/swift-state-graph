@@ -59,8 +59,9 @@ final class CounterViewModel {
 
 ### Persistence and Storage
 
-- <doc:Backing-Storage>
-- ``GraphStorageBacking``
+- <doc:UserDefaults>
+- ``GraphUserDefault``
+- ``UserDefaultsStorable``
 
 ### Building Reactive Models
 

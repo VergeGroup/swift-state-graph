@@ -50,22 +50,21 @@ profile.email = "john@example.com"
 profile.age = 30
 ```
 
-### Persistent Storage
+### Persistent Values
 
-`@GraphStored` properties can also use persistent backing storage like UserDefaults:
+`Stored` intentionally owns only in-memory state. Use `@GraphUserDefault` when a
+model value should synchronize with UserDefaults:
 
 ```swift
 final class AppSettings {
-  // This value persists across app launches
-  @GraphStored(backed: .userDefaults(key: "userName"))
+  @GraphUserDefault("userName")
   var userName: String = ""
-  
-  // Computed properties work with persistent storage too
+
   @GraphComputed
   var welcomeMessage: String
-  
+
   init() {
-    self.$welcomeMessage = .init { [$userName] _ in
+    $welcomeMessage = .init { [$userName] _ in
       let name = $userName.wrappedValue
       return name.isEmpty ? "Welcome!" : "Welcome, \(name)!"
     }
@@ -73,7 +72,10 @@ final class AppSettings {
 }
 ```
 
-See <doc:Backing-Storage> for comprehensive coverage of storage options.
+`$userName` is the reference-identity `GraphUserDefault<String>` handle. Reading
+its value delegates to an internal `Stored<String>` node, so dependency tracking
+is identical to an in-memory `@GraphStored` property. See <doc:UserDefaults> for
+store injection, suites, and custom value types.
 
 ### Characteristics of Stored Nodes
 
@@ -333,4 +335,4 @@ Now that you understand the core concepts:
 
 - <doc:Describing-Models> - Learn to build complex reactive models
 - <doc:Advanced-Patterns> - Explore advanced usage patterns
-- <doc:Performance-Optimization> - Optimize your state graphs for performance 
+- <doc:Performance-Optimization> - Optimize your state graphs for performance
