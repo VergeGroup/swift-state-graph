@@ -692,7 +692,9 @@ struct ContinuousTrackingTests {
 
 }
 
-@Suite
+// These tests intentionally suspend a synchronous tracking handler. Running both at once can
+// occupy every cooperative-executor worker on small CI machines before either test can resume it.
+@Suite(.serialized)
 struct IssuesTrackingOnHeavyOperation {
 
   final class Model: Sendable {
@@ -706,7 +708,11 @@ struct IssuesTrackingOnHeavyOperation {
   func stuck() async {
 
     let model = Model()
-
+    let handlerStarted = DispatchSemaphore(value: 0)
+    let handlerFinished = TestSignal()
+    let resumeHandler = DispatchSemaphore(value: 0)
+    let coordinatorFinished = TestSignal()
+    let coordinatorObservedHandler = OSAllocatedUnfairLock(initialState: false)
     var cancellable: AnyCancellable?
 
     await confirmation(expectedCount: 1) { c in
@@ -716,26 +722,32 @@ struct IssuesTrackingOnHeavyOperation {
 
           if model.count2 == 2 {
             c.confirm()
+            handlerFinished.signal()
           }
 
-          if model.count1 == 1 {
-            Thread.sleep(forTimeInterval: 2)
+          if model.count1 == 1, model.count2 != 2 {
+            handlerStarted.signal()
+            resumeHandler.wait()
           }
 
         }
       }
-      Task.detached {
-        print("Update count1")
-        model.count1 = 1
-        Task.detached {
-          try? await Task.sleep(for: .milliseconds(100))
-          print("Update count2")
+
+      DispatchQueue.global().async {
+        let didObserveHandler = handlerStarted.wait(timeout: .now() + .seconds(5)) == .success
+        coordinatorObservedHandler.withLock { $0 = didObserveHandler }
+        if didObserveHandler {
           model.count2 = 2
         }
+        resumeHandler.signal()
+        coordinatorFinished.signal()
       }
 
-      try? await Task.sleep(for: .seconds(3))
+      model.count1 = 1
 
+      #expect(await handlerFinished.wait(for: .seconds(5)))
+      #expect(await coordinatorFinished.wait(for: .seconds(5)))
+      #expect(coordinatorObservedHandler.withLock { $0 })
       #expect(model.count2 == 2)
     }
 
@@ -747,6 +759,12 @@ struct IssuesTrackingOnHeavyOperation {
   func stuckMain() async {
 
     let model = Model()
+    let trackingStarted = TestSignal()
+    let handlerStarted = DispatchSemaphore(value: 0)
+    let handlerFinished = TestSignal()
+    let resumeHandler = DispatchSemaphore(value: 0)
+    let coordinatorFinished = TestSignal()
+    let coordinatorObservedHandler = OSAllocatedUnfairLock(initialState: false)
 
     await confirmation(expectedCount: 1) { c in
 
@@ -758,18 +776,16 @@ struct IssuesTrackingOnHeavyOperation {
         
         let _cancellable = withGraphTracking {
           withGraphTrackingGroup {
-            print("💥 In")
             #expect(Thread.isMainThread)
             if model.count2 == 2 {
-              print("✨ confirm")
               c.confirm()
+              handlerFinished.signal()
             }
             
-            if model.count1 == 1 {
-              print("😪 sleep")
-              Thread.sleep(forTimeInterval: 2)
+            if model.count1 == 1, model.count2 != 2 {
+              handlerStarted.signal()
+              resumeHandler.wait()
             }
-            print("💥 out")
             
           }
         }
@@ -777,24 +793,28 @@ struct IssuesTrackingOnHeavyOperation {
         cancellable.withLockUnchecked {
           $0 = _cancellable
         }
+        trackingStarted.signal()
       }
 
-      Task {        
-        try? await Task.sleep(for: .milliseconds(100))
-        print("Update count1")
-        model.count1 = 1
-        Task {
-          try? await Task.sleep(for: .milliseconds(100))
-          print("Update count2")
+      #expect(await trackingStarted.wait(for: .seconds(5)))
+
+      DispatchQueue.global().async {
+        let didObserveHandler = handlerStarted.wait(timeout: .now() + .seconds(5)) == .success
+        coordinatorObservedHandler.withLock { $0 = didObserveHandler }
+        if didObserveHandler {
           model.count2 = 2
         }
-
-        withExtendedLifetime(cancellable) {}
+        resumeHandler.signal()
+        coordinatorFinished.signal()
       }
 
-      try? await Task.sleep(for: .seconds(4))
+      model.count1 = 1
+      #expect(await handlerFinished.wait(for: .seconds(5)))
+      #expect(await coordinatorFinished.wait(for: .seconds(5)))
+      #expect(coordinatorObservedHandler.withLock { $0 })
       #expect(model.count2 == 2)
 
+      withExtendedLifetime(cancellable) {}
     }
 
   }

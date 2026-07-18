@@ -196,6 +196,58 @@ private actor ConcurrentStartGate {
   }
 }
 
+/// A one-shot signal that lets synchronous store callbacks resume async test code.
+///
+/// Waiting suspends the test task, which avoids exhausting cooperative-executor threads
+/// when synchronization tests run in parallel with the rest of the package.
+private final class TestSignal: @unchecked Sendable {
+
+  private struct State {
+    var isSignaled = false
+    var waiters: [UUID: CheckedContinuation<Bool, Never>] = [:]
+  }
+
+  private let state = OSAllocatedUnfairLock(initialState: State())
+
+  func signal() {
+    let waiters = state.withLock { state in
+      guard !state.isSignaled else { return [CheckedContinuation<Bool, Never>]() }
+
+      state.isSignaled = true
+      let waiters = Array(state.waiters.values)
+      state.waiters.removeAll()
+      return waiters
+    }
+
+    waiters.forEach { $0.resume(returning: true) }
+  }
+
+  func wait(for timeout: Duration) async -> Bool {
+    let id = UUID()
+
+    return await withCheckedContinuation { continuation in
+      let isAlreadySignaled = state.withLock { state in
+        guard !state.isSignaled else { return true }
+        state.waiters[id] = continuation
+        return false
+      }
+
+      guard !isAlreadySignaled else {
+        continuation.resume(returning: true)
+        return
+      }
+
+      Task.detached { [self] in
+        try? await Task.sleep(for: timeout)
+        let waiter = state.withLock { state in
+          state.waiters.removeValue(forKey: id)
+        }
+        waiter?.resume(returning: false)
+      }
+    }
+  }
+}
+
 @Suite
 struct NormalizationTests {
 
@@ -321,17 +373,18 @@ struct NormalizationTests {
     #expect(childStore.contains(.init(2)))
   }
 
-  @Test func readWaitsForCoordinatedMutation() {
+  @Test func readWaitsForCoordinatedMutation() async {
     let coordinator = EntityStoreCoordinator()
     let store = EntityStore<ValueEntity>(
       entities: [.init(1): .init(id: 1, value: 1)],
       coordinator: coordinator
     )
-    let mutationStarted = DispatchSemaphore(value: 0)
+    let mutationStarted = TestSignal()
     let allowMutationToFinish = DispatchSemaphore(value: 0)
-    let readStarted = DispatchSemaphore(value: 0)
-    let readFinished = DispatchSemaphore(value: 0)
+    let readStarted = TestSignal()
+    let readFinished = TestSignal()
     let work = DispatchGroup()
+    let workFinished = TestSignal()
     let readValue = OSAllocatedUnfairLock<Int?>(initialState: nil)
 
     work.enter()
@@ -348,7 +401,7 @@ struct NormalizationTests {
       work.leave()
     }
 
-    #expect(mutationStarted.wait(timeout: .now() + .seconds(5)) == .success)
+    #expect(await mutationStarted.wait(for: .seconds(5)))
 
     work.enter()
     DispatchQueue.global().async {
@@ -358,17 +411,21 @@ struct NormalizationTests {
       work.leave()
     }
 
-    #expect(readStarted.wait(timeout: .now() + .seconds(5)) == .success)
-    #expect(readFinished.wait(timeout: .now() + .milliseconds(100)) == .timedOut)
+    work.notify(queue: .global()) {
+      workFinished.signal()
+    }
+
+    #expect(await readStarted.wait(for: .seconds(5)))
+    #expect(await !readFinished.wait(for: .milliseconds(100)))
 
     allowMutationToFinish.signal()
 
-    #expect(readFinished.wait(timeout: .now() + .seconds(5)) == .success)
-    #expect(work.wait(timeout: .now() + .seconds(5)) == .success)
+    #expect(await readFinished.wait(for: .seconds(5)))
+    #expect(await workFinished.wait(for: .seconds(5)))
     #expect(readValue.withLock { $0 } == 2)
   }
 
-  @Test func sharedCoordinatorBlocksReadsAcrossStores() {
+  @Test func sharedCoordinatorBlocksReadsAcrossStores() async {
     let coordinator = EntityStoreCoordinator()
     let mutatingStore = EntityStore<ValueEntity>(
       entities: [.init(1): .init(id: 1, value: 1)],
@@ -378,11 +435,12 @@ struct NormalizationTests {
       entities: [.init(2): .init(id: 2, value: 2)],
       coordinator: coordinator
     )
-    let mutationStarted = DispatchSemaphore(value: 0)
+    let mutationStarted = TestSignal()
     let allowMutationToFinish = DispatchSemaphore(value: 0)
-    let readStarted = DispatchSemaphore(value: 0)
-    let readFinished = DispatchSemaphore(value: 0)
+    let readStarted = TestSignal()
+    let readFinished = TestSignal()
     let work = DispatchGroup()
+    let workFinished = TestSignal()
 
     work.enter()
     DispatchQueue.global().async {
@@ -397,7 +455,7 @@ struct NormalizationTests {
       work.leave()
     }
 
-    #expect(mutationStarted.wait(timeout: .now() + .seconds(5)) == .success)
+    #expect(await mutationStarted.wait(for: .seconds(5)))
 
     work.enter()
     DispatchQueue.global().async {
@@ -407,13 +465,17 @@ struct NormalizationTests {
       work.leave()
     }
 
-    #expect(readStarted.wait(timeout: .now() + .seconds(5)) == .success)
-    #expect(readFinished.wait(timeout: .now() + .milliseconds(100)) == .timedOut)
+    work.notify(queue: .global()) {
+      workFinished.signal()
+    }
+
+    #expect(await readStarted.wait(for: .seconds(5)))
+    #expect(await !readFinished.wait(for: .milliseconds(100)))
 
     allowMutationToFinish.signal()
 
-    #expect(readFinished.wait(timeout: .now() + .seconds(5)) == .success)
-    #expect(work.wait(timeout: .now() + .seconds(5)) == .success)
+    #expect(await readFinished.wait(for: .seconds(5)))
+    #expect(await workFinished.wait(for: .seconds(5)))
   }
 
   @Test func getAllReturnsIndependentSnapshot() {
