@@ -23,8 +23,14 @@ public final class Stored<Value: SendableMetatype>: Node, Observable, CustomDebu
 
 #if canImport(Observation)
   @available(macOS 14.0, iOS 17.0, watchOS 10.0, tvOS 17.0, *)
-  private var observationRegistrar: ObservationRegistrar {
-    .shared
+  nonisolated(unsafe)
+  private var observationRegistrar = NodeObservationRegistrar()
+
+  /// Returns whether this node has allocated its Apple Observation state.
+  var _isObservationRegistrarInitialized: Bool {
+    lock.lock()
+    defer { lock.unlock() }
+    return observationRegistrar.isInitialized
   }
 #endif
 
@@ -41,17 +47,18 @@ public final class Stored<Value: SendableMetatype>: Node, Observable, CustomDebu
 
   public var wrappedValue: Value {
     get {
+      lock.lock()
+      defer { lock.unlock() }
+
 #if canImport(Observation)
       if #available(macOS 14.0, iOS 17.0, watchOS 10.0, tvOS 17.0, *) {
+        let observationRegistrar = observationRegistrar.initializeIfNeeded()
         observationRegistrar.access(
           PointerKeyPathRoot<Stored<Value>>.shared,
           keyPath: _keyPath(self)
         )
       }
 #endif
-
-      lock.lock()
-      defer { lock.unlock() }
 
       if let currentNode = ThreadLocal.currentNode.value {
         let edge = Edge(from: self, to: currentNode)
@@ -79,22 +86,28 @@ public final class Stored<Value: SendableMetatype>: Node, Observable, CustomDebu
       }
 
 #if canImport(Observation)
+      let observationRegistrar = observationRegistrar.current
+
       if #available(macOS 14.0, iOS 17.0, watchOS 10.0, tvOS 17.0, *) {
-        withMainActor { [observationRegistrar, keyPath = _keyPath(self)] in
-          observationRegistrar.willSet(
-            PointerKeyPathRoot<Stored<Value>>.shared,
-            keyPath: keyPath
-          )
+        if let observationRegistrar {
+          withMainActor { [observationRegistrar, keyPath = _keyPath(self)] in
+            observationRegistrar.willSet(
+              PointerKeyPathRoot<Stored<Value>>.shared,
+              keyPath: keyPath
+            )
+          }
         }
       }
 
       defer {
         if #available(macOS 14.0, iOS 17.0, watchOS 10.0, tvOS 17.0, *) {
-          withMainActor { [observationRegistrar, keyPath = _keyPath(self)] in
-            observationRegistrar.didSet(
-              PointerKeyPathRoot<Stored<Value>>.shared,
-              keyPath: keyPath
-            )
+          if let observationRegistrar {
+            withMainActor { [observationRegistrar, keyPath = _keyPath(self)] in
+              observationRegistrar.didSet(
+                PointerKeyPathRoot<Stored<Value>>.shared,
+                keyPath: keyPath
+              )
+            }
           }
         }
       }

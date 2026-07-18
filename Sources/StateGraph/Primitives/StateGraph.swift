@@ -170,8 +170,14 @@ public final class Computed<Value: SendableMetatype>: Node, Observable, CustomDe
   
   #if canImport(Observation)
     @available(macOS 14.0, iOS 17.0, watchOS 10.0, tvOS 17.0, *)
-    private var observationRegistrar: ObservationRegistrar {
-      return .shared
+    nonisolated(unsafe)
+    private var observationRegistrar = NodeObservationRegistrar()
+
+    /// Returns whether this node has allocated its Apple Observation state.
+    var _isObservationRegistrarInitialized: Bool {
+      lock.lock()
+      defer { lock.unlock() }
+      return observationRegistrar.isInitialized
     }
   #endif
 
@@ -198,6 +204,10 @@ public final class Computed<Value: SendableMetatype>: Node, Observable, CustomDe
       let _trackingRegistrations = trackingRegistrations
       trackingRegistrations.removeAll()
 
+#if canImport(Observation)
+      let observationRegistrar = observationRegistrar.current
+#endif
+
       lock.unlock()
 
       // Notify observers when becoming potentially dirty, even if the computed value
@@ -206,8 +216,13 @@ public final class Computed<Value: SendableMetatype>: Node, Observable, CustomDe
       // is checked during recomputation to avoid unnecessary downstream propagation.
 #if canImport(Observation)
       if #available(macOS 14.0, iOS 17.0, watchOS 10.0, tvOS 17.0, *) {
-        withMainActor { [observationRegistrar, keyPath = _keyPath(self)] in   
-          observationRegistrar.willSet(PointerKeyPathRoot<Computed<Value>>.shared, keyPath: keyPath)
+        if let observationRegistrar {
+          withMainActor { [observationRegistrar, keyPath = _keyPath(self)] in
+            observationRegistrar.willSet(
+              PointerKeyPathRoot<Computed<Value>>.shared,
+              keyPath: keyPath
+            )
+          }
         }
       }
 #endif
@@ -230,15 +245,21 @@ public final class Computed<Value: SendableMetatype>: Node, Observable, CustomDe
 
   public var wrappedValue: Value {
     get {
-      #if canImport(Observation)
-        if #available(macOS 14.0, iOS 17.0, watchOS 10.0, tvOS 17.0, *) {
-          observationRegistrar.access(PointerKeyPathRoot<Computed<Value>>.shared, keyPath: _keyPath(self))   
-        }
-      #endif
       recomputeIfNeeded()
       
       lock.lock()
       defer { lock.unlock() }
+
+#if canImport(Observation)
+      if #available(macOS 14.0, iOS 17.0, watchOS 10.0, tvOS 17.0, *) {
+        let observationRegistrar = observationRegistrar.initializeIfNeeded()
+        observationRegistrar.access(
+          PointerKeyPathRoot<Computed<Value>>.shared,
+          keyPath: _keyPath(self)
+        )
+      }
+#endif
+
       return _cachedValue!
     }
   }
