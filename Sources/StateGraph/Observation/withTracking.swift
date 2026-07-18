@@ -1,5 +1,51 @@
 import Observation
 
+// MARK: - Changing Node Context API
+
+/// Returns the node that triggered the current tracking callback.
+///
+/// Only valid within tracking handlers (e.g., `withGraphTrackingGroup`).
+/// Returns `nil` on the initial execution (no change triggered).
+///
+/// ## Example
+/// ```swift
+/// withGraphTracking {
+///   withGraphTrackingGroup {
+///     if let node = currentChangingNode() {
+///       print("Changed by: \(node.info.name ?? "unknown")")
+///     } else {
+///       print("Initial run (no change triggered)")
+///     }
+///     _ = someNode.wrappedValue
+///   }
+/// }
+/// ```
+public func currentChangingNode() -> (any TypeErasedNode)? {
+  ChangingNodeContext.current
+}
+
+/// Returns debug information about the node that triggered the current change.
+///
+/// Only valid within tracking handlers (e.g., `withGraphTrackingGroup`).
+/// Returns `nil` on the initial execution (no change triggered).
+///
+/// ## Example
+/// ```swift
+/// withGraphTracking {
+///   withGraphTrackingGroup {
+///     if let info = currentChangingNodeInfo() {
+///       print("Changed by: \(info.name ?? "unknown") at \(info.sourceLocation)")
+///     }
+///     _ = someNode.wrappedValue
+///   }
+/// }
+/// ```
+public func currentChangingNodeInfo() -> NodeInfo? {
+  currentChangingNode()?.info
+}
+
+// MARK: - Tracking
+
 /// Tracks access to the properties of StoredNode or Computed.
 /// Similarly to Observation.withObservationTracking, didChange runs one time after property changes applied.
 /// To observe properties continuously, use ``withContinuousStateGraphTracking``.

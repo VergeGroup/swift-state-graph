@@ -231,7 +231,9 @@ public final class _Stored<
       lock.unlock()
 
       for registration in _trackingRegistrations {
-        registration.perform()
+        ChangingNodeContext.$current.withValue(self) {
+          registration.perform()
+        }
       }
 
       for edge in _outgoingEdges {
@@ -242,7 +244,7 @@ public final class _Stored<
       _didSetHandler?(oldValue, newValue)
     }
   }
-  
+
   private func notifyStorageUpdated() {
 #if canImport(Observation)
     if #available(macOS 14.0, iOS 17.0, watchOS 10.0, tvOS 17.0, *) {
@@ -264,7 +266,9 @@ public final class _Stored<
     lock.unlock()
 
     for registration in _trackingRegistrations {
-      registration.perform()
+      ChangingNodeContext.$current.withValue(self) {
+        registration.perform()
+      }
     }
 
     for edge in _outgoingEdges {
@@ -272,7 +276,7 @@ public final class _Stored<
       edge.to?.potentiallyDirty = true
     }
   }
-  
+
   public var incomingEdges: ContiguousArray<Edge> {
     get {
       fatalError()

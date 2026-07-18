@@ -314,9 +314,11 @@ public final class Computed<Value: SendableMetatype>: Node, Observable, CustomDe
       }
 
       for registration in _trackingRegistrations {
-        registration.perform()
+        ChangingNodeContext.$current.withValue(self) {
+          registration.perform()
+        }
       }
-            
+
     }
   }
 
