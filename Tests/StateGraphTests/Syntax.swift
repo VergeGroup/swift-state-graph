@@ -17,11 +17,10 @@ private enum Static {
 }
 
 final class UserDefaultsModel {
-  
-  @GraphStored(backed: .userDefaults(key: "value")) var value: Int = 0
-  @GraphStored(backed: .userDefaults(key: "value2")) var value2: String? = nil
-  @GraphStored(backed: .userDefaults(key: "maxRetries")) var maxRetries: Int = 3
-  
+
+  @GraphUserDefault("value") var value: Int = 0
+  @GraphUserDefault("value2") var value2: String? = nil
+  @GraphUserDefault("maxRetries") var maxRetries: Int = 3
 }
 
 final class PrivateExample {
@@ -34,21 +33,19 @@ final class PrivateExample {
   
 }
 
-// MARK: - Unified Syntax Demo
+// MARK: - Storage Composition Demo
 
-final class UnifiedSyntaxDemo {
+final class StorageCompositionDemo {
   
-  // Memory storage (default)
+  // In-memory graph primitives
   @GraphStored var count: Int = 0
   @GraphStored var name: String?
-  
-  // UserDefaults storage
-  @GraphStored(backed: .userDefaults(key: "theme")) var theme: String = "light"
-  @GraphStored(backed: .userDefaults(key: "isEnabled")) var isEnabled: Bool = true
-  
-  // UserDefaults with suite
-  @GraphStored(backed: .userDefaults(suite: "com.example.app", key: "apiUrl")) var apiUrl: String = "https://api.example.com"
-  
+
+  // UserDefaults-backed composition
+  @GraphUserDefault("theme") var theme: String = "light"
+  @GraphUserDefault("isEnabled") var isEnabled: Bool = true
+  @GraphUserDefault("apiUrl", suiteName: "com.example.app")
+  var apiUrl: String = "https://api.example.com"
 }
 
 final class ImplicitInitializers {

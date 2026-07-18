@@ -40,8 +40,5 @@ enum ThreadLocal: Sendable {
   static let subscriptions: ThreadLocalValue<Subscriptions> = .init(key: "org.vergegroup.state-graph.subscriptions")
   static let currentNode: ThreadLocalValue<any TypeErasedNode> = .init(key: "org.vergegroup.state-graph.currentNode")
   static let currentCancellable: ThreadLocalValue<GraphTrackingCancellable> = .init(key: "org.vergegroup.state-graph.currentCancellable")
-  static let deferredStorageUpdates: ThreadLocalValue<DeferredStorageUpdates> = .init(
-    key: "org.vergegroup.state-graph.deferredStorageUpdates"
-  )
 
 }
