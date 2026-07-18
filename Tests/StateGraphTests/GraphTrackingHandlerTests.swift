@@ -46,7 +46,7 @@ struct GraphTrackingHandlerTests {
     }
 
     private let state = OSAllocatedUnfairLock(initialState: State())
-    let firstInvocationStarted = DispatchSemaphore(value: 0)
+    let firstInvocationStarted = TestSignal()
     let resumeFirstInvocation = DispatchSemaphore(value: 0)
 
     var result: (invocationCount: Int, maximumActiveCount: Int) {
@@ -104,21 +104,22 @@ struct GraphTrackingHandlerTests {
   }
 
   @Test
-  func concurrentInvocationsAreSerializedAndCoalesced() {
+  func concurrentInvocationsAreSerializedAndCoalesced() async {
     let probe = InvocationProbe()
     let handler = GraphTrackingHandler {
       probe.invoke()
     }
-    let firstInvocationFinished = DispatchSemaphore(value: 0)
+    let firstInvocationFinished = TestSignal()
 
     DispatchQueue.global().async {
       handler.invoke()
       firstInvocationFinished.signal()
     }
 
-    #expect(probe.firstInvocationStarted.wait(timeout: .now() + 1) == .success)
+    #expect(await probe.firstInvocationStarted.wait(for: .seconds(5)))
 
     let pendingInvocations = DispatchGroup()
+    let pendingInvocationsFinished = TestSignal()
     for _ in 0..<10 {
       pendingInvocations.enter()
       DispatchQueue.global().async {
@@ -126,10 +127,13 @@ struct GraphTrackingHandlerTests {
         pendingInvocations.leave()
       }
     }
+    pendingInvocations.notify(queue: .global()) {
+      pendingInvocationsFinished.signal()
+    }
 
-    #expect(pendingInvocations.wait(timeout: .now() + 1) == .success)
+    #expect(await pendingInvocationsFinished.wait(for: .seconds(5)))
     probe.resumeFirstInvocation.signal()
-    #expect(firstInvocationFinished.wait(timeout: .now() + 1) == .success)
+    #expect(await firstInvocationFinished.wait(for: .seconds(5)))
 
     let result = probe.result
     #expect(result.invocationCount == 2)
