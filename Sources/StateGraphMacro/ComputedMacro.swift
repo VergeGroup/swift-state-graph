@@ -87,7 +87,7 @@ extension ComputedMacro: PeerMacro {
           """
           @GraphIgnored
           private func __graphCompute_\(raw: name)(_ context: inout Computed<\(type)>.Context) -> \(type) {
-          \(body)
+          \(body.trimmed)
           }
           """,
         ]
@@ -109,7 +109,7 @@ extension ComputedMacro: PeerMacro {
           """
           @GraphIgnored
           private \(raw: staticModifier)func __graphCompute_\(raw: name)(_ context: inout Computed<\(type)>.Context) -> \(type) {
-          \(body)
+          \(body.trimmed)
           }
           """,
         ]

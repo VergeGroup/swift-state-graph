@@ -59,6 +59,77 @@ struct ClosureBox<R> {
   }
 }
 
+/// Owns a tracking handler's lifetime and serializes its execution.
+///
+/// The state lock is held only while updating invocation state. The handler runs
+/// after the lock is released so it may cancel its own tracking scope safely.
+final class GraphTrackingHandler: @unchecked Sendable {
+
+  /// Immutable closure storage whose execution is serialized by the owning state machine.
+  private struct Handler: @unchecked Sendable {
+    let closure: () -> Void
+
+    func callAsFunction() {
+      closure()
+    }
+  }
+
+  private struct State {
+    var handler: Handler?
+    var isInvoking = false
+    var needsInvocation = false
+  }
+
+  private let state: OSAllocatedUnfairLock<State>
+
+  init(_ handler: @escaping () -> Void) {
+    self.state = .init(
+      uncheckedState: .init(handler: .init(closure: handler))
+    )
+  }
+
+  var isCancelled: Bool {
+    state.withLock { $0.handler == nil }
+  }
+
+  func invoke() {
+    let shouldDrain = state.withLock { state in
+      guard state.handler != nil else { return false }
+
+      state.needsInvocation = true
+      guard !state.isInvoking else { return false }
+
+      state.isInvoking = true
+      return true
+    }
+
+    guard shouldDrain else { return }
+
+    while let handler = takeNextHandler() {
+      handler()
+    }
+  }
+
+  func cancel() {
+    state.withLock { state in
+      state.handler = nil
+      state.needsInvocation = false
+    }
+  }
+
+  private func takeNextHandler() -> Handler? {
+    state.withLock { state in
+      guard state.needsInvocation, let handler = state.handler else {
+        state.isInvoking = false
+        return nil
+      }
+
+      state.needsInvocation = false
+      return handler
+    }
+  }
+}
+
 func perform<Return>(
   _ closure: () -> Return,
   isolation: isolated (any Actor)? = #isolation
@@ -251,39 +322,50 @@ public final class TrackingRegistration: Sendable, Hashable {
       }
       
       // Re-entry Prevention Guard
-      // ========================
+      // =========================
       //
-      // Problem: Infinite loop when setting unchanged values within tracking handlers
+      // `_Stored` evaluates its notification predicate before calling `perform()`:
       //
-      // Scenario:
-      // 1. withGraphTrackingGroup { ... } establishes a tracking context
-      // 2. Inside the handler, we read a node's value (e.g., node.wrappedValue)
-      // 3. We set the same value back (e.g., node.wrappedValue = value)
-      // 4. The setter ALWAYS triggers tracking registrations (no equality check)
-      // 5. This calls perform() on the same registration that's currently executing
-      // 6. The handler runs again, repeating steps 2-5 infinitely
+      // - Equatable values notify only when `oldValue != newValue`.
+      // - Non-Equatable reference values notify only when their identity changes.
+      // - Values without either comparison use the default predicate and notify
+      //   for every assignment.
       //
-      // Solution:
-      // Check if the registration trying to perform is the SAME as the one currently
-      // executing (stored in TaskLocal). If so, skip re-execution to break the cycle.
+      // Assignments filtered by that predicate never reach this method. This means
+      // that assigning the same `Int`, for example, is already handled by `_Stored`
+      // and does not exercise this guard. Changed values and assignments that use
+      // the always-notify predicate still need explicit re-entry protection here.
       //
-      // How it works:
-      // - TrackingRegistration.registration is a @TaskLocal that holds the currently
-      //   executing registration during handler execution
-      // - If `self` (the registration being performed) matches the TaskLocal value,
-      //   we're attempting to re-enter the same handler
-      // - Return early to prevent the infinite loop
+      // During a tracking handler's execution, `withStateGraphTracking` stores its
+      // registration in `ThreadLocal.registration`. Reading a node then adds that
+      // registration to the node's set of observers. If the same handler mutates
+      // the node before it finishes, the setter asks every captured registration
+      // to perform, including the registration that is currently executing.
       //
-      // Example:
-      //   let node = Stored(wrappedValue: 42)
+      // Without this identity check, the active registration would schedule its
+      // own `didChange` closure. Continuous tracking would run the handler again,
+      // install a new registration, perform the same mutation, and repeat the cycle.
+      //
+      // Only the currently executing registration is suppressed. Other handlers
+      // observing the same node have different registrations, so they must still be
+      // invalidated and receive the update normally.
+      //
+      // For example, a non-Equatable value uses the always-notify predicate:
+      //
+      //   struct Value: Sendable { var rawValue: Int }
+      //   let node = Stored(wrappedValue: Value(rawValue: 0))
+      //
       //   withGraphTracking {
       //     withGraphTrackingGroup {
-      //       let value = node.wrappedValue  // Establishes tracking
-      //       node.wrappedValue = value      // Without this guard, would loop infinitely
+      //       let value = node.wrappedValue
+      //       node.wrappedValue = value
       //     }
       //   }
       //
-      // This behavior is similar to Apple's Observation framework.
+      // Although the stored properties are unchanged, the assignment is
+      // notification-worthy because `Value` has no equality predicate. This guard
+      // prevents that group from re-entering itself while allowing peer groups to
+      // observe the assignment.
       if ThreadLocal.registration.value == self {
         return
       }

@@ -17,7 +17,10 @@ import Foundation.NSLock
 ///
 /// - When value changes: Changes propagate to all dependent nodes, triggering recalculations
 /// - When value is accessed: Dependencies are recorded, automatically building the graph structure
-public typealias Stored<Value> = _Stored<Value, InMemoryStorage<Value>>
+///
+/// `Value` itself does not need to conform to `Sendable`. `SendableMetatype` allows the
+/// node's isolated closures to use generic conformances safely.
+public typealias Stored<Value: SendableMetatype> = _Stored<Value, InMemoryStorage<Value>>
 
 extension _Stored where S == InMemoryStorage<Value> {
   /// Convenience initializer with wrappedValue (non-Equatable types)
@@ -103,9 +106,13 @@ extension _Stored where S == InMemoryStorage<Value>, Value: Equatable & AnyObjec
   }
 }
 
+/// Describes how a computed node produces and compares values.
+///
+/// `Value` itself does not need to conform to `Sendable`. `SendableMetatype` allows the
+/// descriptor's sendable closures to use generic conformances safely.
 public protocol ComputedDescriptor<Value>: Sendable {
   
-  associatedtype Value
+  associatedtype Value: SendableMetatype
   
   func compute(context: inout Computed<Value>.Context) -> Value
   
@@ -115,14 +122,14 @@ public protocol ComputedDescriptor<Value>: Sendable {
 extension ComputedDescriptor {
   
   @Sendable
-  public static func any<Value>(
+  public static func any<Value: SendableMetatype>(
     _ compute: @Sendable @escaping (inout Computed<Value>.Context) -> Value
   ) -> Self where Self == AnyComputedDescriptor<Value> {
     AnyComputedDescriptor(compute: compute, isEqual: { _, _ in false })
   }
   
   @Sendable
-  public static func any<Value>(
+  public static func any<Value: SendableMetatype>(
     _ compute: @Sendable @escaping (
       inout Computed<Value>.Context
     ) -> Value
@@ -132,7 +139,7 @@ extension ComputedDescriptor {
   
 }
 
-public struct AnyComputedDescriptor<Value>: ComputedDescriptor {
+public struct AnyComputedDescriptor<Value: SendableMetatype>: ComputedDescriptor {
 
   private let computeClosure: @Sendable (inout Computed<Value>.Context) -> Value
   private let isEqualClosure: @Sendable (Value, Value) -> Bool
@@ -147,7 +154,7 @@ public struct AnyComputedDescriptor<Value>: ComputedDescriptor {
   
   public init(
     compute: @escaping @Sendable (inout Computed<Value>.Context) -> Value
-  ) where Value : Equatable {
+  ) where Value: Equatable {
     self.computeClosure = compute  
     self.isEqualClosure = { $0 == $1 }
   }
@@ -209,8 +216,10 @@ public enum StateGraphGlobal {
 /// - Value is lazily computed: Calculations only occur when the value is accessed
 /// - Dependencies are tracked: The node automatically tracks which nodes it depends on
 /// - Changes propagate: When this node's value changes, downstream nodes are notified
-/// ```
-public final class Computed<Value>: Node, Observable, CustomDebugStringConvertible {
+///
+/// `Value` itself does not need to conform to `Sendable`. `SendableMetatype` allows the
+/// node's isolated closures to use generic conformances safely.
+public final class Computed<Value: SendableMetatype>: Node, Observable, CustomDebugStringConvertible {
     
   public struct Context {
     
@@ -301,7 +310,7 @@ public final class Computed<Value>: Node, Observable, CustomDebugStringConvertib
 #endif
 
       for edge in _outgoingEdges {
-        edge.to.potentiallyDirty = true
+        edge.to?.potentiallyDirty = true
       }
 
       for registration in _trackingRegistrations {
@@ -368,7 +377,8 @@ public final class Computed<Value>: Node, Observable, CustomDebugStringConvertib
     self.lock = .init()
 
 #if DEBUG
-    Task {
+    Task { [weak self] in
+      guard let self else { return }
       await NodeStore.shared.register(node: self)
     }
 #endif
@@ -400,7 +410,8 @@ public final class Computed<Value>: Node, Observable, CustomDebugStringConvertib
     self.lock = .init()
 
 #if DEBUG
-    Task {
+    Task { [weak self] in
+      guard let self else { return }
       await NodeStore.shared.register(node: self)
     }
 #endif
@@ -432,18 +443,30 @@ public final class Computed<Value>: Node, Observable, CustomDebugStringConvertib
     self.lock = .init()
    
 #if DEBUG
-    Task {
+    Task { [weak self] in
+      guard let self else { return }
       await NodeStore.shared.register(node: self)
     }
 #endif
   }
   
-    deinit {
-//      Log.generic.debug("Deinit Computed: \(self.info.name.map(String.init) ?? "noname")")
-      for edge in incomingEdges {
-        edge.from.outgoingEdges.removeAll(where: { $0 === edge })
-      }
+  deinit {
+//    Log.generic.debug("Deinit Computed: \(self.info.name.map(String.init) ?? "noname")")
+    lock.lock()
+    let incomingEdges = self.incomingEdges
+    let outgoingEdges = self.outgoingEdges
+    self.incomingEdges.removeAll()
+    self.outgoingEdges.removeAll()
+    lock.unlock()
+
+    for edge in incomingEdges {
+      edge.from?.removeOutgoingEdge(edge)
     }
+
+    for edge in outgoingEdges {
+      edge.to?.removeIncomingEdge(edge)
+    }
+  }
 
   public func recomputeIfNeeded() {
 
@@ -464,11 +487,15 @@ public final class Computed<Value>: Node, Observable, CustomDebugStringConvertib
 
     if !_potentiallyDirty && _cachedValue != nil { return }
 
+    incomingEdges.removeAll(where: { $0.from == nil })
+
     for edge in incomingEdges {
-      edge.from.recomputeIfNeeded()
+      edge.from?.recomputeIfNeeded()
     }
 
-    let hasPendingIncomingEdge = incomingEdges.contains(where: \.isPending)
+    let hasPendingIncomingEdge = incomingEdges.contains {
+      $0.from != nil && $0.isPending
+    }
 
     if hasPendingIncomingEdge || _cachedValue == nil {
 
@@ -506,16 +533,20 @@ public final class Computed<Value>: Node, Observable, CustomDebugStringConvertib
   }
 
   private func removeIncomingEdges() {
+    let incomingEdges = self.incomingEdges
+    self.incomingEdges.removeAll()
+
     for edge in incomingEdges {
-      edge.from.lock.lock()
-      edge.from.outgoingEdges.removeAll(where: { $0 === edge })
-      edge.from.lock.unlock()
+      edge.from?.removeOutgoingEdge(edge)
     }
-    incomingEdges.removeAll()
   }
    
   public var debugDescription: String {
-    "Computed<\(Value.self)>(name=\(info.name.map(String.init) ?? "noname"), value=\(String(describing: _cachedValue)))"
+    lock.lock()
+    let cachedValue = _cachedValue
+    lock.unlock()
+
+    return "Computed<\(Value.self)>(name=\(info.name.map(String.init) ?? "noname"), value=\(String(describing: cachedValue)))"
   }
   
 }
@@ -567,7 +598,14 @@ extension Computed {
   
 }
 
-public struct GraphComputedBacking<Owner: AnyObject, Value>: ~Copyable, @unchecked Sendable {
+/// Lazily stores the computed node synthesized for an instance `@GraphComputedBody` property.
+///
+/// This type is public so macro expansions in client modules can reference it. Create graph
+/// computed properties with `@GraphComputedBody` instead of using this type directly.
+public struct GraphComputedBacking<
+  Owner: AnyObject,
+  Value: SendableMetatype
+>: ~Copyable, @unchecked Sendable {
 
   private let name: StaticString
   private let rule: @Sendable (Owner, inout Computed<Value>.Context) -> Value
@@ -612,7 +650,11 @@ private struct GraphComputedWeakOwner<Owner: AnyObject>: ~Copyable, @unchecked S
   }
 }
 
-public struct GraphComputedGlobalBacking<Value>: ~Copyable, @unchecked Sendable {
+/// Lazily stores the computed node synthesized for a global or static `@GraphComputedBody` property.
+///
+/// This type is public so macro expansions in client modules can reference it. Create graph
+/// computed properties with `@GraphComputedBody` instead of using this type directly.
+public struct GraphComputedGlobalBacking<Value: SendableMetatype>: ~Copyable, @unchecked Sendable {
 
   private let name: StaticString
   private let rule: @Sendable (inout Computed<Value>.Context) -> Value
@@ -643,11 +685,11 @@ public struct GraphComputedGlobalBacking<Value>: ~Copyable, @unchecked Sendable 
   }
 }
 
-@DebugDescription
+/// A dependency link whose lifetime does not keep either endpoint alive.
 public final class Edge: CustomDebugStringConvertible {
 
-  unowned let from: any TypeErasedNode
-  unowned let to: any TypeErasedNode
+  weak var from: (any TypeErasedNode)?
+  weak var to: (any TypeErasedNode)?
   
   private let lock: OSAllocatedUnfairLock<Void> = .init()
   
@@ -672,7 +714,11 @@ public final class Edge: CustomDebugStringConvertible {
   }
 
   public var debugDescription: String {
-    "\(from.debugDescription) -> \(to.debugDescription)"
+    guard let from, let to else {
+      return "Edge(deallocated endpoint)"
+    }
+
+    return "\(from.debugDescription) -> \(to.debugDescription)"
   }
 
   deinit {
