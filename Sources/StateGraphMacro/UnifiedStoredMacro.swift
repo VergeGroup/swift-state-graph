@@ -802,33 +802,47 @@ extension UnifiedStoredMacro: AccessorMacro {
     }
 
     let typeAnnotation = variableDecl.typeSyntax.map { ": \($0.trimmed)" } ?? ""
-    var statements: [String] = []
+    let backingNode = String(assignmentTarget.dropLast(".wrappedValue".count))
+    let capturePrefix = observerCapturePrefix(for: variableDecl, context: context)
+    var arguments: [String] = ["__graphStoredNewValue"]
 
     if let willSetBlock = variableDecl.willSetBlock {
       let newValueName = variableDecl.willSetParameterName
       let observerStatements = makeObserverStatements(from: willSetBlock)
-      statements.append(
+      let valueBinding = observer(willSetBlock, references: newValueName)
+        ? "let \(newValueName)\(typeAnnotation) = __graphStoredFinalValue\n"
+        : ""
+      let observerBody =
         """
         do {
-        \(indent("let \(newValueName)\(typeAnnotation) = __graphStoredNewValue\n\(observerStatements)", by: 2))
+        \(indent("\(valueBinding)\(observerStatements)", by: 2))
+        }
+        """
+      arguments.append(
+        """
+        willSet: { \(capturePrefix)_, __graphStoredFinalValue in
+        \(indent(observerBody, by: 2))
         }
         """
       )
     }
 
-    if variableDecl.didSetBlock != nil {
-      let oldValueName = variableDecl.didSetParameterName
-      statements.append("let \(oldValueName)\(typeAnnotation) = \(assignmentTarget)")
-    }
-
-    statements.append("\(assignmentTarget) = __graphStoredNewValue")
-
     if let didSetBlock = variableDecl.didSetBlock {
+      let oldValueName = variableDecl.didSetParameterName
       let observerStatements = makeObserverStatements(from: didSetBlock)
-      statements.append(
+      let valueBinding = observer(didSetBlock, references: oldValueName)
+        ? "let \(oldValueName)\(typeAnnotation) = __graphStoredOriginalValue\n"
+        : ""
+      let observerBody = valueBinding +
         """
         do {
         \(indent(observerStatements, by: 2))
+        }
+        """
+      arguments.append(
+        """
+        didSet: { \(capturePrefix)__graphStoredOriginalValue, _ in
+        \(indent(observerBody, by: 2))
         }
         """
       )
@@ -837,16 +851,41 @@ extension UnifiedStoredMacro: AccessorMacro {
     return AccessorDeclSyntax(
       """
       \(raw: setterKeyword)(__graphStoredNewValue) {
-      \(raw: indent(statements.joined(separator: "\n"), by: 2))
+        \(raw: backingNode)._setGraphStoredValue(
+      \(raw: indent(arguments.joined(separator: ",\n"), by: 4))
+        )
       }
       """
     )
+  }
+
+  /// Returns the capture list required by an escaping instance observer closure.
+  private static func observerCapturePrefix(
+    for variableDecl: VariableDeclSyntax,
+    context: some MacroExpansionContext
+  ) -> String {
+    let isTypeProperty = variableDecl.modifiers.contains {
+      $0.name.tokenKind == .keyword(.static)
+        || $0.name.tokenKind == .keyword(.class)
+    }
+
+    guard !isTypeProperty, nearestContainingTypeKind(context: context) != nil else {
+      return ""
+    }
+
+    return "[self] "
   }
 
   private static func makeObserverStatements(from block: CodeBlockSyntax) -> String {
     block.trimmed.statements
       .map { $0.trimmed.description }
       .joined(separator: "\n")
+  }
+
+  private static func observer(_ block: CodeBlockSyntax, references identifier: String) -> Bool {
+    block.tokens(viewMode: .sourceAccurate).contains { token in
+      token.tokenKind == .identifier(identifier)
+    }
   }
 
   private static func indent(_ string: String, by spaces: Int) -> String {

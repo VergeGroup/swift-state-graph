@@ -145,11 +145,15 @@ final class UnifiedStoredMacroTests: XCTestCase {
       }
 
       set(__graphStoredNewValue) {
-        let oldValue: Int = $count.wrappedValue
-        $count.wrappedValue = __graphStoredNewValue
-        do {
-          history.append((oldValue, count))
-        }
+        $count._setGraphStoredValue(
+          __graphStoredNewValue,
+          didSet: { __graphStoredOriginalValue, _ in
+            let oldValue: Int = __graphStoredOriginalValue
+            do {
+              history.append((oldValue, count))
+            }
+          }
+        )
       }
       """
     )
@@ -177,11 +181,15 @@ final class UnifiedStoredMacroTests: XCTestCase {
       }
 
       set(__graphStoredNewValue) {
-        do {
-          let newValue: Int = __graphStoredNewValue
-          history.append((count, newValue))
-        }
-        $count.wrappedValue = __graphStoredNewValue
+        $count._setGraphStoredValue(
+          __graphStoredNewValue,
+          willSet: { _, __graphStoredFinalValue in
+            do {
+              let newValue: Int = __graphStoredFinalValue
+              history.append((count, newValue))
+            }
+          }
+        )
       }
       """
     )
@@ -209,11 +217,15 @@ final class UnifiedStoredMacroTests: XCTestCase {
       }
 
       set(__graphStoredNewValue) {
-        do {
-          let nextValue: Int = __graphStoredNewValue
-          history.append((count, nextValue))
-        }
-        $count.wrappedValue = __graphStoredNewValue
+        $count._setGraphStoredValue(
+          __graphStoredNewValue,
+          willSet: { _, __graphStoredFinalValue in
+            do {
+              let nextValue: Int = __graphStoredFinalValue
+              history.append((count, nextValue))
+            }
+          }
+        )
       }
       """
     )
@@ -244,18 +256,89 @@ final class UnifiedStoredMacroTests: XCTestCase {
       }
 
       set(__graphStoredNewValue) {
-        do {
-          let newValue: Int = __graphStoredNewValue
-          history.append(("will", count, newValue))
-        }
-        let oldValue: Int = $count.wrappedValue
-        $count.wrappedValue = __graphStoredNewValue
-        do {
-          history.append(("did", oldValue, count))
-        }
+        $count._setGraphStoredValue(
+          __graphStoredNewValue,
+          willSet: { _, __graphStoredFinalValue in
+            do {
+              let newValue: Int = __graphStoredFinalValue
+              history.append(("will", count, newValue))
+            }
+          },
+          didSet: { __graphStoredOriginalValue, _ in
+            let oldValue: Int = __graphStoredOriginalValue
+            do {
+              history.append(("did", oldValue, count))
+            }
+          }
+        )
       }
       """
     )
+  }
+
+  func test_memory_storage_observers_capture_instance_self() {
+    assertMacro {
+      """
+      final class Model {
+        @GraphStored
+        var count: Int = 0 {
+          willSet {
+            history.append((count, newValue))
+          }
+          didSet {
+            history.append((oldValue, count))
+          }
+        }
+
+        var history: [(Int, Int)] = []
+      }
+      """
+    } expansion: {
+      """
+      final class Model {
+        var count: Int {
+          willSet {
+            history.append((count, newValue))
+          }
+          didSet {
+            history.append((oldValue, count))
+          }
+          @storageRestrictions(
+            accesses: $count
+          )
+          init(initialValue) {
+            $count.wrappedValue = initialValue
+          }
+
+          get {
+            return $count.wrappedValue
+          }
+
+          set(__graphStoredNewValue) {
+            $count._setGraphStoredValue(
+              __graphStoredNewValue,
+              willSet: { [self] _, __graphStoredFinalValue in
+                do {
+                  let newValue: Int = __graphStoredFinalValue
+                  history.append((count, newValue))
+                }
+              },
+              didSet: { [self] __graphStoredOriginalValue, _ in
+                let oldValue: Int = __graphStoredOriginalValue
+                do {
+                  history.append((oldValue, count))
+                }
+              }
+            )
+          }
+        }
+
+        @GraphIgnored let $count: Stored<Int> = .init(name: "count", wrappedValue: 0)
+
+        var history: [(Int, Int)] = []
+      }
+      """
+    }
   }
 
   func test_memory_storage_didSet_accessor_expansion_with_custom_old_value_name() throws {
@@ -280,11 +363,15 @@ final class UnifiedStoredMacroTests: XCTestCase {
       }
 
       set(__graphStoredNewValue) {
-        let previousValue: Int = $count.wrappedValue
-        $count.wrappedValue = __graphStoredNewValue
-        do {
-          history.append((previousValue, count))
-        }
+        $count._setGraphStoredValue(
+          __graphStoredNewValue,
+          didSet: { __graphStoredOriginalValue, _ in
+            let previousValue: Int = __graphStoredOriginalValue
+            do {
+              history.append((previousValue, count))
+            }
+          }
+        )
       }
       """
     )
@@ -312,11 +399,15 @@ final class UnifiedStoredMacroTests: XCTestCase {
       }
 
       set(__graphStoredNewValue) {
-        let oldValue: String = $username.wrappedValue
-        $username.wrappedValue = __graphStoredNewValue
-        do {
-          history.append((oldValue, username))
-        }
+        $username._setGraphStoredValue(
+          __graphStoredNewValue,
+          didSet: { __graphStoredOriginalValue, _ in
+            let oldValue: String = __graphStoredOriginalValue
+            do {
+              history.append((oldValue, username))
+            }
+          }
+        )
       }
       """
     )
@@ -344,11 +435,15 @@ final class UnifiedStoredMacroTests: XCTestCase {
       }
 
       set(__graphStoredNewValue) {
-        do {
-          let newValue: String = __graphStoredNewValue
-          history.append((username, newValue))
-        }
-        $username.wrappedValue = __graphStoredNewValue
+        $username._setGraphStoredValue(
+          __graphStoredNewValue,
+          willSet: { _, __graphStoredFinalValue in
+            do {
+              let newValue: String = __graphStoredFinalValue
+              history.append((username, newValue))
+            }
+          }
+        )
       }
       """
     )

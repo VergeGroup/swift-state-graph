@@ -6,6 +6,12 @@ import Foundation
 
 // MARK: - Storage Protocol
 
+/// A backing store used by a StateGraph stored node.
+///
+/// StateGraph reads and writes `value` while holding the owning node's lock. A value
+/// accessor must not re-enter that node or access another StateGraph node because doing
+/// so can violate lock ordering. Backing-store changes should be reported only through
+/// the `StorageContext` received by `loaded(context:)`.
 public protocol Storage<Value>: Sendable {
   
   associatedtype Value
@@ -189,61 +195,237 @@ public final class _Stored<
         self.trackingRegistrations.insert(registration)
       }
 
+      if let transaction = ThreadLocal.transaction.value {
+        switch transaction.stagedValue(for: self, as: Value.self) {
+        case .absent:
+          break
+        case .staged(let value):
+          return value
+        }
+      }
+
       return storage.value
     }
     set {
-      lock.lock()
+      _setGraphStoredValue(newValue)
+    }
+  }
 
-      let oldValue = storage.value
+  /// Sets a value while preserving `@GraphStored` property-observer semantics.
+  ///
+  /// Macro-generated accessors use this method to defer their observers together
+  /// with a transaction's staged value. On a successful transaction, `willSet`
+  /// runs once before any staged value is applied and `didSet` runs once after all
+  /// staged values are applied. A failed transaction discards both callbacks.
+  ///
+  /// - Important: The callbacks are intentionally non-`Sendable`. Transactions
+  ///   commit synchronously on the same isolation context that staged them.
+  ///
+  /// - Parameters:
+  ///   - finalValue: The value assigned by the generated property setter.
+  ///   - willSet: A callback receiving the original and final values.
+  ///   - didSet: A callback receiving the original and final values.
+  public func _setGraphStoredValue(
+    _ finalValue: Value,
+    willSet: ((Value, Value) -> Void)? = nil,
+    didSet: ((Value, Value) -> Void)? = nil
+  ) {
+    if stageValueIfNeeded(
+      finalValue,
+      willSetObserver: willSet,
+      didSetObserver: didSet
+    ) {
+      return
+    }
 
-      // Skip notification if value hasn't changed (like Observation.framework)
-      guard shouldNotify(oldValue, newValue) else {
-        storage.value = newValue
-        let _didSetHandler = didSetHandler
-        lock.unlock()
-        _didSetHandler?(oldValue, newValue)
-        return
+    if let transaction = ThreadLocal.committingTransaction.value, transaction.defersMutations {
+      transaction.deferUntilAfterCompletion { [self] in
+        _setGraphStoredValue(finalValue, willSet: willSet, didSet: didSet)
       }
+      return
+    }
+
+    if let willSet {
+      lock.lock()
+      let valueBeforeWillSet = storage.value
+      lock.unlock()
+      willSet(valueBeforeWillSet, finalValue)
+    }
+
+    let originalValue = setImmediately(finalValue)
+    didSet?(originalValue, finalValue)
+  }
+
+  private func stageValueIfNeeded(
+    _ finalValue: Value,
+    willSetObserver: ((Value, Value) -> Void)?,
+    didSetObserver: ((Value, Value) -> Void)?
+  ) -> Bool {
+    guard let transaction = ThreadLocal.transaction.value, transaction.isCollecting else {
+      return false
+    }
+
+    lock.lock()
+    defer { lock.unlock() }
+
+    transaction.stage(
+      node: self,
+      initialValue: storage.value,
+      finalValue: finalValue,
+      willSetObserver: willSetObserver,
+      didSetObserver: didSetObserver,
+      shouldNotify: shouldNotify,
+      readCurrentValue: { [self] in
+        lock.lock()
+        defer { lock.unlock() }
+        return storage.value
+      },
+      applyValue: { [self] value in
+        lock.lock()
+        storage.value = value
+        lock.unlock()
+      },
+      publishValue: { [self] _, _, publishesChange, transaction in
+        publishTransactionMutation(
+          publishesChange: publishesChange,
+          transaction: transaction
+        )
+      },
+      completeValue: { [self] oldValue, newValue in
+        lock.lock()
+        let handler = didSetHandler
+        lock.unlock()
+        handler?(oldValue, newValue)
+      }
+    )
+
+    return true
+  }
+
+  @discardableResult
+  private func setImmediately(_ newValue: Value) -> Value {
+    lock.lock()
+
+    let oldValue = storage.value
+
+    // Skip graph and Observation notification if the value has not changed.
+    guard shouldNotify(oldValue, newValue) else {
+      storage.value = newValue
+      let handler = didSetHandler
+      lock.unlock()
+      handler?(oldValue, newValue)
+      return oldValue
+    }
 
 #if canImport(Observation)
-      if #available(macOS 14.0, iOS 17.0, watchOS 10.0, tvOS 17.0, *) {
-        withMainActor { [observationRegistrar, keyPath = _keyPath(self)] in
-          observationRegistrar.willSet(PointerKeyPathRoot<_Stored<Value, S>>.shared, keyPath: keyPath)
-        }
+    if #available(macOS 14.0, iOS 17.0, watchOS 10.0, tvOS 17.0, *) {
+      withMainActor { [observationRegistrar, keyPath = _keyPath(self)] in
+        observationRegistrar.willSet(
+          PointerKeyPathRoot<_Stored<Value, S>>.shared,
+          keyPath: keyPath
+        )
       }
-
-      defer {
-        if #available(macOS 14.0, iOS 17.0, watchOS 10.0, tvOS 17.0, *) {
-          withMainActor { [observationRegistrar, keyPath = _keyPath(self)] in
-            observationRegistrar.didSet(PointerKeyPathRoot<_Stored<Value, S>>.shared, keyPath: keyPath)
-          }
-        }
-      }
+    }
 #endif
 
-      storage.value = newValue
+    storage.value = newValue
 
-      let _outgoingEdges = outgoingEdges
-      let _trackingRegistrations = trackingRegistrations
-      let _didSetHandler = didSetHandler
-      self.trackingRegistrations.removeAll()
+    let currentOutgoingEdges = outgoingEdges
+    let currentTrackingRegistrations = trackingRegistrations
+    let handler = didSetHandler
+    trackingRegistrations.removeAll()
 
-      lock.unlock()
+    lock.unlock()
 
-      for registration in _trackingRegistrations {
-        registration.perform()
-      }
-
-      for edge in _outgoingEdges {
-        edge.isPending = true
-        edge.to?.potentiallyDirty = true
-      }
-
-      _didSetHandler?(oldValue, newValue)
+    for registration in currentTrackingRegistrations {
+      registration.perform()
     }
+
+    for edge in currentOutgoingEdges {
+      edge.isPending = true
+      edge.to?.potentiallyDirty = true
+    }
+
+    handler?(oldValue, newValue)
+
+#if canImport(Observation)
+    if #available(macOS 14.0, iOS 17.0, watchOS 10.0, tvOS 17.0, *) {
+      withMainActor { [observationRegistrar, keyPath = _keyPath(self)] in
+        observationRegistrar.didSet(
+          PointerKeyPathRoot<_Stored<Value, S>>.shared,
+          keyPath: keyPath
+        )
+      }
+    }
+#endif
+
+    return oldValue
+  }
+
+  private func publishTransactionMutation(
+    publishesChange: Bool,
+    transaction: GraphTransaction
+  ) {
+    guard publishesChange else {
+      return
+    }
+
+    publishTransactionChange(into: transaction)
+  }
+
+  private func publishTransactionChange(into transaction: GraphTransaction) {
+
+    lock.lock()
+    let currentOutgoingEdges = outgoingEdges
+    let currentTrackingRegistrations = trackingRegistrations
+    trackingRegistrations.removeAll()
+    lock.unlock()
+
+    transaction.enqueue(currentTrackingRegistrations)
+
+    // Dirty propagation precedes Observation callbacks so a callback that reads
+    // a dependent Computed node cannot observe its stale pre-transaction cache.
+    for edge in currentOutgoingEdges {
+      edge.isPending = true
+      edge.to?.potentiallyDirty = true
+    }
+
+    // Observation is queued until graph propagation has completed for every
+    // staged node. This keeps unrelated Computed caches coherent in callbacks.
+#if canImport(Observation)
+    if #available(macOS 14.0, iOS 17.0, watchOS 10.0, tvOS 17.0, *) {
+      transaction.enqueueObservation { [observationRegistrar, keyPath = _keyPath(self)] in
+        withMainActor {
+          observationRegistrar.willSet(
+            PointerKeyPathRoot<_Stored<Value, S>>.shared,
+            keyPath: keyPath
+          )
+          observationRegistrar.didSet(
+            PointerKeyPathRoot<_Stored<Value, S>>.shared,
+            keyPath: keyPath
+          )
+        }
+      }
+    }
+#endif
   }
   
   private func notifyStorageUpdated() {
+    if let transaction = ThreadLocal.committingTransaction.value, transaction.phase == .applying {
+      if transaction.containsMutation(for: self) {
+        // A custom Storage may synchronously report its own setter. The transaction
+        // already publishes that mutation after every staged node has been applied.
+        return
+      }
+
+      // A shared backend can synchronously update an alias node that is not itself
+      // staged. Queue only its publication so callbacks still see the final batch.
+      transaction.enqueueStoragePublication(for: self) { [weak self] transaction in
+        self?.publishTransactionChange(into: transaction)
+      }
+      return
+    }
+
 #if canImport(Observation)
     if #available(macOS 14.0, iOS 17.0, watchOS 10.0, tvOS 17.0, *) {
       // Workaround: SwiftUI will not trigger update if we call only didSet.

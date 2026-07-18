@@ -303,8 +303,21 @@ public final class Computed<Value: SendableMetatype>: Node, Observable, CustomDe
       // is checked during recomputation to avoid unnecessary downstream propagation.
 #if canImport(Observation)
       if #available(macOS 14.0, iOS 17.0, watchOS 10.0, tvOS 17.0, *) {
-        withMainActor { [observationRegistrar, keyPath = _keyPath(self)] in   
-          observationRegistrar.willSet(PointerKeyPathRoot<Computed<Value>>.shared, keyPath: keyPath)
+        let publishObservation = { [observationRegistrar, keyPath = _keyPath(self)] in
+          withMainActor {
+            observationRegistrar.willSet(
+              PointerKeyPathRoot<Computed<Value>>.shared,
+              keyPath: keyPath
+            )
+          }
+        }
+
+        if let transaction = ThreadLocal.committingTransaction.value,
+           transaction.phase == .publishing
+        {
+          transaction.enqueueObservation(publishObservation)
+        } else {
+          publishObservation()
         }
       }
 #endif
@@ -313,8 +326,14 @@ public final class Computed<Value: SendableMetatype>: Node, Observable, CustomDe
         edge.to?.potentiallyDirty = true
       }
 
-      for registration in _trackingRegistrations {
-        registration.perform()
+      if let transaction = ThreadLocal.committingTransaction.value,
+         transaction.phase == .publishing
+      {
+        transaction.enqueue(_trackingRegistrations)
+      } else {
+        for registration in _trackingRegistrations {
+          registration.perform()
+        }
       }
             
     }
@@ -332,6 +351,28 @@ public final class Computed<Value: SendableMetatype>: Node, Observable, CustomDe
           observationRegistrar.access(PointerKeyPathRoot<Computed<Value>>.shared, keyPath: _keyPath(self))   
         }
       #endif
+
+      if let transaction = ThreadLocal.transaction.value,
+         transaction.isCollecting,
+         transaction.hasStagedMutations
+      {
+        // Establish the global cache and dependency edges from committed values.
+        // The staged evaluation below remains transaction-local, so a rollback
+        // cannot leak staged values into the shared graph.
+        ThreadLocal.transaction.withValue(nil) {
+          recomputeIfNeeded()
+        }
+
+        return transaction.computedValue(for: self) { [self] in
+          ThreadLocal.currentNode.withValue(nil) {
+            ThreadLocal.registration.withValue(nil) {
+              var context = Context(environment: .init())
+              return descriptor.compute(context: &context)
+            }
+          }
+        }
+      }
+
       recomputeIfNeeded()
       
       lock.lock()
