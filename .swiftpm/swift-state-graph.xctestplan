@@ -31,6 +31,13 @@
     {
       "target" : {
         "containerPath" : "container:",
+        "identifier" : "StateGraphUbiquitousKeyValueTests",
+        "name" : "StateGraphUbiquitousKeyValueTests"
+      }
+    },
+    {
+      "target" : {
+        "containerPath" : "container:",
         "identifier" : "StateGraphNormalizationTests",
         "name" : "StateGraphNormalizationTests"
       }

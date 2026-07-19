@@ -38,6 +38,20 @@
             buildForAnalyzing = "YES">
             <BuildableReference
                BuildableIdentifier = "primary"
+               BlueprintIdentifier = "StateGraphUbiquitousKeyValue"
+               BuildableName = "StateGraphUbiquitousKeyValue"
+               BlueprintName = "StateGraphUbiquitousKeyValue"
+               ReferencedContainer = "container:">
+            </BuildableReference>
+         </BuildActionEntry>
+         <BuildActionEntry
+            buildForTesting = "YES"
+            buildForRunning = "YES"
+            buildForProfiling = "YES"
+            buildForArchiving = "YES"
+            buildForAnalyzing = "YES">
+            <BuildableReference
+               BuildableIdentifier = "primary"
                BlueprintIdentifier = "StateGraphNormalization"
                BuildableName = "StateGraphNormalization"
                BlueprintName = "StateGraphNormalization"
@@ -80,6 +94,16 @@
                BlueprintIdentifier = "StateGraphTests"
                BuildableName = "StateGraphTests"
                BlueprintName = "StateGraphTests"
+               ReferencedContainer = "container:">
+            </BuildableReference>
+         </TestableReference>
+         <TestableReference
+            skipped = "NO">
+            <BuildableReference
+               BuildableIdentifier = "primary"
+               BlueprintIdentifier = "StateGraphUbiquitousKeyValueTests"
+               BuildableName = "StateGraphUbiquitousKeyValueTests"
+               BlueprintName = "StateGraphUbiquitousKeyValueTests"
                ReferencedContainer = "container:">
             </BuildableReference>
          </TestableReference>

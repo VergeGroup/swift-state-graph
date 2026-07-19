@@ -105,6 +105,22 @@ The projected value, `$theme`, is the reference-identity
 `GraphUserDefault<String>` handle. Its reads participate in graph dependency
 tracking, and its writes persist to UserDefaults.
 
+### iCloud Key-Value Synchronization
+
+Synchronize small, infrequently changing values across a person's devices
+without changing the in-memory `Stored` primitive:
+
+```swift
+import StateGraphUbiquitousKeyValue
+
+@GraphUbiquitousKeyValue("currentPage")
+var currentPage = 1
+```
+
+The host app must enable the iCloud key-value store entitlement. Local changes
+publish to the graph synchronously, while propagation between devices remains
+asynchronous.
+
 ## Installation
 
 Add to your `Package.swift`:
@@ -119,6 +135,21 @@ dependencies: [
 .target(
   name: "YourTarget",
   dependencies: ["StateGraph"]
+)
+```
+
+Targets using iCloud key-value synchronization add the optional extension
+product instead. It re-exports `StateGraph`, so one import provides both APIs:
+
+```swift
+.target(
+  name: "YourTarget",
+  dependencies: [
+    .product(
+      name: "StateGraphUbiquitousKeyValue",
+      package: "swift-state-graph"
+    )
+  ]
 )
 ```
 
@@ -254,6 +285,7 @@ For detailed guides, see the [Documentation](Sources/StateGraph/Documentation.do
 - [SwiftUI Integration](Sources/StateGraph/Documentation.docc/SwiftUI-Integration.md) - Bindings, GraphObject, Environment
 - [UIKit Integration](Sources/StateGraph/Documentation.docc/UIKit-Integration.md) - withGraphTracking patterns
 - [UserDefaults](Sources/StateGraph/Documentation.docc/UserDefaults.md) - Persistent values composed with Stored nodes
+- [iCloud Key-Value Store](Sources/StateGraphUbiquitousKeyValue/Documentation.docc/iCloud-Key-Value-Store.md) - Small graph-aware values synchronized across devices
 - [Data Normalization](Sources/StateGraph/Documentation.docc/Data-Normalization.md) - EntityStore for relational data
 - [Migration from Observable](Sources/StateGraph/Documentation.docc/Migration-from-Observable.md) - Step-by-step guide
 
