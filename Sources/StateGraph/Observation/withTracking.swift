@@ -294,6 +294,9 @@ public final class TrackingRegistration: Sendable, Hashable {
 
   private struct State: Sendable {
     var isInvalidated: Bool = false
+#if DEBUG
+    var hasEmittedSelfInvalidationWarning = false
+#endif
     let didChange: @isolated(any) @Sendable () -> Void
   }
 
@@ -316,9 +319,13 @@ public final class TrackingRegistration: Sendable, Hashable {
   }
 
   func perform() {
-    state.withLock { state in
+#if DEBUG
+    let isSelfInvalidationWarningEnabled = StateGraphDiagnostics.isSelfInvalidationWarningEnabled
+#endif
+
+    let shouldEmitSelfInvalidationWarning = state.withLock { state in
       guard state.isInvalidated == false else {
-        return
+        return false
       }
       
       // Re-entry Prevention Guard
@@ -367,7 +374,13 @@ public final class TrackingRegistration: Sendable, Hashable {
       // prevents that group from re-entering itself while allowing peer groups to
       // observe the assignment.
       if ThreadLocal.registration.value == self {
-        return
+#if DEBUG
+        if isSelfInvalidationWarningEnabled, state.hasEmittedSelfInvalidationWarning == false {
+          state.hasEmittedSelfInvalidationWarning = true
+          return true
+        }
+#endif
+        return false
       }
       
       state.isInvalidated = true
@@ -376,7 +389,14 @@ public final class TrackingRegistration: Sendable, Hashable {
       Task {
         await closure()
       }
+      return false
     }
+
+#if DEBUG
+    if shouldEmitSelfInvalidationWarning {
+      Log.logSuppressedSelfInvalidation()
+    }
+#endif
   }
 
 }
