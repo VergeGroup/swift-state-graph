@@ -33,6 +33,10 @@ struct GraphTrackingHandlerTests {
       handler.withLock { $0 }?.invoke()
     }
 
+    func invoke(in scopeCancellable: GraphTrackingCancellable) {
+      handler.withLock { $0 }?.invoke(in: scopeCancellable)
+    }
+
     func cancel() {
       handler.withLock { $0 }?.cancel()
     }
@@ -138,5 +142,103 @@ struct GraphTrackingHandlerTests {
     let result = probe.result
     #expect(result.invocationCount == 2)
     #expect(result.maximumActiveCount == 1)
+  }
+
+  @Test
+  func coalescedRerunReestablishesContinuousTracking() async {
+    let value = Stored(wrappedValue: 0)
+    let applyCount = Counter()
+    let invocationCount = Counter()
+    let secondInvocationStarted = TestSignal()
+    let thirdApplyFinished = TestSignal()
+    let thirdInvocationFinished = TestSignal()
+    let fourthInvocationFinished = TestSignal()
+    let resumeSecondInvocation = DispatchSemaphore(value: 0)
+
+    let handler = GraphTrackingHandler {
+      let invocation = invocationCount.increment()
+      _ = value.wrappedValue
+
+      switch invocation {
+      case 2:
+        secondInvocationStarted.signal()
+        resumeSecondInvocation.wait()
+      case 3:
+        thirdInvocationFinished.signal()
+      case 4:
+        fourthInvocationFinished.signal()
+      default:
+        break
+      }
+    }
+
+    withContinuousStateGraphTracking {
+      let apply = applyCount.increment()
+      handler.invoke()
+
+      if apply == 3 {
+        // The concurrent invalidation has reached invoke() and recorded its pending rerun.
+        thirdApplyFinished.signal()
+      }
+    } didChange: {
+      handler.isCancelled ? .stop : .next
+    }
+
+    value.wrappedValue = 1
+    let secondStarted = await secondInvocationStarted.wait(for: .seconds(5))
+    #expect(secondStarted)
+    guard secondStarted else {
+      resumeSecondInvocation.signal()
+      handler.cancel()
+      return
+    }
+
+    value.wrappedValue = 2
+    let pendingRerunRecorded = await thirdApplyFinished.wait(for: .seconds(5))
+    resumeSecondInvocation.signal()
+    #expect(pendingRerunRecorded)
+    guard pendingRerunRecorded else {
+      handler.cancel()
+      return
+    }
+
+    #expect(await thirdInvocationFinished.wait(for: .seconds(5)))
+
+    value.wrappedValue = 3
+    #expect(await fourthInvocationFinished.wait(for: .seconds(5)))
+
+    handler.cancel()
+  }
+
+  @Test
+  func coalescedRerunReplacesChildrenFromPreviousPass() {
+    let invocationCount = Counter()
+    let cancelledChildCount = Counter()
+    let holder = HandlerHolder()
+    let scopeCancellable = GraphTrackingCancellable()
+
+    let handler = GraphTrackingHandler {
+      let invocation = invocationCount.increment()
+      scopeCancellable.addChild(
+        GraphTrackingCancellable {
+          cancelledChildCount.increment()
+        }
+      )
+
+      if invocation == 1 {
+        holder.invoke(in: scopeCancellable)
+      }
+    }
+    holder.store(handler)
+
+    // The reentrant request must clean up the first pass's child before it reruns.
+    handler.invoke(in: scopeCancellable)
+
+    #expect(invocationCount.current == 2)
+    #expect(cancelledChildCount.current == 1)
+
+    handler.cancel()
+    scopeCancellable.cancel()
+    #expect(cancelledChildCount.current == 2)
   }
 }
