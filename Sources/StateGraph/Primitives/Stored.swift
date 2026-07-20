@@ -32,6 +32,16 @@ public final class Stored<Value: SendableMetatype>: Node, Observable, CustomDebu
     defer { lock.unlock() }
     return observationRegistrar.isInitialized
   }
+
+  /// Initializes the registrar while protected by the node lock.
+  ///
+  /// The caller performs Observation access after this method returns so framework
+  /// bookkeeping does not execute while the StateGraph node lock is held.
+  private func prepareObservationRegistrarForAccess() -> ObservationRegistrar {
+    lock.withLock {
+      observationRegistrar.initializeIfNeeded()
+    }
+  }
 #endif
 
   public var potentiallyDirty: Bool {
@@ -47,18 +57,18 @@ public final class Stored<Value: SendableMetatype>: Node, Observable, CustomDebu
 
   public var wrappedValue: Value {
     get {
-      lock.lock()
-      defer { lock.unlock() }
-
 #if canImport(Observation)
       if #available(macOS 14.0, iOS 17.0, watchOS 10.0, tvOS 17.0, *) {
-        let observationRegistrar = observationRegistrar.initializeIfNeeded()
+        let observationRegistrar = prepareObservationRegistrarForAccess()
         observationRegistrar.access(
-          PointerKeyPathRoot<Stored<Value>>.shared,
-          keyPath: _keyPath(self)
+          NodeObservationRoot<Stored<Value>>(),
+          keyPath: \NodeObservationRoot<Stored<Value>>.wrappedValue
         )
       }
 #endif
+
+      lock.lock()
+      defer { lock.unlock() }
 
       if let currentNode = ThreadLocal.currentNode.value {
         let edge = Edge(from: self, to: currentNode)
@@ -90,10 +100,10 @@ public final class Stored<Value: SendableMetatype>: Node, Observable, CustomDebu
 
       if #available(macOS 14.0, iOS 17.0, watchOS 10.0, tvOS 17.0, *) {
         if let observationRegistrar {
-          withMainActor { [observationRegistrar, keyPath = _keyPath(self)] in
+          withMainActor { [observationRegistrar] in
             observationRegistrar.willSet(
-              PointerKeyPathRoot<Stored<Value>>.shared,
-              keyPath: keyPath
+              NodeObservationRoot<Stored<Value>>(),
+              keyPath: \NodeObservationRoot<Stored<Value>>.wrappedValue
             )
           }
         }
@@ -102,10 +112,10 @@ public final class Stored<Value: SendableMetatype>: Node, Observable, CustomDebu
       defer {
         if #available(macOS 14.0, iOS 17.0, watchOS 10.0, tvOS 17.0, *) {
           if let observationRegistrar {
-            withMainActor { [observationRegistrar, keyPath = _keyPath(self)] in
+            withMainActor { [observationRegistrar] in
               observationRegistrar.didSet(
-                PointerKeyPathRoot<Stored<Value>>.shared,
-                keyPath: keyPath
+                NodeObservationRoot<Stored<Value>>(),
+                keyPath: \NodeObservationRoot<Stored<Value>>.wrappedValue
               )
             }
           }

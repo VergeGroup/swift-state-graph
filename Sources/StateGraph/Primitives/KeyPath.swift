@@ -5,7 +5,7 @@ import Observation
 /// The owning node must serialize access to this storage with its node lock. Keeping the
 /// registrar scoped to one node ensures that registrations are released with that node.
 @available(macOS 14.0, iOS 17.0, watchOS 10.0, tvOS 17.0, *)
-struct NodeObservationRegistrar: Sendable {
+struct NodeObservationRegistrar: ~Copyable, Sendable {
 
   private var registrar: ObservationRegistrar?
 
@@ -28,23 +28,13 @@ struct NodeObservationRegistrar: Sendable {
   }
 }
 
-struct PointerKeyPathRoot<Object: AnyObject>: Observable, Sendable {
-  
-  static var shared: PointerKeyPathRoot<Object> {
-    PointerKeyPathRoot<Object>()
-  }
-  
-  subscript(pointer pointer: UnsafeMutableRawPointer) -> Never {
-    fatalError()
-  }
-  
-}
+/// A type-specific subject that gives every node registrar a readable property key path.
+///
+/// Node identity is carried by the owning `NodeObservationRegistrar`, so the key path only
+/// needs to describe the observed value. For example, a stored integer prints as
+/// `\NodeObservationRoot<Stored<Int>>.wrappedValue` instead of embedding a memory address.
+@available(macOS 14.0, iOS 17.0, watchOS 10.0, tvOS 17.0, *)
+struct NodeObservationRoot<Owner: AnyObject>: Observable, Sendable {
 
-@inline(__always) 
-func _keyPath<Object: AnyObject>(
-  _ object: Object
-) -> any KeyPath<PointerKeyPathRoot<Object>, Never> & Sendable {
-  let p = Unmanaged.passUnretained(object).toOpaque()
-  let keyPath = \PointerKeyPathRoot<Object>[pointer: p]
-  return keyPath
+  let wrappedValue: Void = ()
 }

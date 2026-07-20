@@ -32,13 +32,10 @@ struct ObservationKeyPathTests {
     #expect(node._isObservationRegistrarInitialized)
   }
 
-  @Test("Separate registrars isolate an identical key path")
-  func separateRegistrarsIsolateIdenticalKeyPath() async {
-    final class Identity: Sendable {}
-
-    let identity = Identity()
-    let keyPath = _keyPath(identity)
-    let root = PointerKeyPathRoot<Identity>.shared
+  @Test("Separate registrars isolate the shared node wrapped-value key path")
+  func separateRegistrarsIsolateSharedNodeWrappedValueKeyPath() async {
+    let root = NodeObservationRoot<Stored<Int>>()
+    let keyPath = \NodeObservationRoot<Stored<Int>>.wrappedValue
     var firstStorage = NodeObservationRegistrar()
     var secondStorage = NodeObservationRegistrar()
     let firstRegistrar = firstStorage.initializeIfNeeded()

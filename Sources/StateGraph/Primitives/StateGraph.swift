@@ -179,6 +179,16 @@ public final class Computed<Value: SendableMetatype>: Node, Observable, CustomDe
       defer { lock.unlock() }
       return observationRegistrar.isInitialized
     }
+
+    /// Initializes the registrar while protected by the node lock.
+    ///
+    /// The caller performs Observation access after this method returns so framework
+    /// bookkeeping does not execute while the StateGraph node lock is held.
+    private func prepareObservationRegistrarForAccess() -> ObservationRegistrar {
+      lock.withLock {
+        observationRegistrar.initializeIfNeeded()
+      }
+    }
   #endif
 
   public var potentiallyDirty: Bool {
@@ -217,10 +227,10 @@ public final class Computed<Value: SendableMetatype>: Node, Observable, CustomDe
 #if canImport(Observation)
       if #available(macOS 14.0, iOS 17.0, watchOS 10.0, tvOS 17.0, *) {
         if let observationRegistrar {
-          withMainActor { [observationRegistrar, keyPath = _keyPath(self)] in
+          withMainActor { [observationRegistrar] in
             observationRegistrar.willSet(
-              PointerKeyPathRoot<Computed<Value>>.shared,
-              keyPath: keyPath
+              NodeObservationRoot<Computed<Value>>(),
+              keyPath: \NodeObservationRoot<Computed<Value>>.wrappedValue
             )
           }
         }
@@ -245,21 +255,20 @@ public final class Computed<Value: SendableMetatype>: Node, Observable, CustomDe
 
   public var wrappedValue: Value {
     get {
-      recomputeIfNeeded()
-      
-      lock.lock()
-      defer { lock.unlock() }
-
 #if canImport(Observation)
       if #available(macOS 14.0, iOS 17.0, watchOS 10.0, tvOS 17.0, *) {
-        let observationRegistrar = observationRegistrar.initializeIfNeeded()
+        let observationRegistrar = prepareObservationRegistrarForAccess()
         observationRegistrar.access(
-          PointerKeyPathRoot<Computed<Value>>.shared,
-          keyPath: _keyPath(self)
+          NodeObservationRoot<Computed<Value>>(),
+          keyPath: \NodeObservationRoot<Computed<Value>>.wrappedValue
         )
       }
 #endif
 
+      recomputeIfNeeded()
+
+      lock.lock()
+      defer { lock.unlock() }
       return _cachedValue!
     }
   }
