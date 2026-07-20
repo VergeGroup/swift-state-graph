@@ -74,10 +74,36 @@ final class GraphTrackingHandler: @unchecked Sendable {
     }
   }
 
+  /// One serialized tracking pass and the dynamic context that requested it.
+  ///
+  /// Keeping the registration and scope together prevents a coalesced rerun from
+  /// executing under the previous pass's tracking context.
+  private struct Invocation {
+    let handler: Handler
+    let registration: TrackingRegistration?
+    let scopeCancellable: GraphTrackingCancellable?
+
+    func callAsFunction() {
+      ThreadLocal.registration.withValue(registration) {
+        // Child scopes belong to the previous completed pass and must be removed
+        // immediately before this pass recreates its dynamic dependencies.
+        scopeCancellable?.cancelChildren()
+
+        if let scopeCancellable {
+          ThreadLocal.currentCancellable.withValue(scopeCancellable) {
+            handler()
+          }
+        } else {
+          handler()
+        }
+      }
+    }
+  }
+
   private struct State {
     var handler: Handler?
     var isInvoking = false
-    var needsInvocation = false
+    var pendingInvocation: Invocation?
   }
 
   private let state: OSAllocatedUnfairLock<State>
@@ -93,10 +119,25 @@ final class GraphTrackingHandler: @unchecked Sendable {
   }
 
   func invoke() {
-    let shouldDrain = state.withLock { state in
-      guard state.handler != nil else { return false }
+    enqueueInvocation(scopeCancellable: nil)
+  }
 
-      state.needsInvocation = true
+  /// Requests a serialized pass that owns the supplied nested tracking scope.
+  func invoke(in scopeCancellable: GraphTrackingCancellable) {
+    enqueueInvocation(scopeCancellable: scopeCancellable)
+  }
+
+  private func enqueueInvocation(scopeCancellable: GraphTrackingCancellable?) {
+    let registration = ThreadLocal.registration.value
+
+    let shouldDrain = state.withLock { state in
+      guard let handler = state.handler else { return false }
+
+      state.pendingInvocation = Invocation(
+        handler: handler,
+        registration: registration,
+        scopeCancellable: scopeCancellable
+      )
       guard !state.isInvoking else { return false }
 
       state.isInvoking = true
@@ -105,27 +146,27 @@ final class GraphTrackingHandler: @unchecked Sendable {
 
     guard shouldDrain else { return }
 
-    while let handler = takeNextHandler() {
-      handler()
+    while let invocation = takeNextInvocation() {
+      invocation()
     }
   }
 
   func cancel() {
     state.withLock { state in
       state.handler = nil
-      state.needsInvocation = false
+      state.pendingInvocation = nil
     }
   }
 
-  private func takeNextHandler() -> Handler? {
+  private func takeNextInvocation() -> Invocation? {
     state.withLock { state in
-      guard state.needsInvocation, let handler = state.handler else {
+      guard state.handler != nil, let invocation = state.pendingInvocation else {
         state.isInvoking = false
         return nil
       }
 
-      state.needsInvocation = false
-      return handler
+      state.pendingInvocation = nil
+      return invocation
     }
   }
 }

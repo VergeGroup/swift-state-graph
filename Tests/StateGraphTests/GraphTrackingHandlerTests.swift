@@ -33,6 +33,10 @@ struct GraphTrackingHandlerTests {
       handler.withLock { $0 }?.invoke()
     }
 
+    func invoke(in scopeCancellable: GraphTrackingCancellable) {
+      handler.withLock { $0 }?.invoke(in: scopeCancellable)
+    }
+
     func cancel() {
       handler.withLock { $0 }?.cancel()
     }
@@ -138,5 +142,36 @@ struct GraphTrackingHandlerTests {
     let result = probe.result
     #expect(result.invocationCount == 2)
     #expect(result.maximumActiveCount == 1)
+  }
+  @Test
+  func coalescedRerunReplacesChildrenFromPreviousPass() {
+    let invocationCount = Counter()
+    let cancelledChildCount = Counter()
+    let holder = HandlerHolder()
+    let scopeCancellable = GraphTrackingCancellable()
+
+    let handler = GraphTrackingHandler {
+      let invocation = invocationCount.increment()
+      scopeCancellable.addChild(
+        GraphTrackingCancellable {
+          cancelledChildCount.increment()
+        }
+      )
+
+      if invocation == 1 {
+        holder.invoke(in: scopeCancellable)
+      }
+    }
+    holder.store(handler)
+
+    // The reentrant request must clean up the first pass's child before it reruns.
+    handler.invoke(in: scopeCancellable)
+
+    #expect(invocationCount.current == 2)
+    #expect(cancelledChildCount.current == 1)
+
+    handler.cancel()
+    scopeCancellable.cancel()
+    #expect(cancelledChildCount.current == 2)
   }
 }

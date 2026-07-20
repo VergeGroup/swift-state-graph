@@ -158,14 +158,7 @@ public func withGraphTrackingMap<Projection>(
 
   withContinuousStateGraphTracking(
     apply: {
-      // Cancel all children before re-executing (cleans up nested subscriptions)
-      scopeCancellable.cancelChildren()
-
-      // Set this scope's cancellable as the current parent for nested tracking
-      // Nested groups/maps will register with this parent via addChild()
-      ThreadLocal.currentCancellable.withValue(scopeCancellable) {
-        trackingHandler.invoke()
-      }
+      trackingHandler.invoke(in: scopeCancellable)
     },
     didChange: {
       guard !trackingHandler.isCancelled else { return .stop }
@@ -337,14 +330,7 @@ public func withGraphTrackingMap<Dependency: AnyObject, Projection>(
         trackingHandler.cancel()
         return
       }
-      // Cancel all children before re-executing (cleans up nested subscriptions)
-      scopeCancellable.cancelChildren()
-
-      // Set this scope's cancellable as the current parent for nested tracking
-      // Nested groups/maps will register with this parent via addChild()
-      ThreadLocal.currentCancellable.withValue(scopeCancellable) {
-        trackingHandler.invoke()
-      }
+      trackingHandler.invoke(in: scopeCancellable)
     },
     didChange: {
       guard !trackingHandler.isCancelled else { return .stop }

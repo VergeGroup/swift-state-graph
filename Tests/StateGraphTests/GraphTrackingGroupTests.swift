@@ -705,6 +705,57 @@ struct IssuesTrackingOnHeavyOperation {
   }
 
   @Test
+  func groupKeepsTrackingAfterCoalescedRerun() async throws {
+    let value = Stored(wrappedValue: 0)
+    let secondInvocationStarted = TestSignal()
+    let thirdInvocationReadValue = TestSignal()
+    let fourthInvocationReadValue = TestSignal()
+    let resumeSecondInvocation = DispatchSemaphore(value: 0)
+
+    let cancellable = withGraphTracking {
+      withGraphTrackingGroup {
+        switch value.wrappedValue {
+        case 1:
+          secondInvocationStarted.signal()
+          resumeSecondInvocation.wait()
+        case 2:
+          thirdInvocationReadValue.signal()
+        case 3:
+          fourthInvocationReadValue.signal()
+        default:
+          break
+        }
+      }
+    }
+    defer {
+      resumeSecondInvocation.signal()
+      cancellable.cancel()
+    }
+
+    // Keep the second group invocation busy.
+    value.wrappedValue = 1
+    let secondStarted = await secondInvocationStarted.wait(for: .seconds(5))
+    #expect(secondStarted)
+    guard secondStarted else { return }
+
+    // Request another group invocation while the second invocation is still running.
+    value.wrappedValue = 2
+
+    // The public API intentionally hides its internal tracking pass. Keep the second
+    // invocation blocked while the value-2 notification enqueues its coalesced rerun.
+    try await Task.sleep(for: .milliseconds(250))
+    resumeSecondInvocation.signal()
+
+    let didReadValueInThirdInvocation = await thirdInvocationReadValue.wait(for: .seconds(5))
+    #expect(didReadValueInThirdInvocation)
+    guard didReadValueInThirdInvocation else { return }
+
+    // The coalesced invocation must reestablish tracking for this later update.
+    value.wrappedValue = 3
+    #expect(await fourthInvocationReadValue.wait(for: .seconds(5)))
+  }
+
+  @Test
   func stuck() async {
 
     let model = Model()
