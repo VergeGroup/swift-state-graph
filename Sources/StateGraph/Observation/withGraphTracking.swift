@@ -7,6 +7,16 @@
  scope are automatically managed and cleaned up when the returned cancellable is cancelled or
  deallocated.
 
+ - Important: If a `withGraphTrackingGroup` or `withGraphTrackingMap` handler
+   synchronously mutates graph state that invalidates a node accessed during the same
+   execution, StateGraph suppresses that handler's own invalidation. The mutation is still
+   applied and peer registrations continue through normal invalidation. The one-shot
+   registration is not restored to the invalidated node, so later changes to that node may
+   not be observed until another tracked change re-executes the handler. DEBUG builds emit
+   a warning unless ``StateGraphDiagnostics/isSelfInvalidationWarningEnabled`` is `false`.
+   This prevents direct self-re-entry only; cycles between multiple mutating handlers are
+   not suppressed.
+
  ## Basic Usage
  ```swift
  let node = Stored(wrappedValue: 0)
