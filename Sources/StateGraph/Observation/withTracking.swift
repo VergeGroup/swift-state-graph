@@ -2,11 +2,14 @@ import Observation
 
 /// Tracks access to the properties of StoredNode or Computed.
 /// Similarly to Observation.withObservationTracking, didChange runs one time after property changes applied.
+/// Callback delivery is enqueued asynchronously. An actor-isolated callback returns to that actor;
+/// a nonisolated callback runs on an unspecified executor.
 /// To observe properties continuously, use ``withContinuousStateGraphTracking``.
 @discardableResult
 func withStateGraphTracking<R>(
   apply: () -> R,
-  @_inheritActorContext didChange: @escaping @isolated(any) @Sendable () -> Void
+  didChange: @escaping () -> Void,
+  isolation: isolated (any Actor)? = #isolation
 ) -> R {
   #if false  // #available(macOS 14.0, iOS 17.0, watchOS 10.0, tvOS 17.0, *)
     return withObservationTracking(
@@ -19,7 +22,10 @@ func withStateGraphTracking<R>(
     )
   #else
     /// Need this for now as https://github.com/VergeGroup/swift-state-graph/pull/79
-    let registration = TrackingRegistration(didChange: didChange)
+    let registration = TrackingRegistration(
+      didChange: didChange,
+      isolation: isolation
+    )
     return ThreadLocal.registration.withValue(registration) {
       apply()
     }
@@ -102,22 +108,26 @@ private func _withContinuousStateGraphTracking<R>(
   didChange: ClosureBox<StateGraphTrackingContinuation>,
   isolation: isolated (any Actor)? = #isolation
 ) {
-  withStateGraphTracking(apply: apply.closure) {
-    let continuation = perform(didChange, isolation: isolation)
-    switch continuation {
-    case .stop:
-      break
-    case .next:
-      // continue tracking on next event loop.
-      // It uses isolation and task dispatching to ensure apply closure is called on the same actor.
-      // Pass the already-wrapped closures directly to avoid thunk stack growing.
-      _withContinuousStateGraphTracking(
-        apply: apply,
-        didChange: didChange,
-        isolation: isolation
-      )
-    }
-  }
+  withStateGraphTracking(
+    apply: apply.closure,
+    didChange: {
+      let continuation = perform(didChange, isolation: isolation)
+      switch continuation {
+      case .stop:
+        break
+      case .next:
+        // continue tracking on next event loop.
+        // It uses isolation and task dispatching to ensure apply closure is called on the same actor.
+        // Pass the already-wrapped closures directly to avoid thunk stack growing.
+        _withContinuousStateGraphTracking(
+          apply: apply,
+          didChange: didChange,
+          isolation: isolation
+        )
+      }
+    },
+    isolation: isolation
+  )
 }
 
 /// Creates an `AsyncStream` that emits projected values whenever tracked StateGraph nodes change.
@@ -219,6 +229,61 @@ public func withStateGraphTrackingStream<T>(
 
 // MARK: - Internals
 
+/// Delivers a one-shot invalidation callback in its requested isolation context.
+///
+/// Delivery is always enqueued in a task. When an actor was captured at registration time, the
+/// callback returns to that actor. Without an actor, it executes on an unspecified executor.
+///
+/// `@unchecked Sendable` deliberately localizes the existing internal transport of a non-`Sendable`
+/// callback. It doesn't make the closure's captures thread-safe. The recorded isolation determines
+/// where an actor-isolated callback executes, while `nil` retains the unspecified-executor contract.
+private struct TrackingInvalidationCallback: @unchecked Sendable {
+
+  private let closure: () -> Void
+  private let isolation: (any Actor)?
+
+  init(
+    closure: @escaping () -> Void,
+    isolation: isolated (any Actor)?
+  ) {
+    self.closure = closure
+    self.isolation = isolation
+  }
+
+  func callAsFunction() {
+    Task { [self] in
+      if let isolation {
+        await perform(isolation: isolation)
+      } else {
+        perform()
+      }
+    }
+  }
+
+  private func perform() {
+    closure()
+  }
+
+  private func perform(isolation: isolated (any Actor)) {
+    closure()
+  }
+}
+
+/// A one-shot record of the State Graph nodes read during one tracking pass.
+///
+/// StateGraph creates a fresh registration for each execution of a continuous tracking API and
+/// installs it as the current tracking context while that execution reads nodes. Each accessed
+/// node retains the registration until an eligible change captures and invalidates it.
+///
+/// The first eligible invalidation delivers the registration's change callback. Further
+/// invalidations are ignored, and the next continuous tracking pass creates a new registration
+/// for its newly read dependencies.
+///
+/// You don't create or manage registrations directly. Use ``withGraphTracking(_:)`` together with
+/// ``withGraphTrackingGroup(_:isolation:)`` or a graph tracking map instead.
+///
+/// For the complete lifecycle, notification filtering, self-invalidation behavior, and concurrent
+/// rerun invariant, see <doc:Tracking-Registrations>.
 public final class TrackingRegistration: Sendable, Hashable {
 
   private struct State: Sendable {
@@ -226,7 +291,7 @@ public final class TrackingRegistration: Sendable, Hashable {
 #if DEBUG
     var hasEmittedSelfInvalidationWarning = false
 #endif
-    let didChange: @isolated(any) @Sendable () -> Void
+    let didChange: TrackingInvalidationCallback
   }
 
   public static func == (lhs: TrackingRegistration, rhs: TrackingRegistration) -> Bool {
@@ -239,10 +304,16 @@ public final class TrackingRegistration: Sendable, Hashable {
 
   private let state: OSAllocatedUnfairLock<State>
 
-  init(didChange: @escaping @isolated(any) @Sendable () -> Void) {
+  init(
+    didChange: @escaping () -> Void,
+    isolation: isolated (any Actor)? = #isolation
+  ) {
     self.state = .init(uncheckedState:
       .init(
-        didChange: didChange
+        didChange: .init(
+          closure: didChange,
+          isolation: isolation
+        )
       )
     )
   }
@@ -252,9 +323,12 @@ public final class TrackingRegistration: Sendable, Hashable {
     let isSelfInvalidationWarningEnabled = StateGraphDiagnostics.isSelfInvalidationWarningEnabled
 #endif
 
-    let shouldEmitSelfInvalidationWarning = state.withLock { state in
+    let invalidation: (
+      didChange: TrackingInvalidationCallback?,
+      shouldEmitSelfInvalidationWarning: Bool
+    ) = state.withLock { state in
       guard state.isInvalidated == false else {
-        return false
+        return (nil, false)
       }
       
       // Re-entry Prevention Guard
@@ -278,7 +352,7 @@ public final class TrackingRegistration: Sendable, Hashable {
       // the node before it finishes, the setter asks every captured registration
       // to perform, including the registration that is currently executing.
       //
-      // Without this identity check, the active registration would schedule its
+      // Without this identity check, the active registration would invoke its
       // own `didChange` closure. Continuous tracking would run the handler again,
       // install a new registration, perform the same mutation, and repeat the cycle.
       //
@@ -306,23 +380,21 @@ public final class TrackingRegistration: Sendable, Hashable {
 #if DEBUG
         if isSelfInvalidationWarningEnabled, state.hasEmittedSelfInvalidationWarning == false {
           state.hasEmittedSelfInvalidationWarning = true
-          return true
+          return (nil, true)
         }
 #endif
-        return false
+        return (nil, false)
       }
-      
+
       state.isInvalidated = true
-      
-      let closure = state.didChange
-      Task {
-        await closure()
-      }
-      return false
+
+      return (state.didChange, false)
     }
 
+    invalidation.didChange?()
+
 #if DEBUG
-    if shouldEmitSelfInvalidationWarning {
+    if invalidation.shouldEmitSelfInvalidationWarning {
       Log.logSuppressedSelfInvalidation()
     }
 #endif
