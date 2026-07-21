@@ -170,9 +170,7 @@ public final class Computed<Value: SendableMetatype>: Node, Observable, CustomDe
   
   #if canImport(Observation)
     @available(macOS 14.0, iOS 17.0, watchOS 10.0, tvOS 17.0, *)
-    private var observationRegistrar: ObservationRegistrar {
-      return .shared
-    }
+    private let observationRegistrar = ObservationRegistrar()
   #endif
 
   public var potentiallyDirty: Bool {
@@ -206,8 +204,11 @@ public final class Computed<Value: SendableMetatype>: Node, Observable, CustomDe
       // is checked during recomputation to avoid unnecessary downstream propagation.
 #if canImport(Observation)
       if #available(macOS 14.0, iOS 17.0, watchOS 10.0, tvOS 17.0, *) {
-        withMainActor { [observationRegistrar, keyPath = _keyPath(self)] in   
-          observationRegistrar.willSet(PointerKeyPathRoot<Computed<Value>>.shared, keyPath: keyPath)
+        withMainActor { [observationRegistrar] in
+          observationRegistrar.willSet(
+            NodeObservationRoot<Computed<Value>>(),
+            keyPath: \NodeObservationRoot<Computed<Value>>.wrappedValue
+          )
         }
       }
 #endif
@@ -230,13 +231,17 @@ public final class Computed<Value: SendableMetatype>: Node, Observable, CustomDe
 
   public var wrappedValue: Value {
     get {
-      #if canImport(Observation)
-        if #available(macOS 14.0, iOS 17.0, watchOS 10.0, tvOS 17.0, *) {
-          observationRegistrar.access(PointerKeyPathRoot<Computed<Value>>.shared, keyPath: _keyPath(self))   
-        }
-      #endif
+#if canImport(Observation)
+      if #available(macOS 14.0, iOS 17.0, watchOS 10.0, tvOS 17.0, *) {
+        observationRegistrar.access(
+          NodeObservationRoot<Computed<Value>>(),
+          keyPath: \NodeObservationRoot<Computed<Value>>.wrappedValue
+        )
+      }
+#endif
+
       recomputeIfNeeded()
-      
+
       lock.lock()
       defer { lock.unlock() }
       return _cachedValue!
