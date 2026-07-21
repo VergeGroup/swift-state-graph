@@ -21,6 +21,10 @@ let package = Package(
       targets: ["StateGraph"]
     ),
     .library(
+      name: "StateGraphUbiquitousKeyValue",
+      targets: ["StateGraphUbiquitousKeyValue"]
+    ),
+    .library(
       name: "StateGraphNormalization",
       targets: ["StateGraphNormalization"]
     )
@@ -45,6 +49,12 @@ let package = Package(
       ]
     ),
     .target(
+      name: "StateGraphUbiquitousKeyValue",
+      dependencies: [
+        "StateGraph"
+      ]
+    ),
+    .target(
       name: "StateGraphNormalization",
       dependencies: [
         "StateGraph",
@@ -62,6 +72,13 @@ let package = Package(
     .testTarget(
       name: "StateGraphTests",
       dependencies: ["StateGraph"]
+    ),
+    .testTarget(
+      name: "StateGraphUbiquitousKeyValueTests",
+      dependencies: [
+        "StateGraph",
+        "StateGraphUbiquitousKeyValue"
+      ]
     ),
     .testTarget(
       name: "StateGraphNormalizationTests",
