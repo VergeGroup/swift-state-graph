@@ -23,25 +23,7 @@ public final class Stored<Value: SendableMetatype>: Node, Observable, CustomDebu
 
 #if canImport(Observation)
   @available(macOS 14.0, iOS 17.0, watchOS 10.0, tvOS 17.0, *)
-  nonisolated(unsafe)
-  private var observationRegistrar = NodeObservationRegistrar()
-
-  /// Returns whether this node has allocated its Apple Observation state.
-  var _isObservationRegistrarInitialized: Bool {
-    lock.lock()
-    defer { lock.unlock() }
-    return observationRegistrar.isInitialized
-  }
-
-  /// Initializes the registrar while protected by the node lock.
-  ///
-  /// The caller performs Observation access after this method returns so framework
-  /// bookkeeping does not execute while the StateGraph node lock is held.
-  private func prepareObservationRegistrarForAccess() -> ObservationRegistrar {
-    lock.withLock {
-      observationRegistrar.initializeIfNeeded()
-    }
-  }
+  private let observationRegistrar = ObservationRegistrar()
 #endif
 
   public var potentiallyDirty: Bool {
@@ -59,7 +41,6 @@ public final class Stored<Value: SendableMetatype>: Node, Observable, CustomDebu
     get {
 #if canImport(Observation)
       if #available(macOS 14.0, iOS 17.0, watchOS 10.0, tvOS 17.0, *) {
-        let observationRegistrar = prepareObservationRegistrarForAccess()
         observationRegistrar.access(
           NodeObservationRoot<Stored<Value>>(),
           keyPath: \NodeObservationRoot<Stored<Value>>.wrappedValue
@@ -96,28 +77,22 @@ public final class Stored<Value: SendableMetatype>: Node, Observable, CustomDebu
       }
 
 #if canImport(Observation)
-      let observationRegistrar = observationRegistrar.current
-
       if #available(macOS 14.0, iOS 17.0, watchOS 10.0, tvOS 17.0, *) {
-        if let observationRegistrar {
-          withMainActor { [observationRegistrar] in
-            observationRegistrar.willSet(
-              NodeObservationRoot<Stored<Value>>(),
-              keyPath: \NodeObservationRoot<Stored<Value>>.wrappedValue
-            )
-          }
+        withMainActor { [observationRegistrar] in
+          observationRegistrar.willSet(
+            NodeObservationRoot<Stored<Value>>(),
+            keyPath: \NodeObservationRoot<Stored<Value>>.wrappedValue
+          )
         }
       }
 
       defer {
         if #available(macOS 14.0, iOS 17.0, watchOS 10.0, tvOS 17.0, *) {
-          if let observationRegistrar {
-            withMainActor { [observationRegistrar] in
-              observationRegistrar.didSet(
-                NodeObservationRoot<Stored<Value>>(),
-                keyPath: \NodeObservationRoot<Stored<Value>>.wrappedValue
-              )
-            }
+          withMainActor { [observationRegistrar] in
+            observationRegistrar.didSet(
+              NodeObservationRoot<Stored<Value>>(),
+              keyPath: \NodeObservationRoot<Stored<Value>>.wrappedValue
+            )
           }
         }
       }

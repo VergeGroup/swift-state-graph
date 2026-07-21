@@ -6,40 +6,12 @@ import Observation
 @MainActor
 struct ObservationKeyPathTests {
 
-  @Test("Stored creates its Observation registrar on first read")
-  func storedCreatesObservationRegistrarLazily() {
-    let node = Stored(wrappedValue: 0)
-
-    #expect(!node._isObservationRegistrarInitialized)
-
-    node.wrappedValue = 1
-
-    #expect(!node._isObservationRegistrarInitialized)
-
-    _ = node.wrappedValue
-
-    #expect(node._isObservationRegistrarInitialized)
-  }
-
-  @Test("Computed creates its Observation registrar on first read")
-  func computedCreatesObservationRegistrarLazily() {
-    let node = Computed<Int>(constant: 0)
-
-    #expect(!node._isObservationRegistrarInitialized)
-
-    _ = node.wrappedValue
-
-    #expect(node._isObservationRegistrarInitialized)
-  }
-
   @Test("Separate registrars isolate the shared node wrapped-value key path")
   func separateRegistrarsIsolateSharedNodeWrappedValueKeyPath() async {
     let root = NodeObservationRoot<Stored<Int>>()
     let keyPath = \NodeObservationRoot<Stored<Int>>.wrappedValue
-    var firstStorage = NodeObservationRegistrar()
-    var secondStorage = NodeObservationRegistrar()
-    let firstRegistrar = firstStorage.initializeIfNeeded()
-    let secondRegistrar = secondStorage.initializeIfNeeded()
+    let firstRegistrar = ObservationRegistrar()
+    let secondRegistrar = ObservationRegistrar()
 
     await confirmation(expectedCount: 1) { confirmation in
       withObservationTracking {
