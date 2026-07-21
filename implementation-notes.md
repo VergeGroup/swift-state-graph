@@ -42,3 +42,36 @@
 - non-Equatable テストを identity comparator の class から always-notify の value type へ変更した。
 - `TrackingRegistration.perform()` の古い「setter は常に通知する」「TaskLocal」という説明を、現在の通知 predicate と `ThreadLocal.registration` に合わせて更新した。
 - review feedback に合わせ、上記コメントを現行実装に即した詳細な説明へ拡充した。
+
+---
+
+# Implementation Notes - Revert #109
+
+- cwd: isolated worktree for `VergeGroup/swift-state-graph`
+- branch: `codex/revert-109`
+- started at: 2026-07-21 (Asia/Tokyo)
+- note owner: Codex
+
+## 設計判断
+
+- #109 (`64df523`)が導入した`GraphTrackingHandler`、drain/coalescing state machine、専用testをrevertし、group/mapをpassごとの`_handlerBox` lock待機へ戻す。
+- #109に含まれていた動作と無関係な`weak var`から`weak let`へのwarning cleanupは維持する。
+
+## 逸脱点
+
+- squash mergeのrevert時、後続#115で変更された`GraphTrackingHandlerTests.swift`にmodify/delete conflictが発生した。#109が追加した専用typeとtestを揃えて戻すため、test fileの削除を選択した。
+
+## トレードオフ
+
+- 各tracking passが自身のregistration context内でhandler lockを待つため、#109後に確認されたinvalidated registration上のcoalesced rerunを回避できる。
+- handlerを`_handlerBox` lock内で実行するため、handlerから同じtracking scopeをcancelするとlockを再取得してdeadlockし得る既知の#109以前の制約も戻る。このPRは再設計前のbaseline復元を目的とする。
+
+## 検証
+
+- Xcode 26.6 / Swift 6.3.3で`swift test`を実行し、XCTest 17件とSwift Testing 146件がpassした。
+- `--skip-build`での反復中に全suiteが一度だけ1 issueで失敗し、直後の再実行は146件passした。revert周辺を分離するため、group/map/cancellation/actor isolationをfilterして再実行し、34件すべてpassした。
+- buildには`GraphTracking.swift`の`@isolated(any)` conversionなど既存warningがあるが、revert対象から新しいwarningは追加していない。
+
+## 未解決の確認事項
+
+- user handlerをlock外で実行しながら、実行するpass固有のregistration contextを失わない後続設計が必要。

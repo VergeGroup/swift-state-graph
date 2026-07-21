@@ -104,11 +104,13 @@ public func withGraphTrackingGroup(
     return
   }
 
-  let trackingHandler = GraphTrackingHandler(handler)
+  let _handlerBox = OSAllocatedUnfairLock<ClosureBox<Void>?>(
+    uncheckedState: ClosureBox(handler)
+  )
 
   // Create a cancellable for this scope that manages nested tracking
   let scopeCancellable = GraphTrackingCancellable {
-    trackingHandler.cancel()
+    _handlerBox.withLock { $0 = nil }
   }
 
   withContinuousStateGraphTracking(
@@ -119,11 +121,13 @@ public func withGraphTrackingGroup(
       // Set this scope's cancellable as the current parent for nested tracking
       // Nested groups/maps will register with this parent via addChild()
       ThreadLocal.currentCancellable.withValue(scopeCancellable) {
-        trackingHandler.invoke()
+        _handlerBox.withLock {
+          $0?()
+        }
       }
     },
     didChange: {
-      guard !trackingHandler.isCancelled else { return .stop }
+      guard !_handlerBox.withLock({ $0 == nil }) else { return .stop }
       return .next
     },
     isolation: isolation
