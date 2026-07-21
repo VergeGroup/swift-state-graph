@@ -59,77 +59,6 @@ struct ClosureBox<R> {
   }
 }
 
-/// Owns a tracking handler's lifetime and serializes its execution.
-///
-/// The state lock is held only while updating invocation state. The handler runs
-/// after the lock is released so it may cancel its own tracking scope safely.
-final class GraphTrackingHandler: @unchecked Sendable {
-
-  /// Immutable closure storage whose execution is serialized by the owning state machine.
-  private struct Handler: @unchecked Sendable {
-    let closure: () -> Void
-
-    func callAsFunction() {
-      closure()
-    }
-  }
-
-  private struct State {
-    var handler: Handler?
-    var isInvoking = false
-    var needsInvocation = false
-  }
-
-  private let state: OSAllocatedUnfairLock<State>
-
-  init(_ handler: @escaping () -> Void) {
-    self.state = .init(
-      uncheckedState: .init(handler: .init(closure: handler))
-    )
-  }
-
-  var isCancelled: Bool {
-    state.withLock { $0.handler == nil }
-  }
-
-  func invoke() {
-    let shouldDrain = state.withLock { state in
-      guard state.handler != nil else { return false }
-
-      state.needsInvocation = true
-      guard !state.isInvoking else { return false }
-
-      state.isInvoking = true
-      return true
-    }
-
-    guard shouldDrain else { return }
-
-    while let handler = takeNextHandler() {
-      handler()
-    }
-  }
-
-  func cancel() {
-    state.withLock { state in
-      state.handler = nil
-      state.needsInvocation = false
-    }
-  }
-
-  private func takeNextHandler() -> Handler? {
-    state.withLock { state in
-      guard state.needsInvocation, let handler = state.handler else {
-        state.isInvoking = false
-        return nil
-      }
-
-      state.needsInvocation = false
-      return handler
-    }
-  }
-}
-
 func perform<Return>(
   _ closure: () -> Return,
   isolation: isolated (any Actor)? = #isolation
@@ -294,6 +223,9 @@ public final class TrackingRegistration: Sendable, Hashable {
 
   private struct State: Sendable {
     var isInvalidated: Bool = false
+#if DEBUG
+    var hasEmittedSelfInvalidationWarning = false
+#endif
     let didChange: @isolated(any) @Sendable () -> Void
   }
 
@@ -316,9 +248,13 @@ public final class TrackingRegistration: Sendable, Hashable {
   }
 
   func perform() {
-    state.withLock { state in
+#if DEBUG
+    let isSelfInvalidationWarningEnabled = StateGraphDiagnostics.isSelfInvalidationWarningEnabled
+#endif
+
+    let shouldEmitSelfInvalidationWarning = state.withLock { state in
       guard state.isInvalidated == false else {
-        return
+        return false
       }
       
       // Re-entry Prevention Guard
@@ -367,7 +303,13 @@ public final class TrackingRegistration: Sendable, Hashable {
       // prevents that group from re-entering itself while allowing peer groups to
       // observe the assignment.
       if ThreadLocal.registration.value == self {
-        return
+#if DEBUG
+        if isSelfInvalidationWarningEnabled, state.hasEmittedSelfInvalidationWarning == false {
+          state.hasEmittedSelfInvalidationWarning = true
+          return true
+        }
+#endif
+        return false
       }
       
       state.isInvalidated = true
@@ -376,7 +318,14 @@ public final class TrackingRegistration: Sendable, Hashable {
       Task {
         await closure()
       }
+      return false
     }
+
+#if DEBUG
+    if shouldEmitSelfInvalidationWarning {
+      Log.logSuppressedSelfInvalidation()
+    }
+#endif
   }
 
 }
