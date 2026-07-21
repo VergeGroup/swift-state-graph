@@ -16,6 +16,7 @@ public struct ComputedMacro {
     case willSetNotSupported
     case weakVariableNotSupported
     case unownedVariableNotSupported
+    case enclosingTypeNotFound
   }
 }
 
@@ -64,14 +65,56 @@ extension ComputedMacro: PeerMacro {
       return []
     }
     
-    for binding in variableDecl.bindings {
-      if binding.accessorBlock != nil {
-        // skip computed properties
-        continue
+    let prefix = "$"
+    let name = variableDecl.name
+    let type = variableDecl.typeSyntax!.trimmed
+
+    if let body = variableDecl.getBlock {
+      if let ownerType = context.enclosingType, variableDecl.isStatic == false {
+        return [
+          """
+          @GraphIgnored
+          private let _graphComputedBacking_\(raw: name): GraphComputedBacking<\(ownerType), \(type)> = .init(name: "\(raw: name)", ownerType: \(ownerType).self) { owner, context in
+            owner.__graphCompute_\(raw: name)(&context)
+          }
+          """,
+          """
+          @GraphIgnored
+          var $\(raw: name): Computed<\(type)> {
+            _graphComputedBacking_\(raw: name).node(owner: self)
+          }
+          """,
+          """
+          @GraphIgnored
+          private func __graphCompute_\(raw: name)(_ context: inout Computed<\(type)>.Context) -> \(type) {
+          \(body.trimmed)
+          }
+          """,
+        ]
+      } else {
+        let staticModifier = variableDecl.isStatic ? "static " : ""
+        return [
+          """
+          @GraphIgnored
+          private \(raw: staticModifier)let _graphComputedBacking_\(raw: name): GraphComputedGlobalBacking<\(type)> = .init(name: "\(raw: name)") { context in
+            __graphCompute_\(raw: name)(&context)
+          }
+          """,
+          """
+          @GraphIgnored
+          \(raw: staticModifier)var $\(raw: name): Computed<\(type)> {
+            _graphComputedBacking_\(raw: name).node()
+          }
+          """,
+          """
+          @GraphIgnored
+          private \(raw: staticModifier)func __graphCompute_\(raw: name)(_ context: inout Computed<\(type)>.Context) -> \(type) {
+          \(body.trimmed)
+          }
+          """,
+        ]
       }
     }
-    
-    let prefix = "$"
     
     var _variableDecl = variableDecl
       .trimmed
@@ -86,8 +129,6 @@ extension ComputedMacro: PeerMacro {
       .modifyingTypeAnnotation({ type in
         return "Computed<\(type.trimmed)>"
       })
-    
-    let name = variableDecl.name
     
     if variableDecl.isOptional && variableDecl.hasInitializer == false {
       
@@ -152,8 +193,7 @@ extension ComputedMacro: AccessorMacro {
     
     let propertyName = identifierPattern.identifier.text
     
-    guard variableDecl.isComputed == false else {
-      context.addDiagnostics(from: Error.computedVariableIsNotSupported, node: declaration)
+    if variableDecl.isComputed {
       return []
     }
     
@@ -193,6 +233,28 @@ extension ComputedMacro: AccessorMacro {
   
 }
 
+extension ComputedMacro: BodyMacro {
+
+  public static func expansion(
+    of node: AttributeSyntax,
+    providingBodyFor declaration: some DeclSyntaxProtocol & WithOptionalCodeBlockSyntax,
+    in context: some MacroExpansionContext
+  ) throws -> [CodeBlockItemSyntax] {
+    guard declaration.is(AccessorDeclSyntax.self),
+          let variableDecl = context.lexicalContext.compactMap({ $0.as(VariableDeclSyntax.self) }).last
+    else {
+      return []
+    }
+
+    let propertyName = variableDecl.name
+    return [
+      """
+      return $\(raw: propertyName).wrappedValue
+      """
+    ]
+  }
+}
+
 // MARK: - Diagnostic Messages
 
 extension ComputedMacro.Error: DiagnosticMessage {
@@ -214,6 +276,8 @@ extension ComputedMacro.Error: DiagnosticMessage {
       return "weak variables are not supported with @GraphComputed"
     case .unownedVariableNotSupported:
       return "unowned variables are not supported with @GraphComputed"
+    case .enclosingTypeNotFound:
+      return "@GraphComputed with a computed body must be declared in a nominal type"
     }
   }
 
@@ -223,5 +287,22 @@ extension ComputedMacro.Error: DiagnosticMessage {
 
   public var severity: DiagnosticSeverity {
     return .error
+  }
+}
+
+private extension MacroExpansionContext {
+  var enclosingType: TypeSyntax? {
+    for syntax in lexicalContext.reversed() {
+      if let classDecl = syntax.as(ClassDeclSyntax.self) {
+        return TypeSyntax(stringLiteral: classDecl.name.text)
+      }
+      if let structDecl = syntax.as(StructDeclSyntax.self) {
+        return TypeSyntax(stringLiteral: structDecl.name.text)
+      }
+      if let actorDecl = syntax.as(ActorDeclSyntax.self) {
+        return TypeSyntax(stringLiteral: actorDecl.name.text)
+      }
+    }
+    return nil
   }
 }

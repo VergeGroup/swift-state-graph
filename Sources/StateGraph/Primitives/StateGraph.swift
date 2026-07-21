@@ -506,6 +506,93 @@ extension Computed {
   
 }
 
+/// Lazily stores the computed node synthesized for an instance `@GraphComputedBody` property.
+///
+/// This type is public so macro expansions in client modules can reference it. Create graph
+/// computed properties with `@GraphComputedBody` instead of using this type directly.
+public struct GraphComputedBacking<
+  Owner: AnyObject,
+  Value: SendableMetatype
+>: ~Copyable, @unchecked Sendable {
+
+  private let name: StaticString
+  private let rule: @Sendable (Owner, inout Computed<Value>.Context) -> Value
+  private let cachedNode: OSAllocatedUnfairLock<Computed<Value>?>
+
+  public init(
+    name: StaticString,
+    ownerType: Owner.Type,
+    rule: @escaping @Sendable (Owner, inout Computed<Value>.Context) -> Value
+  ) {
+    self.name = name
+    self.rule = rule
+    self.cachedNode = .init(uncheckedState: nil)
+  }
+
+  public func node(owner: Owner) -> Computed<Value> {
+    cachedNode.withLockUnchecked { cachedNode in
+      if let cachedNode {
+        return cachedNode
+      }
+
+      let owner = GraphComputedWeakOwner(owner)
+      let rule = self.rule
+      let node = Computed<Value>(name: name) { context in
+        guard let owner = owner.value else {
+          fatalError("GraphComputed owner was released before its computed node")
+        }
+        return rule(owner, &context)
+      }
+      cachedNode = node
+      return node
+    }
+  }
+}
+
+private struct GraphComputedWeakOwner<Owner: AnyObject>: ~Copyable, @unchecked Sendable {
+
+  weak var value: Owner?
+
+  init(_ value: Owner) {
+    self.value = value
+  }
+}
+
+/// Lazily stores the computed node synthesized for a global or static `@GraphComputedBody` property.
+///
+/// This type is public so macro expansions in client modules can reference it. Create graph
+/// computed properties with `@GraphComputedBody` instead of using this type directly.
+public struct GraphComputedGlobalBacking<Value: SendableMetatype>: ~Copyable, @unchecked Sendable {
+
+  private let name: StaticString
+  private let rule: @Sendable (inout Computed<Value>.Context) -> Value
+  private let cachedNode: OSAllocatedUnfairLock<Computed<Value>?>
+
+  public init(
+    name: StaticString,
+    rule: @escaping @Sendable (inout Computed<Value>.Context) -> Value
+  ) {
+    self.name = name
+    self.rule = rule
+    self.cachedNode = .init(uncheckedState: nil)
+  }
+
+  public func node() -> Computed<Value> {
+    cachedNode.withLockUnchecked { cachedNode in
+      if let cachedNode {
+        return cachedNode
+      }
+
+      let rule = self.rule
+      let node = Computed<Value>(name: name) { context in
+        rule(&context)
+      }
+      cachedNode = node
+      return node
+    }
+  }
+}
+
 /// A dependency link whose lifetime does not keep either endpoint alive.
 public final class Edge: CustomDebugStringConvertible {
 
