@@ -30,6 +30,38 @@ struct GraphTrackingGroupTests {
   }
 
   @Test
+  func nonisolatedGroupEnqueuesRerun() async {
+    let node = Stored(wrappedValue: 0)
+    let rerunFinished = TestSignal()
+    let setterStackMarker = "StateGraphTests.nonisolatedGroupEnqueuesRerun.\(UUID())"
+    let callbackObservedSetterStack = OSAllocatedUnfairLock(initialState: false)
+
+    let cancellable = withGraphTracking {
+      withGraphTrackingGroup(
+        {
+          guard node.wrappedValue == 1 else { return }
+          callbackObservedSetterStack.withLock {
+            $0 = Thread.current.threadDictionary[setterStackMarker] != nil
+          }
+          rerunFinished.signal()
+        },
+        isolation: nil
+      )
+    }
+    defer { cancellable.cancel() }
+
+    func setNodeFromMarkedStack() {
+      Thread.current.threadDictionary[setterStackMarker] = true
+      defer { Thread.current.threadDictionary.removeObject(forKey: setterStackMarker) }
+      node.wrappedValue = 1
+    }
+
+    setNodeFromMarkedStack()
+    #expect(await rerunFinished.wait(for: .seconds(5)))
+    #expect(callbackObservedSetterStack.withLock { $0 } == false)
+  }
+
+  @Test
   func basicConditionalTracking() async throws {
     let node1 = Stored(wrappedValue: 5)  // condition node
     let node2 = Stored(wrappedValue: 10)  // conditional node
@@ -692,8 +724,8 @@ struct ContinuousTrackingTests {
 
 }
 
-// These tests intentionally suspend a synchronous tracking handler. Running both at once can
-// occupy every cooperative-executor worker on small CI machines before either test can resume it.
+// These tests intentionally suspend a tracking handler. Running them concurrently can
+// exhaust the execution contexts needed by another test to resume its handler on small CI machines.
 @Suite(.serialized)
 struct IssuesTrackingOnHeavyOperation {
 
@@ -705,54 +737,80 @@ struct IssuesTrackingOnHeavyOperation {
   }
 
   @Test
-  func groupKeepsTrackingAfterCoalescedRerun() async throws {
+  func concurrentGroupKeepsTrackingAcrossSerializedRerun() async {
     let value = Stored(wrappedValue: 0)
-    let secondInvocationStarted = TestSignal()
-    let thirdInvocationReadValue = TestSignal()
-    let fourthInvocationReadValue = TestSignal()
+    let secondInvocationStarted = DispatchSemaphore(value: 0)
+    let thirdInvocationReadValue = DispatchSemaphore(value: 0)
+    let fourthInvocationReadValue = DispatchSemaphore(value: 0)
     let resumeSecondInvocation = DispatchSemaphore(value: 0)
+    let coordinatorFinished = TestSignal()
+    let scenarioResult = OSAllocatedUnfairLock(
+      initialState: (
+        secondInvocationStarted: false,
+        thirdInvocationReadValue: false,
+        fourthInvocationReadValue: false
+      )
+    )
 
     let cancellable = withGraphTracking {
-      withGraphTrackingGroup {
-        switch value.wrappedValue {
-        case 1:
-          secondInvocationStarted.signal()
-          resumeSecondInvocation.wait()
-        case 2:
-          thirdInvocationReadValue.signal()
-        case 3:
-          fourthInvocationReadValue.signal()
-        default:
-          break
-        }
-      }
+      withGraphTrackingGroup(
+        {
+          switch value.wrappedValue {
+          case 1:
+            secondInvocationStarted.signal()
+            resumeSecondInvocation.wait()
+          case 2:
+            thirdInvocationReadValue.signal()
+          case 3:
+            fourthInvocationReadValue.signal()
+          default:
+            break
+          }
+        },
+        isolation: nil
+      )
     }
     defer {
       resumeSecondInvocation.signal()
       cancellable.cancel()
     }
 
-    // Keep the second group invocation busy.
-    value.wrappedValue = 1
-    let secondStarted = await secondInvocationStarted.wait(for: .seconds(5))
-    #expect(secondStarted)
-    guard secondStarted else { return }
+    // Keep every write on one nonisolated synchronous producer. The coordinator uses a Dispatch
+    // queue so it can release the blocked handler even when Swift's cooperative pool has one worker.
+    DispatchQueue.global().async {
+      defer {
+        resumeSecondInvocation.signal()
+        coordinatorFinished.signal()
+      }
 
-    // Request another group invocation while the second invocation is still running.
-    value.wrappedValue = 2
+      value.wrappedValue = 1
+      let secondStarted =
+        secondInvocationStarted.wait(timeout: .now() + .seconds(5)) == .success
+      scenarioResult.withLock { $0.secondInvocationStarted = secondStarted }
+      guard secondStarted else { return }
 
-    // The public API intentionally hides its internal tracking pass. Keep the second
-    // invocation blocked while the value-2 notification enqueues its coalesced rerun.
-    try await Task.sleep(for: .milliseconds(250))
-    resumeSecondInvocation.signal()
+      // Invalidate the pass registration while its handler is still active, then let the enqueued
+      // rerun continue. No timing delay is needed: the setter has already requested the callback.
+      value.wrappedValue = 2
+      resumeSecondInvocation.signal()
 
-    let didReadValueInThirdInvocation = await thirdInvocationReadValue.wait(for: .seconds(5))
-    #expect(didReadValueInThirdInvocation)
-    guard didReadValueInThirdInvocation else { return }
+      let didReadValueInThirdInvocation =
+        thirdInvocationReadValue.wait(timeout: .now() + .seconds(5)) == .success
+      scenarioResult.withLock { $0.thirdInvocationReadValue = didReadValueInThirdInvocation }
+      guard didReadValueInThirdInvocation else { return }
 
-    // The coalesced invocation must reestablish tracking for this later update.
-    value.wrappedValue = 3
-    #expect(await fourthInvocationReadValue.wait(for: .seconds(5)))
+      // The rerun must install a fresh registration for this later update.
+      value.wrappedValue = 3
+      let didReadValueInFourthInvocation =
+        fourthInvocationReadValue.wait(timeout: .now() + .seconds(5)) == .success
+      scenarioResult.withLock { $0.fourthInvocationReadValue = didReadValueInFourthInvocation }
+    }
+
+    #expect(await coordinatorFinished.wait(for: .seconds(20)))
+    let result = scenarioResult.withLock { $0 }
+    #expect(result.secondInvocationStarted)
+    #expect(result.thirdInvocationReadValue)
+    #expect(result.fourthInvocationReadValue)
   }
 
   @Test

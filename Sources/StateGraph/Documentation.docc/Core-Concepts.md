@@ -303,6 +303,7 @@ let subscription = withGraphTracking {
 - Must be called within a `withGraphTracking` scope
 - The handler should perform side effects, not return values
 - All subscriptions are cleaned up when the returned cancellable is cancelled
+- See <doc:Tracking-Registrations> for the lifecycle of the one-shot registrations used by each execution
 
 ## Memory Management
 
