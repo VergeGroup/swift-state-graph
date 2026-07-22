@@ -6,6 +6,28 @@ import Observation
 @MainActor
 struct ObservationKeyPathTests {
 
+  @Test("Separate registrars isolate the shared node wrapped-value key path")
+  func separateRegistrarsIsolateSharedNodeWrappedValueKeyPath() async {
+    let root = NodeObservationRoot<Stored<Int>>()
+    let keyPath = \NodeObservationRoot<Stored<Int>>.wrappedValue
+    let firstRegistrar = ObservationRegistrar()
+    let secondRegistrar = ObservationRegistrar()
+
+    await confirmation(expectedCount: 1) { confirmation in
+      withObservationTracking {
+        firstRegistrar.access(root, keyPath: keyPath)
+      } onChange: {
+        confirmation.confirm()
+      }
+
+      secondRegistrar.willSet(root, keyPath: keyPath)
+      try? await Task.sleep(for: .milliseconds(10))
+
+      firstRegistrar.willSet(root, keyPath: keyPath)
+      try? await Task.sleep(for: .milliseconds(10))
+    }
+  }
+
   @Test("Direct Stored observation ignores another same-type instance")
   func directStoredObservationIgnoresAnotherSameTypeInstance() async {
     let observed = Stored(wrappedValue: 0)

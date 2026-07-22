@@ -258,9 +258,7 @@ public final class Computed<Value>: Node, Observable, CustomDebugStringConvertib
   
   #if canImport(Observation)
     @available(macOS 14.0, iOS 17.0, watchOS 10.0, tvOS 17.0, *)
-    private var observationRegistrar: ObservationRegistrar {
-      return .shared
-    }
+    private let observationRegistrar = ObservationRegistrar()
   #endif
 
   public var potentiallyDirty: Bool {
@@ -294,8 +292,11 @@ public final class Computed<Value>: Node, Observable, CustomDebugStringConvertib
       // is checked during recomputation to avoid unnecessary downstream propagation.
 #if canImport(Observation)
       if #available(macOS 14.0, iOS 17.0, watchOS 10.0, tvOS 17.0, *) {
-        withMainActor { [observationRegistrar, keyPath = _keyPath(self)] in   
-          observationRegistrar.willSet(PointerKeyPathRoot<Computed<Value>>.shared, keyPath: keyPath)
+        withMainActor { [observationRegistrar] in
+          observationRegistrar.willSet(
+            NodeObservationRoot<Computed<Value>>(),
+            keyPath: \NodeObservationRoot<Computed<Value>>.wrappedValue
+          )
         }
       }
 #endif
@@ -320,7 +321,10 @@ public final class Computed<Value>: Node, Observable, CustomDebugStringConvertib
     get {
       #if canImport(Observation)
         if #available(macOS 14.0, iOS 17.0, watchOS 10.0, tvOS 17.0, *) {
-          observationRegistrar.access(PointerKeyPathRoot<Computed<Value>>.shared, keyPath: _keyPath(self))   
+          observationRegistrar.access(
+            NodeObservationRoot<Computed<Value>>(),
+            keyPath: \NodeObservationRoot<Computed<Value>>.wrappedValue
+          )
         }
       #endif
       recomputeIfNeeded()
