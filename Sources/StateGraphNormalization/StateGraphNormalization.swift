@@ -4,16 +4,190 @@
 import Foundation
 import TypedIdentifier
 
-/// Serializes access across a related set of entity stores.
+/// Serializes access and graph publication across a related set of entity stores.
 ///
 /// Give every ``EntityStore`` in one database the same coordinator to protect
 /// canonical entity lookup and mutation across tables. The lock is recursive
 /// because an entity import may synchronously access another coordinated store.
-public final class EntityStoreCoordinator: Sendable {
+///
+/// Graph updates are queued while coordinated access is active, then published
+/// synchronously after the outermost access releases the database lock.
+public final class EntityStoreCoordinator: @unchecked Sendable {
 
-  fileprivate let lock = NSRecursiveLock()
+  private struct PublicationBatch: Sendable {
+    let id: UInt64
+    let publications: [@Sendable () -> Void]
+  }
+
+  private struct PublicationTicket {
+    let id: UInt64
+    let shouldDrain: Bool
+  }
+
+  private let accessLock = NSRecursiveLock()
+  private let publicationCondition = NSCondition()
+  private let drainingContextKey =
+    "org.vergegroup.state-graph.entity-store-publication.\(UUID().uuidString)"
+
+  private var accessDepth = 0
+  private var currentPublications: [@Sendable () -> Void] = []
+
+  private var nextBatchID: UInt64 = 0
+  private var completedThroughBatchID: UInt64 = 0
+  private var completedOutOfOrderBatchIDs: Set<UInt64> = []
+  private var isDraining = false
+  private var pendingBatches: [PublicationBatch] = []
 
   public init() {}
+
+  @discardableResult
+  fileprivate func withAccess<Result, Failure: Error>(
+    _ body: () throws(Failure) -> Result
+  ) throws(Failure) -> Result {
+    accessLock.lock()
+    accessDepth += 1
+
+    defer {
+      let ticket = endAccess()
+      finish(ticket)
+    }
+
+    return try body()
+  }
+
+  /// Adds a graph update to the current coordinated access.
+  ///
+  /// This method must be called from inside ``withAccess(_:)``.
+  fileprivate func enqueuePublication(
+    _ publication: @escaping @Sendable () -> Void
+  ) {
+    precondition(accessDepth > 0)
+    currentPublications.append(publication)
+  }
+
+  /// Ends one recursive access level and enqueues the complete outermost batch.
+  private func endAccess() -> PublicationTicket? {
+    accessDepth -= 1
+
+    let ticket: PublicationTicket?
+    if accessDepth == 0, !currentPublications.isEmpty {
+      let publications = currentPublications
+      currentPublications = []
+      ticket = enqueue(publications)
+    } else {
+      ticket = nil
+    }
+
+    accessLock.unlock()
+    return ticket
+  }
+
+  /// Enqueues a publication batch while preserving database access order.
+  ///
+  /// This method must be called while `accessLock` is held.
+  private func enqueue(
+    _ publications: [@Sendable () -> Void]
+  ) -> PublicationTicket {
+    publicationCondition.lock()
+
+    nextBatchID &+= 1
+    let batch = PublicationBatch(
+      id: nextBatchID,
+      publications: publications
+    )
+    pendingBatches.append(batch)
+
+    let shouldDrain: Bool
+    if isDraining {
+      shouldDrain = false
+    } else {
+      isDraining = true
+      shouldDrain = true
+    }
+
+    publicationCondition.unlock()
+    return PublicationTicket(id: batch.id, shouldDrain: shouldDrain)
+  }
+
+  private func finish(_ ticket: PublicationTicket?) {
+    guard let ticket else { return }
+
+    if ticket.shouldDrain {
+      drainAsOwner()
+    } else if isDrainingOnCurrentThread {
+      // A graph callback may synchronously mutate another coordinated store.
+      // Drain through that mutation without waiting on the current drainer.
+      drainPublications(until: ticket.id)
+    } else {
+      publicationCondition.lock()
+      while !isCompleted(ticket.id) {
+        publicationCondition.wait()
+      }
+      publicationCondition.unlock()
+    }
+  }
+
+  private var isDrainingOnCurrentThread: Bool {
+    Thread.current.threadDictionary[drainingContextKey] as? Bool == true
+  }
+
+  private func drainAsOwner() {
+    let threadDictionary = Thread.current.threadDictionary
+    threadDictionary[drainingContextKey] = true
+    defer { threadDictionary.removeObject(forKey: drainingContextKey) }
+
+    drainPublications(until: nil)
+  }
+
+  private func drainPublications(until targetID: UInt64?) {
+    while true {
+      publicationCondition.lock()
+
+      guard !pendingBatches.isEmpty else {
+        if targetID == nil {
+          isDraining = false
+        }
+        publicationCondition.unlock()
+        return
+      }
+
+      let batch = pendingBatches.removeFirst()
+      publicationCondition.unlock()
+
+      for publication in batch.publications {
+        publication()
+      }
+
+      publicationCondition.lock()
+      markCompleted(batch.id)
+      publicationCondition.broadcast()
+      publicationCondition.unlock()
+
+      if batch.id == targetID {
+        return
+      }
+    }
+  }
+
+  /// Returns whether a publication batch finished, with the condition held.
+  private func isCompleted(_ id: UInt64) -> Bool {
+    id <= completedThroughBatchID || completedOutOfOrderBatchIDs.contains(id)
+  }
+
+  /// Records a completed batch while preserving a contiguous completion prefix.
+  ///
+  /// This method must be called while `publicationCondition` is held.
+  private func markCompleted(_ id: UInt64) {
+    guard id == completedThroughBatchID &+ 1 else {
+      completedOutOfOrderBatchIDs.insert(id)
+      return
+    }
+
+    completedThroughBatchID = id
+    while completedOutOfOrderBatchIDs.remove(completedThroughBatchID &+ 1) != nil {
+      completedThroughBatchID &+= 1
+    }
+  }
 }
 
 /// A uniquely owned canonical entity table.
@@ -229,9 +403,7 @@ public final class EntityStore<T: TypedIdentifiable & Sendable>: Sendable {
   private func withLock<Result, Failure: Error>(
     _ body: () throws(Failure) -> Result
   ) throws(Failure) -> Result {
-    coordinator.lock.lock()
-    defer { coordinator.lock.unlock() }
-    return try body()
+    try coordinator.withAccess(body)
   }
 
   @discardableResult
@@ -240,7 +412,12 @@ public final class EntityStore<T: TypedIdentifiable & Sendable>: Sendable {
   ) throws(Failure) -> Result {
     try withLock { () throws(Failure) -> Result in
       let result = try body()
-      publishMutation()
+      let revision = table.advanceRevision()
+
+      coordinator.enqueuePublication { [graphRevision] in
+        graphRevision.wrappedValue = revision
+      }
+
       return result
     }
   }
@@ -249,8 +426,4 @@ public final class EntityStore<T: TypedIdentifiable & Sendable>: Sendable {
     _ = graphRevision.wrappedValue
   }
 
-  private func publishMutation() {
-    let revision = table.advanceRevision()
-    graphRevision.wrappedValue = revision
-  }
 }

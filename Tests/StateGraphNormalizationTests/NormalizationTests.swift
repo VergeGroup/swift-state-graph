@@ -478,6 +478,87 @@ struct NormalizationTests {
     #expect(await workFinished.wait(for: .seconds(5)))
   }
 
+  @Test func nestedMutationPublishesAfterOutermostCoordinatorUnlocks() async {
+    let coordinator = EntityStoreCoordinator()
+    let outerStore = EntityStore<ValueEntity>(
+      entities: [.init(1): .init(id: 1, value: 1)],
+      coordinator: coordinator
+    )
+    let nestedStore = EntityStore<ValueEntity>(
+      entities: [.init(1): .init(id: 1, value: 1)],
+      coordinator: coordinator
+    )
+    let pauseNextUpstreamComputation = OSAllocatedUnfairLock(initialState: false)
+    let upstreamComputationEntered = TestSignal()
+    let allowUpstreamComputation = DispatchSemaphore(value: 0)
+    let mutationEntered = TestSignal()
+    let allowMutationToPublish = DispatchSemaphore(value: 0)
+    let computationFinished = TestSignal()
+    let mutationFinished = TestSignal()
+    let upstreamTrigger = Stored(wrappedValue: 0)
+
+    let upstreamValue = Computed { _ in
+      let value = upstreamTrigger.wrappedValue
+      let shouldPause = pauseNextUpstreamComputation.withLock { shouldPause in
+        defer { shouldPause = false }
+        return shouldPause
+      }
+      if shouldPause {
+        upstreamComputationEntered.signal()
+        _ = allowUpstreamComputation.wait(timeout: .now() + .seconds(5))
+      }
+      return value
+    }
+
+    let computedValue = Computed { _ in
+      _ = upstreamValue.wrappedValue
+      return nestedStore.get(by: .init(1))?.value
+    }
+
+    #expect(computedValue.wrappedValue == 1)
+    pauseNextUpstreamComputation.withLock { $0 = true }
+    upstreamTrigger.wrappedValue = 1
+
+    DispatchQueue.global().async {
+      _ = computedValue.wrappedValue
+      computationFinished.signal()
+    }
+
+    #expect(await upstreamComputationEntered.wait(for: .seconds(5)))
+
+    DispatchQueue.global().async {
+      outerStore.updateOrCreate(
+        id: .init(1),
+        update: { entity in
+          entity.value = 2
+          nestedStore.updateOrCreate(
+            id: .init(1),
+            update: { nestedEntity in
+              nestedEntity.value = 2
+              mutationEntered.signal()
+              _ = allowMutationToPublish.wait(timeout: .now() + .seconds(5))
+            },
+            create: { .init(id: 1, value: 2) }
+          )
+        },
+        create: { .init(id: 1, value: 2) }
+      )
+      mutationFinished.signal()
+    }
+
+    #expect(await mutationEntered.wait(for: .seconds(5)))
+    allowMutationToPublish.signal()
+
+    // Publication waits for the Computed lock, but the Computed must still be able
+    // to acquire the coordinator. Publishing under the outer lock deadlocks here.
+    #expect(await mutationFinished.wait(for: .milliseconds(100)) == false)
+    allowUpstreamComputation.signal()
+
+    #expect(await computationFinished.wait(for: .seconds(5)))
+    #expect(await mutationFinished.wait(for: .seconds(5)))
+    #expect(computedValue.wrappedValue == 2)
+  }
+
   @Test func getAllReturnsIndependentSnapshot() {
     let store = EntityStore<ValueEntity>()
     store.add(.init(id: 1, value: 1))
