@@ -8,6 +8,7 @@ public enum StateGraphDiagnostics {
 
   private struct State: Sendable {
     var isSelfInvalidationWarningEnabled = true
+    var isNestedTransactionWarningEnabled = true
   }
 
   private static let state = OSAllocatedUnfairLock(initialState: State())
@@ -27,6 +28,20 @@ public enum StateGraphDiagnostics {
       state.withLock { $0.isSelfInvalidationWarningEnabled = newValue }
     }
   }
+
+  /// Controls the DEBUG diagnostic emitted when a nested graph transaction joins
+  /// an active outer transaction.
+  ///
+  /// Nested calls always join the outer transaction regardless of this setting.
+  /// The default is `true`. Logging remains disabled in non-DEBUG builds.
+  public static var isNestedTransactionWarningEnabled: Bool {
+    get {
+      state.withLock { $0.isNestedTransactionWarningEnabled }
+    }
+    set {
+      state.withLock { $0.isNestedTransactionWarningEnabled = newValue }
+    }
+  }
 }
 
 enum Log {
@@ -34,6 +49,9 @@ enum Log {
 #if DEBUG
   @TaskLocal
   static var selfInvalidationWarningObserver: (@Sendable () -> Void)?
+
+  @TaskLocal
+  static var nestedTransactionWarningObserver: (@Sendable () -> Void)?
 #endif
 
   static let generic = Logger(OSLog.makeOSLogInDebug { OSLog.init(subsystem: "state-graph", category: "generic") })
@@ -49,6 +67,22 @@ enum Log {
     tracking.warning(
       "A tracking handler invalidated its own active registration. The mutation was applied and peer registrations were notified, but this registration was not restored to the invalidated node."
     )
+  }
+
+  static func logNestedGraphTransaction(
+    _ file: StaticString,
+    _ line: UInt,
+    _ column: UInt
+  ) {
+#if DEBUG
+    guard StateGraphDiagnostics.isNestedTransactionWarningEnabled else { return }
+    nestedTransactionWarningObserver?()
+
+    let sourceLocation = "\(file):\(line):\(column)"
+    generic.debug(
+      "A nested graph transaction at \(sourceLocation, privacy: .public) joined the active transaction. It has no independent commit or rollback boundary."
+    )
+#endif
   }
 }
 

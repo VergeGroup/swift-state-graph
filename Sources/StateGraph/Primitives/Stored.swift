@@ -19,6 +19,57 @@ public final class Stored<Value: SendableMetatype>: Node, Observable, CustomDebu
   nonisolated(unsafe)
   private var value: Value
 
+  /// A typed staged value owned directly by this node during an outer graph transaction.
+  ///
+  /// The wrapper is deliberately not a reference box. `Stored` values are copyable today,
+  /// but keeping the wrapper noncopyable makes its single owner explicit and lets commit
+  /// consume the staged storage before publishing.
+  private struct TransactionBuffer<Element>: ~Copyable {
+    var value: Element
+
+    init(_ value: consuming Element) {
+      self.value = value
+    }
+
+    consuming func takeValue() -> Element {
+      value
+    }
+  }
+
+  /// Typed commit state moved out of the staging buffer before publication.
+  ///
+  /// Comparators evaluate this pending `(old, new)` pair while outside readers may
+  /// still access the old committed graph. Publication later installs `newValue`
+  /// and fills in the callback work under the short read barrier.
+  private struct TransactionCommitWork {
+    let oldValue: Value
+    let newValue: Value
+    var shouldNotify = false
+    var trackingRegistrations: Set<TrackingRegistration> = []
+    var outgoingEdges: ContiguousArray<Edge> = []
+    var didSetHandler: ((Value, Value) -> Void)?
+  }
+
+  nonisolated(unsafe)
+  private var transactionBuffer: TransactionBuffer<Value>?
+
+  /// A typed value detached from a particular transaction during rollback.
+  ///
+  /// Multiple cleanup operations may overlap after their writer slots are released,
+  /// so context identity keeps their node-local values distinct without moving them
+  /// into the type-erased transaction context.
+  private struct TransactionRollbackValue {
+    let context: ObjectIdentifier
+    let value: Value
+  }
+
+  /// Rolled-back values waiting to be destroyed outside writer coordination.
+  nonisolated(unsafe)
+  private var transactionRollbackValues: [TransactionRollbackValue] = []
+
+  nonisolated(unsafe)
+  private var transactionCommitWork: TransactionCommitWork?
+
   private let shouldNotify: @Sendable (Value, Value) -> Bool
 
 #if canImport(Observation)
@@ -39,81 +90,353 @@ public final class Stored<Value: SendableMetatype>: Node, Observable, CustomDebu
 
   public var wrappedValue: Value {
     get {
+      if ThreadLocal.graphTransaction.value != nil {
+        return transactionValue()
+      }
+
+      return GraphTransactionCoordinator.shared.withReadAccess {
+        committedValue()
+      }
+    }
+    set {
+      if let transaction = ThreadLocal.graphTransaction.value {
+        stage(newValue, in: transaction)
+        return
+      }
+
+      GraphTransactionCoordinator.shared.withImmediateWrite {
+        setImmediately(newValue)
+      }
+    }
+  }
+
+  /// Returns the transaction-visible value without adding committed graph edges.
+  ///
+  /// Body and comparator reads remain isolated. During synchronous callback delivery,
+  /// Observation and graph-tracking passes may register directly with this leaf node.
+  private func transactionValue() -> Value {
+    let recordsDependencies =
+      ThreadLocal.graphTransaction.value?.recordsDependencies == true
+
 #if canImport(Observation)
-      if #available(macOS 14.0, iOS 17.0, watchOS 10.0, tvOS 17.0, *) {
-        observationRegistrar.access(
+    if recordsDependencies,
+      #available(macOS 14.0, iOS 17.0, watchOS 10.0, tvOS 17.0, *)
+    {
+      observationRegistrar.access(
+        NodeObservationRoot<Stored<Value>>(),
+        keyPath: \NodeObservationRoot<Stored<Value>>.wrappedValue
+      )
+    }
+#endif
+
+    lock.lock()
+    defer { lock.unlock() }
+
+    if recordsDependencies, let registration = ThreadLocal.registration.value {
+      trackingRegistrations.insert(registration)
+    }
+
+    if transactionBuffer != nil {
+      return transactionBuffer!.value
+    }
+
+    // Comparators run before publication. Their thread-local transaction context
+    // still reads the complete pending commit while outside readers see `value`.
+    if let transactionCommitWork {
+      return transactionCommitWork.newValue
+    }
+
+    return value
+  }
+
+  /// Returns the committed value and records ordinary graph and tracking dependencies.
+  private func committedValue() -> Value {
+#if canImport(Observation)
+    if #available(macOS 14.0, iOS 17.0, watchOS 10.0, tvOS 17.0, *) {
+      observationRegistrar.access(
+        NodeObservationRoot<Stored<Value>>(),
+        keyPath: \NodeObservationRoot<Stored<Value>>.wrappedValue
+      )
+    }
+#endif
+
+    lock.lock()
+    defer { lock.unlock() }
+
+    if let currentNode = ThreadLocal.currentNode.value {
+      let edge = Edge(from: self, to: currentNode)
+      outgoingEdges.append(edge)
+      currentNode.incomingEdges.append(edge)
+    }
+
+    if let registration = ThreadLocal.registration.value {
+      trackingRegistrations.insert(registration)
+    }
+
+    return value
+  }
+
+  /// Stages an assignment in this node's typed transaction buffer.
+  private func stage(_ newValue: Value, in transaction: GraphTransactionContext) {
+    lock.lock()
+    let needsRegistration = transactionBuffer == nil
+    let discardedBuffer = transactionBuffer.take()
+    transactionBuffer = .init(newValue)
+    lock.unlock()
+
+    if needsRegistration {
+      transaction.register(self)
+    }
+
+    Self.discardTransactionBuffer(discardedBuffer)
+  }
+
+  /// Ends a staged value's lifetime outside the node lock.
+  private static func discardTransactionBuffer(
+    _ buffer: consuming TransactionBuffer<Value>?
+  ) {
+    _ = consume buffer
+  }
+
+  /// Runs the existing immediate assignment pipeline after writer coordination.
+  private func setImmediately(_ newValue: Value) {
+    guard let immediateWriterScope = ThreadLocal.graphImmediateWriterScope.value else {
+      preconditionFailure("Stored immediate mutation requires graph writer coordination.")
+    }
+
+    immediateWriterScope.nodeLockDepth += 1
+    lock.lock()
+
+    let oldValue = value
+
+    guard shouldNotify(oldValue, newValue) else {
+      value = newValue
+      let didSetHandler = self.didSetHandler
+      lock.unlock()
+      immediateWriterScope.nodeLockDepth -= 1
+      didSetHandler?(oldValue, newValue)
+      return
+    }
+
+#if canImport(Observation)
+    if #available(macOS 14.0, iOS 17.0, watchOS 10.0, tvOS 17.0, *) {
+      withMainActor { [observationRegistrar] in
+        observationRegistrar.willSet(
           NodeObservationRoot<Stored<Value>>(),
           keyPath: \NodeObservationRoot<Stored<Value>>.wrappedValue
         )
       }
+    }
+
 #endif
 
-      lock.lock()
-      defer { lock.unlock() }
+    value = newValue
 
-      if let currentNode = ThreadLocal.currentNode.value {
-        let edge = Edge(from: self, to: currentNode)
-        outgoingEdges.append(edge)
-        currentNode.incomingEdges.append(edge)
-      }
+    let outgoingEdges = self.outgoingEdges
+    let trackingRegistrations = self.trackingRegistrations
+    let didSetHandler = self.didSetHandler
+    self.trackingRegistrations.removeAll()
 
-      if let registration = ThreadLocal.registration.value {
-        trackingRegistrations.insert(registration)
-      }
+    lock.unlock()
+    immediateWriterScope.nodeLockDepth -= 1
 
-      return value
-    }
-    set {
-      lock.lock()
+    Self.publishGraphUpdates(
+      trackingRegistrations: trackingRegistrations,
+      outgoingEdges: outgoingEdges
+    )
 
-      let oldValue = value
-
-      guard shouldNotify(oldValue, newValue) else {
-        value = newValue
-        let didSetHandler = self.didSetHandler
-        lock.unlock()
-        didSetHandler?(oldValue, newValue)
-        return
-      }
+    didSetHandler?(oldValue, newValue)
 
 #if canImport(Observation)
-      if #available(macOS 14.0, iOS 17.0, watchOS 10.0, tvOS 17.0, *) {
-        withMainActor { [observationRegistrar] in
+    if #available(macOS 14.0, iOS 17.0, watchOS 10.0, tvOS 17.0, *) {
+      withMainActor { [observationRegistrar] in
+        observationRegistrar.didSet(
+          NodeObservationRoot<Stored<Value>>(),
+          keyPath: \NodeObservationRoot<Stored<Value>>.wrappedValue
+        )
+      }
+    }
+#endif
+  }
+
+  func prepareTransactionCommit() {
+    lock.lock()
+    guard let transactionBuffer = self.transactionBuffer.take() else {
+      lock.unlock()
+      return
+    }
+
+    let oldValue = value
+    let newValue = transactionBuffer.takeValue()
+    transactionCommitWork = .init(
+      oldValue: oldValue,
+      newValue: newValue
+    )
+
+    lock.unlock()
+  }
+
+  func evaluateTransactionComparator() {
+    lock.lock()
+    guard let installedWork = transactionCommitWork else {
+      lock.unlock()
+      return
+    }
+    lock.unlock()
+
+    // Every participant has moved its final value into node-local commit work.
+    // Reentrant assignments see that coherent pending graph and stage into the
+    // following commit batch.
+    let shouldNotify = shouldNotify(
+      installedWork.oldValue,
+      installedWork.newValue
+    )
+
+    lock.lock()
+    guard var transactionCommitWork else {
+      lock.unlock()
+      return
+    }
+    transactionCommitWork.shouldNotify = shouldNotify
+    self.transactionCommitWork = transactionCommitWork
+    lock.unlock()
+  }
+
+  func prepareTransactionObservationWillSet(
+    _ observationDelivery: GraphTransactionObservationDelivery
+  ) {
+    lock.lock()
+    guard transactionCommitWork?.shouldNotify == true else {
+      lock.unlock()
+      return
+    }
+    let outgoingEdges = self.outgoingEdges
+    lock.unlock()
+
+#if canImport(Observation)
+    if #available(macOS 14.0, iOS 17.0, watchOS 10.0, tvOS 17.0, *) {
+      observationDelivery.append { [observationRegistrar] in
+        withMainActor {
           observationRegistrar.willSet(
             NodeObservationRoot<Stored<Value>>(),
             keyPath: \NodeObservationRoot<Stored<Value>>.wrappedValue
           )
         }
       }
-
-      defer {
-        if #available(macOS 14.0, iOS 17.0, watchOS 10.0, tvOS 17.0, *) {
-          withMainActor { [observationRegistrar] in
-            observationRegistrar.didSet(
-              NodeObservationRoot<Stored<Value>>(),
-              keyPath: \NodeObservationRoot<Stored<Value>>.wrappedValue
-            )
-          }
-        }
-      }
+    }
 #endif
 
-      value = newValue
-
-      let outgoingEdges = self.outgoingEdges
-      let trackingRegistrations = self.trackingRegistrations
-      let didSetHandler = self.didSetHandler
-      self.trackingRegistrations.removeAll()
-
-      lock.unlock()
-
-      Self.publishGraphUpdates(
-        trackingRegistrations: trackingRegistrations,
-        outgoingEdges: outgoingEdges
-      )
-
-      didSetHandler?(oldValue, newValue)
+    for edge in outgoingEdges {
+      observationDelivery.prepareWillSet(for: edge)
     }
+  }
+
+  func publishTransactionCommit() {
+    lock.lock()
+    guard var transactionCommitWork else {
+      lock.unlock()
+      return
+    }
+
+    value = transactionCommitWork.newValue
+    transactionCommitWork.didSetHandler = didSetHandler
+    self.transactionCommitWork = transactionCommitWork
+    lock.unlock()
+  }
+
+  func prepareTransactionInvalidations(
+    _ callbackDelivery: GraphTransactionCallbackDelivery
+  ) {
+    lock.lock()
+    guard var transactionCommitWork else {
+      lock.unlock()
+      return
+    }
+
+    if transactionCommitWork.shouldNotify {
+      transactionCommitWork.trackingRegistrations = trackingRegistrations
+      transactionCommitWork.outgoingEdges = outgoingEdges
+      trackingRegistrations.removeAll()
+      self.transactionCommitWork = transactionCommitWork
+    }
+    lock.unlock()
+
+    if transactionCommitWork.shouldNotify {
+      for registration in transactionCommitWork.trackingRegistrations {
+        callbackDelivery.append {
+          registration.perform()
+        }
+      }
+
+      for edge in transactionCommitWork.outgoingEdges {
+        callbackDelivery.prepareInvalidation(for: edge)
+      }
+    }
+  }
+
+  func deliverTransactionCallbacks() {
+    lock.lock()
+    guard let transactionCommitWork = self.transactionCommitWork.take() else {
+      lock.unlock()
+      return
+    }
+    lock.unlock()
+
+    transactionCommitWork.didSetHandler?(
+      transactionCommitWork.oldValue,
+      transactionCommitWork.newValue
+    )
+
+#if canImport(Observation)
+    if transactionCommitWork.shouldNotify,
+      #available(macOS 14.0, iOS 17.0, watchOS 10.0, tvOS 17.0, *)
+    {
+      withMainActor { [observationRegistrar] in
+        observationRegistrar.didSet(
+          NodeObservationRoot<Stored<Value>>(),
+          keyPath: \NodeObservationRoot<Stored<Value>>.wrappedValue
+        )
+      }
+    }
+#endif
+  }
+
+  func prepareTransactionRollback(_ transaction: GraphTransactionContext) {
+    lock.lock()
+    guard let transactionBuffer = transactionBuffer.take() else {
+      lock.unlock()
+      return
+    }
+    transactionRollbackValues.append(
+      .init(
+        context: ObjectIdentifier(transaction),
+        value: transactionBuffer.takeValue()
+      )
+    )
+    lock.unlock()
+  }
+
+  func finishTransactionRollback(_ transaction: GraphTransactionContext) {
+    let context = ObjectIdentifier(transaction)
+
+    lock.lock()
+    guard
+      let index = transactionRollbackValues.lastIndex(
+        where: { $0.context == context }
+      )
+    else {
+      lock.unlock()
+      return
+    }
+    let rollbackValue = transactionRollbackValues.remove(at: index)
+    lock.unlock()
+
+    Self.discardTransactionValue(rollbackValue.value)
+  }
+
+  /// Ends a rolled-back value's lifetime outside node and coordinator locks.
+  private static func discardTransactionValue(_ value: consuming Value) {
+    _ = consume value
   }
 
   /// Publishes graph invalidations captured while the node lock was held.
@@ -192,9 +515,11 @@ public final class Stored<Value: SendableMetatype>: Node, Observable, CustomDebu
   }
 
   public var debugDescription: String {
-    lock.lock()
-    let value = self.value
-    lock.unlock()
+    let value = GraphTransactionCoordinator.shared.withReadAccess {
+      lock.lock()
+      defer { lock.unlock() }
+      return self.value
+    }
 
     let typeName = _typeName(type(of: self))
     return "\(typeName)(name=\(info.name.map(String.init) ?? "noname"), value=\(String(describing: value)))"
@@ -209,15 +534,35 @@ public final class Stored<Value: SendableMetatype>: Node, Observable, CustomDebu
   /// - Important: The mutation executes while the same lock that protects graph
   ///   bookkeeping is held. Calling node APIs or acquiring another node's lock from
   ///   `mutation` is unsupported and can introduce lock-order deadlocks.
+  /// - Important: This method mutates committed storage even inside
+  ///   ``withGraphTransaction(_:_:_:_:)``. The transaction does not stage or roll
+  ///   back the mutation.
   ///
   /// Prefer assigning `wrappedValue`. Use this method only when the caller owns the
   /// lock ordering and intentionally does not require notifications.
   public borrowing func unsafeModify<Result, E>(
     _ mutation: (inout Value) throws(E) -> Result
   ) throws(E) -> Result where E: Error {
-    lock.lock()
-    defer { lock.unlock() }
-    return try mutation(&value)
+    if ThreadLocal.graphTransaction.value != nil {
+      lock.lock()
+      defer { lock.unlock() }
+      return try mutation(&value)
+    }
+
+    return try GraphTransactionCoordinator.shared.withImmediateWrite {
+      () throws(E) -> Result in
+      guard let immediateWriterScope = ThreadLocal.graphImmediateWriterScope.value else {
+        preconditionFailure("Stored unsafe mutation requires graph writer coordination.")
+      }
+
+      immediateWriterScope.nodeLockDepth += 1
+      lock.lock()
+      defer {
+        lock.unlock()
+        immediateWriterScope.nodeLockDepth -= 1
+      }
+      return try mutation(&value)
+    }
   }
 
   /// Use `unsafeModify(_:)`; its name makes the notification and locking risks explicit.
@@ -235,6 +580,8 @@ public final class Stored<Value: SendableMetatype>: Node, Observable, CustomDebu
     didSetHandler = handler
   }
 }
+
+extension Stored: GraphTransactionParticipant {}
 
 extension Stored {
 

@@ -84,6 +84,75 @@ store injection, suites, and custom value types.
 - **Change Propagation**: When their value changes, all dependent nodes are notified
 - **Observable**: They integrate with SwiftUI and other observation systems
 
+### Graph Transactions
+
+Use `withGraphTransaction` when a synchronous operation must publish several
+`Stored` assignments as one graph update:
+
+```swift
+withGraphTransaction {
+  profile.$name.wrappedValue = "Taylor"
+  profile.$age.wrappedValue = 30
+
+  // Reads in this scope see both staged assignments.
+  print(profile.$name.wrappedValue)
+}
+```
+
+The outermost call stages assignments in each `Stored` node. Its body reads the
+latest staged value, while other threads continue to read the previously
+committed graph. When the body returns normally, StateGraph snapshots affected
+Observation nodes after current readers finish, then invokes the existing `willSet`
+delivery path before publication. A synchronously delivered handler on the
+committing thread reads the complete staged snapshot while other threads still
+read the old committed graph. All final values are then installed before
+StateGraph tracking and `onDidSet(_:)` callbacks run. Other writers wait until
+that work finishes, and readers briefly wait during publication so a computed
+value cannot observe a partial commit.
+
+The API is synchronous and thread-local; it does not cross `await`, task
+creation, or executor hops. Nested calls join the outer transaction rather than
+creating savepoints. An inner error that the outer body catches leaves its staged
+assignments in place; only an error that escapes the outermost call rolls all
+staged `Stored` assignments back.
+
+Transaction-time `Computed` reads are evaluated from the staged `Stored` values
+without updating the committed cache or dependency edges. Callback mutations
+join a following commit batch: they are immediately readable by later callbacks
+on the committing thread, and every resulting batch is published before the
+outer call returns. Synchronous callbacks run while other threads' graph writes
+remain suspended. They may mutate `Stored` values reentrantly, but neither a
+comparator nor a callback may wait synchronously for another thread to finish a
+graph write. Callbacks that existing tracking APIs schedule asynchronously do not
+inherit the thread-local transaction. The same applies when existing Observation
+delivery hops to MainActor: that handler reads the coherent committed snapshot
+current when it runs rather than transaction-local staged storage.
+
+Rollback cannot undo side effects outside ordinary `Stored` assignment. For
+example, mutating a property on a class retrieved from `Stored<SomeClass>`
+changes that object immediately and is not reversible by the transaction.
+`Stored.unsafeModify(_:)` also changes committed storage directly and bypasses
+transaction staging and notifications.
+
+Do not mutate `GraphUserDefault`, `EntityStore`, databases, or other externally
+committed sources inside `withGraphTransaction`. Their persistence, locking,
+notification, and rollback semantics are outside this Stored-level API.
+Likewise, accessing an externally locked store from the body while another thread
+mutates it is outside the transaction's lock-order guarantees.
+
+Keep committed `Computed` descriptors free of graph mutations. Descriptors own
+their node's evaluation lock, so beginning a transaction, or blocking on one
+through a `Stored` assignment, conflicts with writer lock ordering. StateGraph
+fails fast in those cases instead of deadlocking; initiate mutations from the
+descriptor's caller.
+
+An ordinary immediate assignment evaluates its `Stored` comparator and
+synchronously delivered Observation `willSet` handlers while a node lock is held.
+Do not begin a transaction there or from `Stored.unsafeModify(_:)`; start it from
+`onDidSet(_:)` or another post-mutation callback instead. Transaction commit
+evaluates comparators and delivers its Observation callbacks outside node locks,
+but comparators should remain free of mutation side effects.
+
 ## Computed Value Nodes
 
 Computed nodes derive their values from other nodes and automatically update when their dependencies change. They represent the "derived state" in your application.
