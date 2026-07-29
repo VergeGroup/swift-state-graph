@@ -8,6 +8,10 @@ on:
 jobs:
   package-test:
     runs-on: macos-26
+    permissions:
+      actions: read
+      checks: write
+      contents: read
 
     steps:
       - uses: maxim-lobanov/setup-xcode@v1.1
@@ -15,7 +19,14 @@ jobs:
           xcode-version: "26.4"
       - uses: actions/checkout@v4
       - name: Run Test
-        run: swift test
+        run: swift test --parallel --xunit-output TestResults.xml
+      - name: Publish Test Report
+        uses: dorny/test-reporter@a43b3a5f7366b97d083190328d2c652e1a8b6aa2 # v3.0.0
+        if: ${{ !cancelled() }}
+        with:
+          name: Swift Tests
+          path: "TestResults*.xml"
+          reporter: swift-xunit
 
   build-development:
     runs-on: macos-26
