@@ -90,7 +90,7 @@ public func withGraphTransaction<Result, Failure: Error>(
 
   let context = GraphTransactionContext()
   let coordinator = GraphTransactionCoordinator.shared
-  let transactionAccess = coordinator.beginTransaction(context)
+  coordinator.beginTransaction(context)
 
   var transactionFinished = false
   let previousContext = ThreadLocal.graphTransaction.replaceValue(context)
@@ -99,7 +99,7 @@ public func withGraphTransaction<Result, Failure: Error>(
     if !transactionFinished {
       ThreadLocal.graphTransaction.replaceValue(previousContext)
       context.prepareRollback()
-      coordinator.finishTransaction(transactionAccess)
+      coordinator.finishTransaction(context)
       context.finishRollback()
     }
   }
@@ -109,10 +109,9 @@ public func withGraphTransaction<Result, Failure: Error>(
   ThreadLocal.graphTransaction.replaceValue(previousContext)
   commitTransactionBatches(
     beginningWith: context,
-    transactionAccess: transactionAccess,
     coordinator: coordinator
   )
-  coordinator.finishTransaction(transactionAccess)
+  coordinator.finishTransaction(context)
   transactionFinished = true
 
   return result
@@ -125,11 +124,10 @@ public func withGraphTransaction<Result, Failure: Error>(
 /// every callback in the current batch has completed. The next batch is drained
 /// before the outer `withGraphTransaction` call returns.
 private func commitTransactionBatches(
-  beginningWith firstBatch: GraphTransactionContext,
-  transactionAccess: GraphTransactionAccess,
+  beginningWith transaction: GraphTransactionContext,
   coordinator: GraphTransactionCoordinator
 ) {
-  var batch = firstBatch
+  var batch = transaction
 
   while batch.freezeParticipantsForCommit() {
     let nextBatch = GraphTransactionContext()
@@ -137,19 +135,19 @@ private func commitTransactionBatches(
       batch.prepareCommit()
       batch.evaluateCommitComparators()
 
-      coordinator.beginPublishing(transactionAccess)
       let observationDelivery = GraphTransactionObservationDelivery()
-      batch.prepareObservationWillSet(observationDelivery)
-      coordinator.finishPublishing(transactionAccess)
+      coordinator.withPublicationBarrier(transaction) {
+        batch.prepareObservationWillSet(observationDelivery)
+      }
 
       nextBatch.beginCallbackDelivery()
       observationDelivery.deliver()
 
-      coordinator.beginPublishing(transactionAccess)
-      batch.publishCommit()
       let callbackDelivery = GraphTransactionCallbackDelivery()
-      batch.prepareCommitInvalidations(callbackDelivery)
-      coordinator.finishPublishing(transactionAccess)
+      coordinator.withPublicationBarrier(transaction) {
+        batch.publishCommit()
+        batch.prepareCommitInvalidations(callbackDelivery)
+      }
 
       callbackDelivery.deliver()
       batch.deliverCommitCallbacks()
@@ -414,17 +412,17 @@ final class GraphImmediateWriterScope: @unchecked Sendable {
   }
 }
 
-/// The coordinator ownership held for one outer graph transaction.
-struct GraphTransactionAccess {
-  let transaction: GraphTransactionContext
-}
-
-/// Coordinates transaction writers with immediate `Stored` writes and commit reads.
+/// Coordinates cross-node writer exclusion and atomic graph publication.
 ///
-/// No graph-node lock is held while this coordinator waits. The lock order is always
-/// coordinator access first, then a node lock; callbacks run after both have been
-/// released. A transaction owns the writer slot only logically, so normal readers
-/// continue during its body and are paused only for the publication phase.
+/// A node lock protects one `Stored` value, but it cannot prevent readers from
+/// observing a transaction after one participant publishes and before another does.
+/// This coordinator therefore suspends other writers for the outer transaction and
+/// installs a reader barrier only around the short publication phases. Committed
+/// reads remain available while the transaction body only stages values.
+///
+/// No graph-node lock is held while this coordinator waits. Coordinator admission
+/// always precedes node locking, and user callbacks run with neither the condition
+/// nor a node lock held.
 final class GraphTransactionCoordinator: @unchecked Sendable {
 
   static let shared = GraphTransactionCoordinator()
@@ -442,7 +440,7 @@ final class GraphTransactionCoordinator: @unchecked Sendable {
 
   func beginTransaction(
     _ transaction: GraphTransactionContext
-  ) -> GraphTransactionAccess {
+  ) {
     let immediateWriterScope = ThreadLocal.graphImmediateWriterScope.value
     precondition(
       immediateWriterScope?.canBeginTransaction != false,
@@ -466,15 +464,23 @@ final class GraphTransactionCoordinator: @unchecked Sendable {
     waitingTransactionCount -= 1
     activeTransaction = transaction
     condition.unlock()
-
-    return GraphTransactionAccess(transaction: transaction)
   }
 
-  func beginPublishing(_ access: GraphTransactionAccess) {
+  /// Runs one value or invalidation publication phase after draining current readers.
+  func withPublicationBarrier(
+    _ transaction: GraphTransactionContext,
+    _ body: () -> Void
+  ) {
+    beginPublishing(transaction)
+    defer { finishPublishing(transaction) }
+    body()
+  }
+
+  private func beginPublishing(_ transaction: GraphTransactionContext) {
     condition.lock()
     defer { condition.unlock() }
 
-    precondition(activeTransaction === access.transaction)
+    precondition(activeTransaction === transaction)
     precondition(!isPublishing)
     isPublishing = true
 
@@ -495,11 +501,11 @@ final class GraphTransactionCoordinator: @unchecked Sendable {
 #endif
   }
 
-  func finishTransaction(_ access: GraphTransactionAccess) {
+  func finishTransaction(_ transaction: GraphTransactionContext) {
     condition.lock()
     defer { condition.unlock() }
 
-    precondition(activeTransaction === access.transaction)
+    precondition(activeTransaction === transaction)
     precondition(!isPublishing)
 
     isPublishing = false
@@ -509,11 +515,11 @@ final class GraphTransactionCoordinator: @unchecked Sendable {
 
   /// Releases the short publication barrier after all source values and graph
   /// invalidations are coherent, while the transaction continues blocking writers.
-  func finishPublishing(_ access: GraphTransactionAccess) {
+  private func finishPublishing(_ transaction: GraphTransactionContext) {
     condition.lock()
     defer { condition.unlock() }
 
-    precondition(activeTransaction === access.transaction)
+    precondition(activeTransaction === transaction)
     isPublishing = false
     condition.broadcast()
   }

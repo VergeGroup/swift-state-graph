@@ -173,8 +173,8 @@ public final class Computed<Value: SendableMetatype>: Node, Observable, CustomDe
     private let observationRegistrar = ObservationRegistrar()
   #endif
 
-  /// Graph work captured when this node first becomes potentially dirty.
-  private struct InvalidationWork {
+  /// Single-use graph work captured when this node first becomes potentially dirty.
+  private struct InvalidationWork: ~Copyable {
     let outgoingEdges: ContiguousArray<Edge>
     let trackingRegistrations: Set<TrackingRegistration>
   }
