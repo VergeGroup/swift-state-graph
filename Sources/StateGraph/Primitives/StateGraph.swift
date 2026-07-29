@@ -521,7 +521,7 @@ extension Computed: GraphTransactionInvalidatableNode {
   /// Delivers Observation's existing pre-mutation notification without making the
   /// committed cache dirty before publication.
   func prepareGraphTransactionObservationWillSet(
-    _ observationDelivery: GraphTransactionObservationDelivery
+    _ observationWillSetDelivery: GraphTransactionObservationWillSetDelivery
   ) {
     lock.lock()
     guard !_potentiallyDirty else {
@@ -533,7 +533,7 @@ extension Computed: GraphTransactionInvalidatableNode {
 
 #if canImport(Observation)
     if #available(macOS 14.0, iOS 17.0, watchOS 10.0, tvOS 17.0, *) {
-      observationDelivery.append { [observationRegistrar] in
+      observationWillSetDelivery.appendWillSetOperation { [observationRegistrar] in
         withMainActor {
           observationRegistrar.willSet(
             NodeObservationRoot<Computed<Value>>(),
@@ -545,7 +545,7 @@ extension Computed: GraphTransactionInvalidatableNode {
 #endif
 
     for edge in outgoingEdges {
-      observationDelivery.prepareWillSet(for: edge)
+      observationWillSetDelivery.prepareWillSet(for: edge)
     }
   }
 

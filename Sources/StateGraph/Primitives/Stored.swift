@@ -303,7 +303,7 @@ public final class Stored<Value: SendableMetatype>: Node, Observable, CustomDebu
   }
 
   func prepareTransactionObservationWillSet(
-    _ observationDelivery: GraphTransactionObservationDelivery
+    _ observationWillSetDelivery: GraphTransactionObservationWillSetDelivery
   ) {
     lock.lock()
     guard transactionCommitWork?.shouldNotify == true else {
@@ -315,7 +315,7 @@ public final class Stored<Value: SendableMetatype>: Node, Observable, CustomDebu
 
 #if canImport(Observation)
     if #available(macOS 14.0, iOS 17.0, watchOS 10.0, tvOS 17.0, *) {
-      observationDelivery.append { [observationRegistrar] in
+      observationWillSetDelivery.appendWillSetOperation { [observationRegistrar] in
         withMainActor {
           observationRegistrar.willSet(
             NodeObservationRoot<Stored<Value>>(),
@@ -327,7 +327,7 @@ public final class Stored<Value: SendableMetatype>: Node, Observable, CustomDebu
 #endif
 
     for edge in outgoingEdges {
-      observationDelivery.prepareWillSet(for: edge)
+      observationWillSetDelivery.prepareWillSet(for: edge)
     }
   }
 

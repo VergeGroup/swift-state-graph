@@ -158,9 +158,9 @@ private func commitTransactionBatches(
       // Phase 1 captures Observation's pre-mutation traversal without publishing a
       // Stored value or invoking user callbacks. The short barrier prevents a
       // committed reader from crossing the snapshot boundary while work is collected.
-      let observationDelivery = GraphTransactionObservationDelivery()
+      let observationWillSetDelivery = GraphTransactionObservationWillSetDelivery()
       coordinator.withPublicationBarrier(transaction) {
-        batch.prepareObservationWillSet(observationDelivery)
+        batch.prepareObservationWillSet(observationWillSetDelivery)
       }
 
       // Observation delivery is outside the condition mutex, reader barrier, and
@@ -169,7 +169,7 @@ private func commitTransactionBatches(
       // callbacks. The committing thread sees pending values while outside readers
       // still see old committed values.
       nextBatch.beginCallbackDelivery()
-      observationDelivery.deliver()
+      observationWillSetDelivery.deliverWillSet()
 
       // Phase 2 installs all values and propagates dirty state before committed
       // readers resume, preventing a reader from observing a partial batch. It only
@@ -207,7 +207,7 @@ protocol GraphTransactionParticipant: AnyObject {
 
   /// Captures Observation's pre-mutation notifications without invoking callbacks.
   func prepareTransactionObservationWillSet(
-    _ observationDelivery: GraphTransactionObservationDelivery
+    _ observationWillSetDelivery: GraphTransactionObservationWillSetDelivery
   )
 
   /// Replaces the committed value without running callbacks.
@@ -271,10 +271,10 @@ final class GraphTransactionContext {
   }
 
   func prepareObservationWillSet(
-    _ observationDelivery: GraphTransactionObservationDelivery
+    _ observationWillSetDelivery: GraphTransactionObservationWillSetDelivery
   ) {
     for participant in frozenParticipants {
-      participant.prepareTransactionObservationWillSet(observationDelivery)
+      participant.prepareTransactionObservationWillSet(observationWillSetDelivery)
     }
   }
 
@@ -344,7 +344,7 @@ final class GraphTransactionContext {
 /// rather than exposing a clean cache after its sources have committed.
 protocol GraphTransactionInvalidatableNode: AnyObject {
   func prepareGraphTransactionObservationWillSet(
-    _ observationDelivery: GraphTransactionObservationDelivery
+    _ observationWillSetDelivery: GraphTransactionObservationWillSetDelivery
   )
 
   func prepareGraphTransactionInvalidation(
@@ -352,23 +352,49 @@ protocol GraphTransactionInvalidatableNode: AnyObject {
   )
 }
 
-/// Freezes Observation's `willSet` work from the committed dependency graph.
+/// Collects Observation `willSet` work for one transaction commit batch.
 ///
-/// The transaction briefly drains committed readers while this object traverses the
-/// graph, then releases that barrier before invoking the captured callbacks. A
-/// synchronously delivered callback can therefore read the complete staged snapshot
-/// without blocking another thread from reading the old committed graph. Nodes
-/// registered afterwards follow the same concurrent-access boundary as a
-/// registration racing an ordinary setter after its `willSet` call.
-final class GraphTransactionObservationDelivery {
+/// Observation requires a pre-mutation notification, but running arbitrary user
+/// callbacks while the publication barrier is active could block graph progress or
+/// deadlock with work performed by those callbacks. This object separates those
+/// responsibilities:
+///
+/// 1. While committed readers are briefly drained, it traverses the committed
+///    dependency graph and queues one `willSet` notification operation for each
+///    reachable node in that snapshot.
+/// 2. After the barrier and all node locks have been released, it invokes the queued
+///    operations. Transaction-local reads on the committing thread then see the
+///    complete pending snapshot, while outside readers still see the old committed
+///    snapshot.
+///
+/// The collector does not carry transaction values, publish values, or mark nodes
+/// dirty. ``GraphTransactionCallbackDelivery`` separately owns the callbacks that
+/// run after value publication and graph invalidation.
+final class GraphTransactionObservationWillSetDelivery {
 
-  private var deliveredNodes: Set<ObjectIdentifier> = []
-  private var callbacks: [() -> Void] = []
+  /// Nodes already visited during the pre-publication dependency traversal.
+  ///
+  /// Multiple changed sources can reach the same computed node. Identity
+  /// de-duplication gives that node one `willSet` preparation for this commit batch.
+  private var visitedNodes: Set<ObjectIdentifier> = []
 
-  func append(_ callback: @escaping () -> Void) {
-    callbacks.append(callback)
+  /// Deferred registrar operations, kept inert until the publication barrier ends.
+  ///
+  /// These are not a snapshot of Observation's registered callbacks. The registrar
+  /// determines its delivery when each operation invokes `willSet`.
+  private var willSetOperations: [() -> Void] = []
+
+  /// Queues one registrar `willSet` operation without invoking user code.
+  func appendWillSetOperation(_ operation: @escaping () -> Void) {
+    willSetOperations.append(operation)
   }
 
+  /// Continues pre-publication traversal through an outgoing dependency edge.
+  ///
+  /// A diamond-shaped graph can encounter the same target more than once, so each
+  /// target is prepared only on its first visit. Preparation may append its own
+  /// Observation notification operation and recursively visit its outgoing edges;
+  /// it must not dirty the target or invoke user code.
   func prepareWillSet(for edge: Edge) {
     guard let target = edge.to else { return }
     guard let node = target as? any GraphTransactionInvalidatableNode else {
@@ -378,15 +404,16 @@ final class GraphTransactionObservationDelivery {
     }
 
     let identifier = ObjectIdentifier(node)
-    guard deliveredNodes.insert(identifier).inserted else { return }
+    guard visitedNodes.insert(identifier).inserted else { return }
     node.prepareGraphTransactionObservationWillSet(self)
   }
 
-  func deliver() {
-    for callback in callbacks {
-      callback()
+  /// Invokes the queued `willSet` operations after leaving the publication barrier.
+  func deliverWillSet() {
+    for operation in willSetOperations {
+      operation()
     }
-    callbacks.removeAll()
+    willSetOperations.removeAll()
   }
 }
 
