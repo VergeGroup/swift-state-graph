@@ -593,6 +593,7 @@ struct ContinuousTrackingTests {
   func observation_api() async throws {
 
     let model = Model()
+    let observedChange = TestSignal()
 
     await confirmation(expectedCount: 1) { c in
 
@@ -602,12 +603,13 @@ struct ContinuousTrackingTests {
       } onChange: {
         print(model.count1, model.count2)
         c.confirm()
+        observedChange.signal()
       }
 
       model.count1 += 1
       model.count2 += 1
 
-      try? await Task.sleep(for: .milliseconds(100))
+      #expect(await observedChange.wait(for: .seconds(5)))
 
     }
   }
