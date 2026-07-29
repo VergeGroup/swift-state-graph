@@ -10,12 +10,19 @@ import Foundation
 /// publication. A synchronously delivered handler on the committing thread can
 /// read the complete staged snapshot while other threads still read the old
 /// committed graph. The staged values are then committed together before
-/// graph-tracking and `onDidSet(_:)` callbacks are delivered.
+/// graph-tracking invalidation and Observation's `didSet` delivery.
 ///
-/// A callback mutation joins a following commit batch owned by the same outer
-/// transaction. Its staged value is immediately readable by later callbacks on the
-/// committing thread, and the batch is published before this function returns.
-/// Every batch uses each `Stored` node's ordinary comparator and callback pipeline.
+/// ``Stored/onDidSet(_:)`` and `@GraphStored` property observers retain ordinary
+/// assignment semantics: they run synchronously for every staged assignment.
+/// `Stored` assignments made by those observers join the same transaction and are
+/// discarded if the outer body throws. The observers themselves are not deferred,
+/// so rollback cannot undo their non-`Stored` side effects.
+///
+/// A mutation made by a synchronously delivered Observation handler during commit
+/// joins a following batch owned by the same outer transaction. Its staged value is
+/// immediately readable by later synchronous handlers on the committing thread, and
+/// the batch is published before this function returns. Every batch uses each
+/// `Stored` node's ordinary comparator and graph notification pipeline.
 ///
 /// Nested calls join the active transaction. They do not create a savepoint or an
 /// independent commit or rollback boundary: if an inner error is caught by `body`,
@@ -29,7 +36,7 @@ import Foundation
 /// short commit phase, reads wait so they cannot observe a partially committed set
 /// of nodes.
 ///
-/// `Computed` values read by the transaction or its synchronous callbacks are
+/// `Computed` values read by the transaction or its synchronous observers are
 /// evaluated from staged values without updating the committed cache or dependency
 /// graph. The next ordinary read continues to use the committed graph.
 ///
@@ -42,10 +49,10 @@ import Foundation
 /// - Important: ``Stored/unsafeModify(_:)`` deliberately bypasses assignment,
 ///   invalidation, and transaction staging. A mutation made through it is not
 ///   rolled back.
-/// - Important: Synchronous callbacks run before the outer call returns and while
+/// - Important: Synchronous observers run before the outer call returns and while
 ///   writes from other threads remain suspended. Reentrant `Stored` assignments are
-///   supported, but a comparator or callback must not synchronously wait for another
-///   thread to complete a graph write. Callbacks that existing APIs schedule
+///   supported, but a comparator or observer must not synchronously wait for another
+///   thread to complete a graph write. Handlers that existing APIs schedule
 ///   asynchronously do not inherit the thread-local transaction.
 ///   This includes Observation delivery that uses StateGraph's existing MainActor
 ///   hop: after a hop, the handler reads the coherent committed snapshot current
@@ -67,8 +74,8 @@ import Foundation
 ///   - column: The source column that starts the transaction.
 ///   - body: The synchronous work whose `Stored` assignments are staged.
 /// - Returns: The value returned by `body`. The outermost call returns after every
-///   staged callback batch commits. A nested call returns to the active outer body
-///   without committing.
+///   staged Observation-handler batch commits. A nested call returns to the active
+///   outer body without committing.
 /// - Throws: The error thrown by `body`. An error escaping the outermost call
 ///   discards every staged assignment before it is rethrown.
 @discardableResult
@@ -112,7 +119,7 @@ public func withGraphTransaction<Result, Failure: Error>(
 
   let result = try body()
 
-  // The body has finished staging. Callback delivery receives its own fresh
+  // The body has finished staging. Synchronous Observation delivery receives fresh
   // thread-local contexts inside the iterative commit trampoline below.
   ThreadLocal.graphTransaction.replaceValue(previousContext)
   commitTransactionBatches(
@@ -120,25 +127,25 @@ public func withGraphTransaction<Result, Failure: Error>(
     coordinator: coordinator
   )
 
-  // Callback-generated batches are now empty, so external writers may resume.
+  // Observation-generated batches are now empty, so external writers may resume.
   coordinator.finishTransaction(context)
   transactionFinished = true
 
   return result
 }
 
-/// Commits the body batch and any mutations synchronously staged by its callbacks.
+/// Commits the body batch and mutations staged by synchronous Observation delivery.
 ///
-/// Callback delivery is one hook boundary: a callback mutation is immediately
-/// readable on the committing thread, but its graph publication is deferred until
-/// every callback in the current batch has completed. The next batch is drained
-/// before the outer `withGraphTransaction` call returns.
+/// An Observation-handler mutation is immediately readable on the committing thread,
+/// but its graph publication is deferred until every synchronous handler in the
+/// current batch has completed. The next batch is drained before the outer
+/// `withGraphTransaction` call returns.
 ///
-/// The loop acts as a synchronous trampoline. Callbacks still run on the current
-/// stack, but their mutations never recursively enter the commit pipeline. They
-/// stage into a fresh context that the next loop iteration drains after the current
-/// callback wave returns. This prevents recursive stack growth; it does not make a
-/// callback that continuously stages new mutations terminate.
+/// The loop acts as a synchronous trampoline. Observation handlers still run on the
+/// current stack, but their mutations never recursively enter the commit pipeline.
+/// They stage into a fresh context that the next loop iteration drains after the
+/// current delivery wave returns. This prevents recursive stack growth; it does not
+/// make a handler that continuously stages new mutations terminate.
 private func commitTransactionBatches(
   beginningWith transaction: GraphTransactionContext,
   coordinator: GraphTransactionCoordinator
@@ -146,8 +153,8 @@ private func commitTransactionBatches(
   var batch = transaction
 
   while batch.freezeParticipantsForCommit() {
-    // Mutations made by this batch's callbacks collect here instead of recursively
-    // reentering commit. An empty context makes the next loop condition terminate.
+    // Mutations made by synchronous Observation handlers collect here instead of
+    // recursively reentering commit. An empty context terminates the next iteration.
     let nextBatch = GraphTransactionContext()
     ThreadLocal.graphTransaction.withValue(nextBatch) {
       // Move every participant's staged value into stable commit work before any
@@ -180,15 +187,15 @@ private func commitTransactionBatches(
         batch.prepareCommitInvalidations(callbackDelivery)
       }
 
-      // Graph-tracking, onDidSet, and Observation didSet callbacks run after
-      // publication releases its reader barrier. Any mutations they make also join
-      // `nextBatch`.
+      // Graph-tracking invalidation is handed off after publication; its user handler
+      // is task-enqueued and does not inherit this thread-local transaction.
+      // Observation `didSet` may still run synchronously and join `nextBatch`.
       callbackDelivery.deliver()
-      batch.deliverCommitCallbacks()
+      batch.deliverObservationDidSet()
     }
 
-    // Continue with callback-generated work iteratively instead of committing from
-    // inside callback delivery.
+    // Continue with Observation-generated work instead of recursively committing
+    // from inside handler delivery.
     batch = nextBatch
   }
 }
@@ -219,8 +226,8 @@ protocol GraphTransactionParticipant: AnyObject {
     _ callbackDelivery: GraphTransactionCallbackDelivery
   )
 
-  /// Delivers `Stored` callbacks after graph invalidation has completed.
-  func deliverTransactionCallbacks()
+  /// Delivers Observation's post-publication notification.
+  func deliverTransactionObservationDidSet()
 
   /// Detaches the staged value while the transaction still excludes other writers.
   func prepareTransactionRollback(_ transaction: GraphTransactionContext)
@@ -292,11 +299,11 @@ final class GraphTransactionContext {
     }
   }
 
-  func deliverCommitCallbacks() {
+  func deliverObservationDidSet() {
     defer { frozenParticipants.removeAll() }
 
     for participant in frozenParticipants {
-      participant.deliverTransactionCallbacks()
+      participant.deliverTransactionObservationDidSet()
     }
   }
 
@@ -339,7 +346,7 @@ final class GraphTransactionContext {
 ///
 /// The pre-publication traversal preserves Observation's `willSet` boundary. The
 /// publication traversal then makes every cache dirty before releasing the read
-/// barrier and queues graph-tracking callbacks for delivery afterwards. Every
+/// barrier and queues graph-tracking invalidation handoffs for afterwards. Every
 /// concrete dependency target must provide this split; publication fails closed
 /// rather than exposing a clean cache after its sources have committed.
 protocol GraphTransactionInvalidatableNode: AnyObject {
@@ -368,8 +375,8 @@ protocol GraphTransactionInvalidatableNode: AnyObject {
 ///    snapshot.
 ///
 /// The collector does not carry transaction values, publish values, or mark nodes
-/// dirty. ``GraphTransactionCallbackDelivery`` separately owns the callbacks that
-/// run after value publication and graph invalidation.
+/// dirty. ``GraphTransactionCallbackDelivery`` separately owns the graph-tracking
+/// invalidation work handed off after value publication.
 final class GraphTransactionObservationWillSetDelivery {
 
   /// Nodes already visited during the pre-publication dependency traversal.
@@ -417,12 +424,13 @@ final class GraphTransactionObservationWillSetDelivery {
   }
 }
 
-/// User callbacks captured while a transaction marks its dependency graph dirty.
+/// Graph-tracking invalidation work captured while a transaction marks nodes dirty.
 ///
 /// The publication barrier protects only value installation and dirty-state
-/// propagation. Delivering graph-tracking and custom-node callbacks after releasing
-/// that barrier avoids making a callback that waits for another thread's graph read
-/// deadlock the commit.
+/// propagation. Running each `TrackingRegistration` handoff after releasing that
+/// barrier avoids executing its synchronization and task scheduling while committed
+/// reads are blocked. The registration enqueues its user handler separately; that
+/// handler does not inherit the transaction's thread-local context.
 final class GraphTransactionCallbackDelivery {
 
   private var callbacks: [() -> Void] = []
@@ -544,7 +552,13 @@ final class GraphTransactionCoordinator: @unchecked Sendable {
   /// Outermost committed read scopes that may currently hold node or Computed locks.
   private var activeReaderCount = 0
 
-  /// Whether new committed reads must wait for a coherent publication boundary.
+  /// Whether a transaction has closed admission to new committed reads.
+  ///
+  /// `Publishing` here means running a short commit phase that must not overlap a
+  /// committed read: either traversing the pre-mutation graph to collect Observation
+  /// `willSet` operations, or installing every staged `Stored` value and propagating
+  /// invalidations as one coherent committed graph. Existing readers drain before the
+  /// phase body starts; new readers wait until this flag becomes `false`.
   private var isPublishing = false
 
   // MARK: - Outer Transaction
@@ -694,6 +708,25 @@ final class GraphTransactionCoordinator: @unchecked Sendable {
     )
   }
 
+  /// Admits one ordinary `Stored` setter into the immediate-writer group.
+  ///
+  /// Admission does not acquire a node lock or serialize ordinary setters with one
+  /// another. It reserves one counted writer slot so an outer transaction cannot
+  /// begin until this setter finishes. Different admitted setters may continue
+  /// concurrently and rely on each `Stored` node's lock for node-local exclusion.
+  ///
+  /// If a transaction is active or already waiting, this method sleeps on
+  /// `condition` until the transactions ahead of this setter have completed. Giving
+  /// queued transactions priority prevents a continuous stream of ordinary setters
+  /// from starving them.
+  ///
+  /// On return, `immediateWriterScope.isCounted` is `true`,
+  /// `activeImmediateWriterCount` includes this scope, and the condition mutex has
+  /// been released. The caller may then enter the ordinary node mutation pipeline.
+  ///
+  /// - Precondition: `immediateWriterScope` is not already counted. A mutation
+  ///   initiated from a committed graph read must also be able to enter without
+  ///   waiting; otherwise this method fails before creating a lock-order cycle.
   private func admitImmediateWriter(
     _ immediateWriterScope: GraphImmediateWriterScope
   ) {
@@ -742,6 +775,11 @@ final class GraphTransactionCoordinator: @unchecked Sendable {
     condition.unlock()
   }
 
+  /// Releases an ordinary setter's counted writer slot.
+  ///
+  /// The scope may already have relinquished its slot when a post-mutation callback
+  /// starts a transaction. Otherwise, decrementing the count wakes any outer
+  /// transaction waiting for the last admitted setter to finish.
   private func finishImmediateWriter(
     _ immediateWriterScope: GraphImmediateWriterScope
   ) {
@@ -808,7 +846,7 @@ final class GraphTransactionCoordinator: @unchecked Sendable {
   ///
   /// This deterministic test seam verifies waiting semantics without relying on a
   /// scheduler delay as evidence that an outside setter has attempted its write.
-  func waitForImmediateWriterToBlock(until deadline: Date) -> Bool {
+  func __testing__waitForImmediateWriterToBlock(until deadline: Date) -> Bool {
     condition.lock()
     defer { condition.unlock() }
 
@@ -819,7 +857,7 @@ final class GraphTransactionCoordinator: @unchecked Sendable {
   }
 
   /// Waits until another outer transaction is queued behind the active one.
-  func waitForTransactionToBlock(until deadline: Date) -> Bool {
+  func __testing__waitForTransactionToBlock(until deadline: Date) -> Bool {
     condition.lock()
     defer { condition.unlock() }
 
@@ -830,7 +868,7 @@ final class GraphTransactionCoordinator: @unchecked Sendable {
   }
 
   /// Waits until a publication barrier is blocked by an active committed reader.
-  func waitForPublisherToBlock(until deadline: Date) -> Bool {
+  func __testing__waitForPublisherToBlock(until deadline: Date) -> Bool {
     condition.lock()
     defer { condition.unlock() }
 

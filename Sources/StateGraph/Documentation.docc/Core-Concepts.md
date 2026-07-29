@@ -106,12 +106,20 @@ Observation nodes after current readers finish, then invokes the existing `willS
 delivery path before publication. A synchronously delivered handler on the
 committing thread reads the complete staged snapshot while other threads still
 read the old committed graph. All final values are then installed before
-StateGraph tracking and `onDidSet(_:)` callbacks run. Other writers wait until
-that work finishes, and readers briefly wait during publication so a computed
-value cannot observe a partial commit.
+StateGraph tracking invalidation and Observation's `didSet` delivery. Other
+writers wait until that work finishes, and readers briefly wait during
+publication so a computed value cannot observe a partial commit.
 
-Transactions do not coalesce per-node callbacks. Each `Stored` value uses its
-existing comparator and notification pipeline at commit.
+`Stored.onDidSet(_:)` and `@GraphStored` property observers remain assignment
+observers. They run synchronously for every staged assignment, including repeated
+or comparator-equivalent assignments. `willSet` reads the preceding staged
+snapshot; `didSet` and `Stored.onDidSet(_:)` read the newly staged value. Ordinary
+`Stored` assignments made by any of these observers join the same transaction. A
+rollback discards those assignments but cannot undo other side effects already
+performed by the observer.
+
+Each `Stored` value uses its existing comparator and graph notification pipeline
+once at commit, comparing the committed old value with the final staged value.
 
 The API is synchronous and thread-local; it does not cross `await`, task
 creation, or executor hops. Nested calls join the outer transaction rather than
@@ -120,16 +128,17 @@ assignments in place; only an error that escapes the outermost call rolls all
 staged `Stored` assignments back.
 
 Transaction-time `Computed` reads are evaluated from the staged `Stored` values
-without updating the committed cache or dependency edges. Callback mutations
-join a following commit batch: they are immediately readable by later callbacks
-on the committing thread, and every resulting batch is published before the
-outer call returns. Synchronous callbacks run while other threads' graph writes
-remain suspended. They may mutate `Stored` values reentrantly, but neither a
-comparator nor a callback may wait synchronously for another thread to finish a
-graph write. Callbacks that existing tracking APIs schedule asynchronously do not
-inherit the thread-local transaction. The same applies when existing Observation
-delivery hops to MainActor: that handler reads the coherent committed snapshot
-current when it runs rather than transaction-local staged storage.
+without updating the committed cache or dependency edges. A mutation made by a
+synchronously delivered Observation handler during commit joins a following
+commit batch: it is immediately readable by later synchronous handlers on the
+committing thread, and every resulting batch is published before the outer call
+returns. These handlers run while other threads' graph writes remain suspended,
+but neither a comparator nor a handler may wait synchronously for another thread
+to finish a graph write. Handlers that existing tracking APIs schedule
+asynchronously do not inherit the thread-local transaction. The same applies when
+existing Observation delivery hops to MainActor: that handler reads the coherent
+committed snapshot current when it runs rather than transaction-local staged
+storage.
 
 Rollback cannot undo side effects outside ordinary `Stored` assignment. For
 example, mutating a property through reference storage reachable from a

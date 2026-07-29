@@ -40,14 +40,13 @@ public final class Stored<Value: SendableMetatype>: Node, Observable, CustomDebu
   ///
   /// Comparators evaluate this pending `(old, new)` pair while outside readers may
   /// still access the old committed graph. Publication later installs `newValue`
-  /// and fills in the callback work under the short read barrier.
+  /// and captures graph invalidation work under the short read barrier.
   private struct TransactionCommitWork {
     let oldValue: Value
     let newValue: Value
     var shouldNotify = false
     var trackingRegistrations: Set<TrackingRegistration> = []
     var outgoingEdges: ContiguousArray<Edge> = []
-    var didSetHandler: ((Value, Value) -> Void)?
   }
 
   nonisolated(unsafe)
@@ -176,12 +175,32 @@ public final class Stored<Value: SendableMetatype>: Node, Observable, CustomDebu
     return value
   }
 
-  /// Stages an assignment in this node's typed transaction buffer.
+  /// Stages one assignment and then runs its assignment observer.
+  ///
+  /// `onDidSet(_:)` has the same per-assignment semantics inside and outside a
+  /// transaction. The buffer is installed before the handler runs, so handler reads
+  /// observe `newValue` and any `Stored` assignments it makes join the same ambient
+  /// transaction. A later rollback discards all of those staged assignments, but it
+  /// cannot undo non-`Stored` side effects already performed by the handler.
   private func stage(_ newValue: Value, in transaction: GraphTransactionContext) {
     lock.lock()
+
+    let oldValue: Value
+    if transactionBuffer != nil {
+      oldValue = transactionBuffer!.value
+    } else if let transactionCommitWork {
+      // A synchronous Observation callback may assign while the preceding batch is
+      // still being delivered. Its transaction-visible old value is that batch's
+      // pending value, even when publication has not installed it yet.
+      oldValue = transactionCommitWork.newValue
+    } else {
+      oldValue = value
+    }
+
     let needsRegistration = transactionBuffer == nil
     let discardedBuffer = transactionBuffer.take()
     transactionBuffer = .init(newValue)
+    let didSetHandler = self.didSetHandler
     lock.unlock()
 
     if needsRegistration {
@@ -189,6 +208,7 @@ public final class Stored<Value: SendableMetatype>: Node, Observable, CustomDebu
     }
 
     Self.discardTransactionBuffer(discardedBuffer)
+    didSetHandler?(oldValue, newValue)
   }
 
   /// Ends a staged value's lifetime outside the node lock.
@@ -333,14 +353,12 @@ public final class Stored<Value: SendableMetatype>: Node, Observable, CustomDebu
 
   func publishTransactionCommit() {
     lock.lock()
-    guard var transactionCommitWork else {
+    guard let transactionCommitWork else {
       lock.unlock()
       return
     }
 
     value = transactionCommitWork.newValue
-    transactionCommitWork.didSetHandler = didSetHandler
-    self.transactionCommitWork = transactionCommitWork
     lock.unlock()
   }
 
@@ -374,18 +392,13 @@ public final class Stored<Value: SendableMetatype>: Node, Observable, CustomDebu
     }
   }
 
-  func deliverTransactionCallbacks() {
+  func deliverTransactionObservationDidSet() {
     lock.lock()
     guard let transactionCommitWork = self.transactionCommitWork.take() else {
       lock.unlock()
       return
     }
     lock.unlock()
-
-    transactionCommitWork.didSetHandler?(
-      transactionCommitWork.oldValue,
-      transactionCommitWork.newValue
-    )
 
 #if canImport(Observation)
     if transactionCommitWork.shouldNotify,
@@ -573,7 +586,18 @@ public final class Stored<Value: SendableMetatype>: Node, Observable, CustomDebu
     try unsafeModify(body)
   }
 
-  /// Sets a closure to call after an assignment completes.
+  /// Sets the closure invoked after each assignment completes.
+  ///
+  /// The handler runs synchronously after the new value becomes readable and after
+  /// the node lock is released. It runs for every assignment, including assignments
+  /// that the node's comparator considers equivalent.
+  ///
+  /// Inside ``withGraphTransaction(_:_:_:_:)``, the assigned value is staged before
+  /// the handler runs. Reads made by the handler observe that staged value, and any
+  /// ordinary `Stored` assignments made by the handler join the same transaction.
+  /// Those assignments are discarded if the outer transaction rolls back. The
+  /// handler itself is not deferred, so rollback cannot undo its non-`Stored` side
+  /// effects.
   public func onDidSet(_ handler: @escaping (Value, Value) -> Void) {
     lock.lock()
     defer { lock.unlock() }

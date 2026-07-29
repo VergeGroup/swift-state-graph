@@ -172,7 +172,7 @@ struct GraphTransactionTests {
     let writerBlocked = TestSignal()
     let didObserveBlockedWriter = LockedBox(false)
     Thread {
-      let didBlock = GraphTransactionCoordinator.shared.waitForImmediateWriterToBlock(
+      let didBlock = GraphTransactionCoordinator.shared.__testing__waitForImmediateWriterToBlock(
         until: Date().addingTimeInterval(1)
       )
       didObserveBlockedWriter.update { $0 = didBlock }
@@ -190,15 +190,19 @@ struct GraphTransactionTests {
   }
 
   @Test
-  func thrownTransactionRollsBackWithoutNotificationsOrInvalidation() {
+  func thrownTransactionRollsBackAssignmentsWithoutGraphNotifications() {
     let source = Stored(wrappedValue: 0)
-    let computed = Computed { _ in source.wrappedValue * 2 }
+    let derived = Stored(wrappedValue: 0)
+    let computed = Computed { _ in
+      source.wrappedValue * 2 + derived.wrappedValue
+    }
     let didSetCount = LockedBox(0)
     let trackingCallbackCount = LockedBox(0)
     let observationCallbackCount = LockedBox(0)
 
-    source.onDidSet { _, _ in
+    source.onDidSet { _, newValue in
       didSetCount.update { $0 += 1 }
+      derived.wrappedValue += newValue
     }
 
     let registration = TrackingRegistration(
@@ -209,10 +213,12 @@ struct GraphTransactionTests {
     )
     ThreadLocal.registration.withValue(registration) {
       _ = source.wrappedValue
+      _ = derived.wrappedValue
     }
 
     withObservationTracking {
       _ = source.wrappedValue
+      _ = derived.wrappedValue
     } onChange: {
       observationCallbackCount.update { $0 += 1 }
     }
@@ -223,6 +229,10 @@ struct GraphTransactionTests {
     do {
       try withGraphTransaction { () throws(TransactionError) -> Void in
         source.wrappedValue = 1
+
+        #expect(source.wrappedValue == 1)
+        #expect(derived.wrappedValue == 1)
+
         throw .rollback
       }
     } catch {
@@ -232,8 +242,9 @@ struct GraphTransactionTests {
     #expect(didRollBack)
 
     #expect(source.wrappedValue == 0)
+    #expect(derived.wrappedValue == 0)
     #expect(computed.wrappedValue == 0)
-    #expect(didSetCount.value == 0)
+    #expect(didSetCount.value == 1)
     #expect(trackingCallbackCount.value == 0)
     #expect(observationCallbackCount.value == 0)
   }
@@ -335,7 +346,7 @@ struct GraphTransactionTests {
 
   @Test
   @MainActor
-  func commitDefersCallbacksUntilTheTransactionBodyReturns() async {
+  func transactionRunsOnDidSetDuringBodyAndDefersGraphCallbacksUntilCommit() async {
     let source = Stored(wrappedValue: 0)
     let didSetCount = LockedBox(0)
     let trackingCallbackCount = LockedBox(0)
@@ -368,7 +379,7 @@ struct GraphTransactionTests {
     withGraphTransaction {
       source.wrappedValue = 1
 
-      #expect(didSetCount.value == 0)
+      #expect(didSetCount.value == 1)
       #expect(trackingCallbackCount.value == 0)
       #expect(observationCallbackCount.value == 0)
     }
@@ -490,7 +501,7 @@ struct GraphTransactionTests {
   }
 
   @Test
-  func multipleWritesCommitOnlyTheFinalValueWithTheExistingComparator() {
+  func multipleWritesPreserveOnDidSetAssignmentsAndCommitOnlyTheFinalValue() {
     let node = Stored(wrappedValue: 0)
     var didSetValues: [(Int, Int)] = []
 
@@ -505,9 +516,13 @@ struct GraphTransactionTests {
     }
 
     #expect(node.wrappedValue == 2)
-    #expect(didSetValues.count == 1)
+    #expect(didSetValues.count == 3)
     #expect(didSetValues[0].0 == 0)
-    #expect(didSetValues[0].1 == 2)
+    #expect(didSetValues[0].1 == 1)
+    #expect(didSetValues[1].0 == 1)
+    #expect(didSetValues[1].1 == 2)
+    #expect(didSetValues[2].0 == 2)
+    #expect(didSetValues[2].1 == 2)
   }
 
   @Test
@@ -684,7 +699,7 @@ struct GraphTransactionTests {
 #endif
 
   @Test
-  func firstSynchronousCallbackSeesEveryFinalCommittedValue() {
+  func onDidSetReadsTheSequentialTransactionSnapshot() {
     let first = Stored(wrappedValue: 0)
     let second = Stored(wrappedValue: 0)
     var secondValueObservedByFirstCallback: Int?
@@ -695,10 +710,13 @@ struct GraphTransactionTests {
 
     withGraphTransaction {
       first.wrappedValue = 1
+
+      #expect(secondValueObservedByFirstCallback == 0)
+
       second.wrappedValue = 2
     }
 
-    #expect(secondValueObservedByFirstCallback == 2)
+    #expect(secondValueObservedByFirstCallback == 0)
   }
 
   @Test
@@ -728,6 +746,48 @@ struct GraphTransactionTests {
 
     #expect(await callbackDelivered.wait(for: .seconds(5)))
     #expect(observedTotal.value == 3)
+  }
+
+  @Test
+  @MainActor
+  func synchronousObservationMutationsDrainFollowingCommitBatches() {
+    let first = Stored(wrappedValue: 0)
+    let second = Stored(wrappedValue: 0)
+    let third = Stored(wrappedValue: 0)
+    let firstChangeCount = LockedBox(0)
+    let secondChangeCount = LockedBox(0)
+
+    withObservationTracking {
+      _ = first.wrappedValue
+    } onChange: {
+      firstChangeCount.update { $0 += 1 }
+
+      // `first` has not been published yet, but the committing thread reads its
+      // pending value and stages this assignment in the following commit batch.
+      #expect(first.wrappedValue == 1)
+      second.wrappedValue = 2
+    }
+
+    withObservationTracking {
+      _ = second.wrappedValue
+    } onChange: {
+      secondChangeCount.update { $0 += 1 }
+
+      // Committing `second` proves that the batch drain must iterate rather than
+      // handle only one callback-generated batch.
+      #expect(second.wrappedValue == 2)
+      third.wrappedValue = 3
+    }
+
+    withGraphTransaction {
+      first.wrappedValue = 1
+    }
+
+    #expect(first.wrappedValue == 1)
+    #expect(second.wrappedValue == 2)
+    #expect(third.wrappedValue == 3)
+    #expect(firstChangeCount.value == 1)
+    #expect(secondChangeCount.value == 1)
   }
 
   @Test
@@ -880,7 +940,7 @@ struct GraphTransactionTests {
     let publisherWaitFinished = TestSignal()
     let didObserveBlockedPublisher = LockedBox(false)
     Thread {
-      let didBlock = GraphTransactionCoordinator.shared.waitForPublisherToBlock(
+      let didBlock = GraphTransactionCoordinator.shared.__testing__waitForPublisherToBlock(
         until: Date().addingTimeInterval(1)
       )
       didObserveBlockedPublisher.update { $0 = didBlock }
@@ -1021,7 +1081,7 @@ struct GraphTransactionTests {
   }
 
   @Test
-  func callbackMutationUsesOneLatestTransactionSnapshot() {
+  func onDidSetMutationJoinsTheCurrentTransactionInAssignmentOrder() {
     let first = Stored(wrappedValue: 0)
     let second = Stored(wrappedValue: 0)
     let third = Stored(wrappedValue: 0)
@@ -1050,21 +1110,26 @@ struct GraphTransactionTests {
 
     withGraphTransaction {
       first.wrappedValue = 1
+
+      #expect(second.wrappedValue == 2)
+      #expect(third.wrappedValue == 3)
+
       second.wrappedValue = 1
       third.wrappedValue = 1
     }
 
     let transitions = secondTransitions.value
     #expect(secondValueReadByFirstCallback.value == 2)
-    #expect(second.wrappedValue == 2)
+    #expect(second.wrappedValue == 1)
+    #expect(third.wrappedValue == 1)
     #expect(transitions.count == 2)
     #expect(transitions[0].oldValue == 0)
-    #expect(transitions[0].newValue == 1)
+    #expect(transitions[0].newValue == 2)
     #expect(transitions[0].observedSecond == 2)
-    #expect(transitions[0].observedThird == 3)
-    #expect(transitions[1].oldValue == 1)
-    #expect(transitions[1].newValue == 2)
-    #expect(transitions[1].observedSecond == 2)
+    #expect(transitions[0].observedThird == 0)
+    #expect(transitions[1].oldValue == 2)
+    #expect(transitions[1].newValue == 1)
+    #expect(transitions[1].observedSecond == 1)
     #expect(transitions[1].observedThird == 3)
   }
 
@@ -1229,7 +1294,7 @@ struct GraphTransactionTests {
     let transactionWaitFinished = TestSignal()
     let didObserveQueuedTransaction = LockedBox(false)
     Thread {
-      let didBlock = GraphTransactionCoordinator.shared.waitForTransactionToBlock(
+      let didBlock = GraphTransactionCoordinator.shared.__testing__waitForTransactionToBlock(
         until: Date().addingTimeInterval(1)
       )
       didObserveQueuedTransaction.update { $0 = didBlock }
