@@ -34,10 +34,11 @@ import Foundation
 /// graph. The next ordinary read continues to use the committed graph.
 ///
 /// - Important: Rollback applies to `Stored` assignments only. Mutating properties
-///   of a reference obtained from `Stored<SomeClass>` is an external side effect and
-///   cannot be rolled back. Mutating `GraphUserDefault`, `EntityStore`, databases,
-///   or other externally committed sources inside `body` is unsupported; their
-///   persistence, locking, and rollback semantics are outside this API.
+///   through reference storage reachable from a `Stored` value is an external side
+///   effect and cannot be rolled back. This includes a class instance stored directly
+///   or as an entity in a value-semantic collection. Mutating `GraphUserDefault`,
+///   databases, or other externally committed sources inside `body` is unsupported;
+///   their persistence, locking, and rollback semantics are outside this API.
 /// - Important: ``Stored/unsafeModify(_:)`` deliberately bypasses assignment,
 ///   invalidation, and transaction staging. A mutation made through it is not
 ///   rolled back.
@@ -65,7 +66,9 @@ import Foundation
 ///   - line: The source line that starts the transaction.
 ///   - column: The source column that starts the transaction.
 ///   - body: The synchronous work whose `Stored` assignments are staged.
-/// - Returns: The value returned by `body` after its staged assignments commit.
+/// - Returns: The value returned by `body`. The outermost call returns after every
+///   staged callback batch commits. A nested call returns to the active outer body
+///   without committing.
 /// - Throws: The error thrown by `body`. An error escaping the outermost call
 ///   discards every staged assignment before it is rethrown.
 @discardableResult
@@ -302,7 +305,9 @@ final class GraphTransactionContext {
 ///
 /// The pre-publication traversal preserves Observation's `willSet` boundary. The
 /// publication traversal then makes every cache dirty before releasing the read
-/// barrier and queues graph-tracking callbacks for delivery afterwards.
+/// barrier and queues graph-tracking callbacks for delivery afterwards. Every
+/// concrete dependency target must provide this split; publication fails closed
+/// rather than exposing a clean cache after its sources have committed.
 protocol GraphTransactionInvalidatableNode: AnyObject {
   func prepareGraphTransactionObservationWillSet(
     _ observationDelivery: GraphTransactionObservationDelivery
@@ -331,8 +336,11 @@ final class GraphTransactionObservationDelivery {
   }
 
   func prepareWillSet(for edge: Edge) {
-    guard let node = edge.to as? any GraphTransactionInvalidatableNode else {
-      return
+    guard let target = edge.to else { return }
+    guard let node = target as? any GraphTransactionInvalidatableNode else {
+      preconditionFailure(
+        "A graph transaction reached a dependency node without two-phase invalidation support."
+      )
     }
 
     let identifier = ObjectIdentifier(node)
@@ -367,13 +375,9 @@ final class GraphTransactionCallbackDelivery {
 
     guard let node = edge.to else { return }
     guard let node = node as? any GraphTransactionInvalidatableNode else {
-      // StateGraph's built-in dependency targets conform to the transaction-aware
-      // invalidation path. A custom TypeErasedNode keeps its existing callback
-      // behavior as a compatibility fallback.
-      append {
-        node.potentiallyDirty = true
-      }
-      return
+      preconditionFailure(
+        "A graph transaction reached a dependency node without two-phase invalidation support."
+      )
     }
 
     node.prepareGraphTransactionInvalidation(self)

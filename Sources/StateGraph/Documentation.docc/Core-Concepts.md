@@ -87,7 +87,7 @@ store injection, suites, and custom value types.
 ### Graph Transactions
 
 Use `withGraphTransaction` when a synchronous operation must publish several
-`Stored` assignments as one graph update:
+`Stored` assignments without exposing a partial commit:
 
 ```swift
 withGraphTransaction {
@@ -110,6 +110,9 @@ StateGraph tracking and `onDidSet(_:)` callbacks run. Other writers wait until
 that work finishes, and readers briefly wait during publication so a computed
 value cannot observe a partial commit.
 
+Transactions do not coalesce per-node callbacks. Each `Stored` value uses its
+existing comparator and notification pipeline at commit.
+
 The API is synchronous and thread-local; it does not cross `await`, task
 creation, or executor hops. Nested calls join the outer transaction rather than
 creating savepoints. An inner error that the outer body catches leaves its staged
@@ -129,16 +132,17 @@ delivery hops to MainActor: that handler reads the coherent committed snapshot
 current when it runs rather than transaction-local staged storage.
 
 Rollback cannot undo side effects outside ordinary `Stored` assignment. For
-example, mutating a property on a class retrieved from `Stored<SomeClass>`
-changes that object immediately and is not reversible by the transaction.
-`Stored.unsafeModify(_:)` also changes committed storage directly and bypasses
-transaction staging and notifications.
+example, mutating a property through reference storage reachable from a
+`Stored` value changes that object immediately and is not reversible by the
+transaction. This includes a class stored directly or as an entity in a
+value-semantic collection. `Stored.unsafeModify(_:)` also changes committed
+storage directly and bypasses transaction staging and notifications.
 
-Do not mutate `GraphUserDefault`, `EntityStore`, databases, or other externally
-committed sources inside `withGraphTransaction`. Their persistence, locking,
+Do not mutate `GraphUserDefault`, databases, or other externally committed
+sources inside `withGraphTransaction`. Their persistence, locking,
 notification, and rollback semantics are outside this Stored-level API.
-Likewise, accessing an externally locked store from the body while another thread
-mutates it is outside the transaction's lock-order guarantees.
+Likewise, accessing an externally locked store from the body while another
+thread mutates it is outside the transaction's lock-order guarantees.
 
 Keep committed `Computed` descriptors free of graph mutations. Descriptors own
 their node's evaluation lock, so beginning a transaction, or blocking on one

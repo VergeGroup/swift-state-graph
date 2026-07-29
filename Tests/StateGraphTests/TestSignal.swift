@@ -62,3 +62,39 @@ final class TestSignal: @unchecked Sendable {
     waiter?.resume(returning: false)
   }
 }
+
+/// An asynchronous countdown used when a test must observe several completions.
+///
+/// Producers call ``signal()`` from synchronous callbacks or worker threads. The
+/// test task awaits ``wait(for:)``, which suspends rather than blocking a
+/// cooperative-executor thread.
+final class TestCountdown: @unchecked Sendable {
+
+  private let remaining: OSAllocatedUnfairLock<Int>
+  private let completion = TestSignal()
+
+  init(count: Int) {
+    precondition(count > 0)
+    self.remaining = .init(initialState: count)
+  }
+
+  /// Decrements the remaining completion count.
+  ///
+  /// Calls after the countdown reaches zero have no effect.
+  func signal() {
+    let didFinish = remaining.withLock { remaining in
+      guard remaining > 0 else { return false }
+      remaining -= 1
+      return remaining == 0
+    }
+
+    if didFinish {
+      completion.signal()
+    }
+  }
+
+  /// Suspends until every producer signals or the timeout expires.
+  func wait(for timeout: Duration) async -> Bool {
+    await completion.wait(for: timeout)
+  }
+}

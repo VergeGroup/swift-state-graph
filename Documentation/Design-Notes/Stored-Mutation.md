@@ -88,9 +88,12 @@ all of the following:
 
 Keep mutable application state, including value-semantic `EntityStore`
 instances, in `Stored` or `@GraphStored`. Prefer an operation that performs a
-whole batch in one method call when possible. Applications that permit
-concurrent mutation of the same property must currently serialize the complete
-read-modify-write operation at the owning actor or queue.
+whole batch in one method call when possible. When multiple threads can mutate
+the same property, wrap the complete synchronous read-modify-write operation in
+`withGraphTransaction`, or serialize it at the owning actor or queue. A graph
+transaction prevents competing writers from losing updates, but it still uses
+the current getter/writeback materialization and therefore does not solve the
+copy optimization described above.
 
 This issue concerns in-memory `Stored` mutation. It does not require
 `EntityStore` to have reference semantics, and it is not a database transaction

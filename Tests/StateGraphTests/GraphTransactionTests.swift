@@ -34,6 +34,37 @@ struct GraphTransactionTests {
     }
   }
 
+  /// A one-shot gate for deliberately pausing synchronous graph work on an OS thread.
+  ///
+  /// Use this only when a synchronous transaction body, comparator, or callback must
+  /// remain active while another thread reaches a deterministic state. Async test
+  /// control flow must use `TestSignal` or `TestCountdown` so it suspends instead of
+  /// blocking a cooperative-executor thread.
+  private final class TestThreadGate: @unchecked Sendable {
+    private let condition = NSCondition()
+    private var isOpen = false
+
+    /// Releases every current or future waiter.
+    func open() {
+      condition.lock()
+      isOpen = true
+      condition.broadcast()
+      condition.unlock()
+    }
+
+    /// Blocks the current OS thread until the gate opens or the deadline expires.
+    @discardableResult
+    func wait(until deadline: Date) -> Bool {
+      condition.lock()
+      defer { condition.unlock() }
+
+      while !isOpen {
+        guard condition.wait(until: deadline) else { return isOpen }
+      }
+      return true
+    }
+  }
+
   /// Runs a supplied action when a staged reference value is destroyed.
   private final class DeinitAction {
     private let action: () -> Void
@@ -83,70 +114,78 @@ struct GraphTransactionTests {
   }
 
   @Test
-  func outsideReaderSeesCommittedValueWhileTransactionBodyIsPaused() {
+  func outsideReaderSeesCommittedValueWhileTransactionBodyIsPaused() async {
     let node = Stored(wrappedValue: 0)
-    let transactionStarted = DispatchSemaphore(value: 0)
-    let resumeTransaction = DispatchSemaphore(value: 0)
-    let transactionFinished = DispatchSemaphore(value: 0)
+    let transactionStarted = TestSignal()
+    let resumeTransaction = TestThreadGate()
+    let transactionFinished = TestSignal()
 
     let thread = Thread {
       withGraphTransaction {
         node.wrappedValue = 1
         transactionStarted.signal()
-        resumeTransaction.wait()
+        resumeTransaction.wait(until: Date().addingTimeInterval(5))
       }
       transactionFinished.signal()
     }
     thread.start()
 
-    #expect(transactionStarted.wait(timeout: .now() + .seconds(1)) == .success)
+    #expect(await transactionStarted.wait(for: .seconds(5)))
     #expect(node.wrappedValue == 0)
 
-    resumeTransaction.signal()
-    #expect(transactionFinished.wait(timeout: .now() + .seconds(1)) == .success)
+    resumeTransaction.open()
+    #expect(await transactionFinished.wait(for: .seconds(5)))
     #expect(node.wrappedValue == 1)
   }
 
   @Test
-  func outsideWriterWaitsForTransactionCompletion() {
+  func outsideWriterWaitsForTransactionCompletion() async {
     let node = Stored(wrappedValue: 0)
-    let transactionStarted = DispatchSemaphore(value: 0)
-    let resumeTransaction = DispatchSemaphore(value: 0)
-    let transactionFinished = DispatchSemaphore(value: 0)
-    let writerStarted = DispatchSemaphore(value: 0)
-    let writerFinished = DispatchSemaphore(value: 0)
+    let transactionStarted = TestSignal()
+    let resumeTransaction = TestThreadGate()
+    let transactionFinished = TestSignal()
+    let writerStarted = TestSignal()
+    let writerFinished = TestSignal()
+    let writerDidFinish = LockedBox(false)
 
     let transactionThread = Thread {
       withGraphTransaction {
         node.wrappedValue = 1
         transactionStarted.signal()
-        resumeTransaction.wait()
+        resumeTransaction.wait(until: Date().addingTimeInterval(5))
       }
       transactionFinished.signal()
     }
     transactionThread.start()
 
-    #expect(transactionStarted.wait(timeout: .now() + .seconds(1)) == .success)
+    #expect(await transactionStarted.wait(for: .seconds(5)))
 
-    DispatchQueue.global().async {
+    Thread {
       writerStarted.signal()
       node.wrappedValue = 2
+      writerDidFinish.update { $0 = true }
       writerFinished.signal()
-    }
+    }.start()
 
-    #expect(writerStarted.wait(timeout: .now() + .seconds(1)) == .success)
+    #expect(await writerStarted.wait(for: .seconds(5)))
 #if DEBUG
-    #expect(
-      GraphTransactionCoordinator.shared.waitForImmediateWriterToBlock(
+    let writerBlocked = TestSignal()
+    let didObserveBlockedWriter = LockedBox(false)
+    Thread {
+      let didBlock = GraphTransactionCoordinator.shared.waitForImmediateWriterToBlock(
         until: Date().addingTimeInterval(1)
       )
-    )
+      didObserveBlockedWriter.update { $0 = didBlock }
+      writerBlocked.signal()
+    }.start()
+    #expect(await writerBlocked.wait(for: .seconds(5)))
+    #expect(didObserveBlockedWriter.value)
 #endif
-    #expect(writerFinished.wait(timeout: .now()) == .timedOut)
+    #expect(!writerDidFinish.value)
 
-    resumeTransaction.signal()
-    #expect(transactionFinished.wait(timeout: .now() + .seconds(1)) == .success)
-    #expect(writerFinished.wait(timeout: .now() + .seconds(1)) == .success)
+    resumeTransaction.open()
+    #expect(await transactionFinished.wait(for: .seconds(5)))
+    #expect(await writerFinished.wait(for: .seconds(5)))
     #expect(node.wrappedValue == 2)
   }
 
@@ -221,13 +260,13 @@ struct GraphTransactionTests {
   }
 
   @Test
-  func overlappingRollbacksKeepEachContextsTypedValuesDistinct() {
+  func overlappingRollbacksKeepEachContextsTypedValuesDistinct() async {
     let first = Stored(wrappedValue: DeinitAction())
     let second = Stored(wrappedValue: DeinitAction())
-    let firstCleanupStarted = DispatchSemaphore(value: 0)
-    let resumeFirstCleanup = DispatchSemaphore(value: 0)
-    let outerFinished = DispatchSemaphore(value: 0)
-    let innerFinished = DispatchSemaphore(value: 0)
+    let firstCleanupStarted = TestSignal()
+    let resumeFirstCleanup = TestThreadGate()
+    let outerFinished = TestSignal()
+    let innerFinished = TestSignal()
     let outerSecondCleanupCount = LockedBox(0)
     let innerCleanupCount = LockedBox(0)
 
@@ -236,8 +275,8 @@ struct GraphTransactionTests {
         try withGraphTransaction { () throws(TransactionError) -> Void in
           first.wrappedValue = DeinitAction {
             firstCleanupStarted.signal()
-            _ = resumeFirstCleanup.wait(
-              timeout: .now() + .seconds(2)
+            resumeFirstCleanup.wait(
+              until: Date().addingTimeInterval(5)
             )
           }
           second.wrappedValue = DeinitAction {
@@ -251,9 +290,7 @@ struct GraphTransactionTests {
       outerFinished.signal()
     }.start()
 
-    #expect(
-      firstCleanupStarted.wait(timeout: .now() + .seconds(1)) == .success
-    )
+    #expect(await firstCleanupStarted.wait(for: .seconds(5)))
 
     Thread {
       do {
@@ -269,12 +306,12 @@ struct GraphTransactionTests {
       innerFinished.signal()
     }.start()
 
-    #expect(innerFinished.wait(timeout: .now() + .seconds(1)) == .success)
+    #expect(await innerFinished.wait(for: .seconds(5)))
     #expect(innerCleanupCount.value == 1)
     #expect(outerSecondCleanupCount.value == 0)
 
-    resumeFirstCleanup.signal()
-    #expect(outerFinished.wait(timeout: .now() + .seconds(1)) == .success)
+    resumeFirstCleanup.open()
+    #expect(await outerFinished.wait(for: .seconds(5)))
     #expect(outerSecondCleanupCount.value == 1)
   }
 
@@ -297,13 +334,14 @@ struct GraphTransactionTests {
   }
 
   @Test
-  func commitDefersCallbacksUntilTheTransactionBodyReturns() {
+  @MainActor
+  func commitDefersCallbacksUntilTheTransactionBodyReturns() async {
     let source = Stored(wrappedValue: 0)
     let didSetCount = LockedBox(0)
     let trackingCallbackCount = LockedBox(0)
     let observationCallbackCount = LockedBox(0)
-    let trackingDelivered = DispatchSemaphore(value: 0)
-    let observationDelivered = DispatchSemaphore(value: 0)
+    let trackingDelivered = TestSignal()
+    let observationDelivered = TestSignal()
 
     source.onDidSet { _, _ in
       didSetCount.update { $0 += 1 }
@@ -337,9 +375,9 @@ struct GraphTransactionTests {
 
     #expect(source.wrappedValue == 1)
     #expect(didSetCount.value == 1)
-    #expect(trackingDelivered.wait(timeout: .now() + .seconds(1)) == .success)
+    #expect(await trackingDelivered.wait(for: .seconds(5)))
     #expect(trackingCallbackCount.value == 1)
-    #expect(observationDelivered.wait(timeout: .now() + .seconds(1)) == .success)
+    #expect(await observationDelivered.wait(for: .seconds(5)))
     #expect(observationCallbackCount.value == 1)
   }
 
@@ -518,28 +556,36 @@ struct GraphTransactionTests {
   }
 
   @Test
-  func comparatorCanWaitForAnotherThreadToReadCommittedGraph() {
+  func comparatorCanWaitForAnotherThreadToReadCommittedGraph() async {
     let unrelated = Stored(wrappedValue: 42)
-    let readerFinished = DispatchSemaphore(value: 0)
+    let readerFinished = TestThreadGate()
+    let transactionFinished = TestSignal()
     let readerCompletedBeforeComparatorReturned = LockedBox(false)
     let node = Stored(
       wrappedValue: 0,
       shouldNotify: { oldValue, newValue in
-        DispatchQueue.global().async {
+        Thread {
           _ = unrelated.wrappedValue
-          readerFinished.signal()
-        }
+          readerFinished.open()
+        }.start()
+
+        // Waiting is the behavior under test. The comparator itself runs on the
+        // explicitly created transaction thread rather than a test executor.
         readerCompletedBeforeComparatorReturned.update {
-          $0 = readerFinished.wait(timeout: .now() + .seconds(1)) == .success
+          $0 = readerFinished.wait(until: Date().addingTimeInterval(5))
         }
         return oldValue != newValue
       }
     )
 
-    withGraphTransaction {
-      node.wrappedValue = 1
-    }
+    Thread {
+      withGraphTransaction {
+        node.wrappedValue = 1
+      }
+      transactionFinished.signal()
+    }.start()
 
+    #expect(await transactionFinished.wait(for: .seconds(5)))
     #expect(readerCompletedBeforeComparatorReturned.value)
   }
 
@@ -688,15 +734,15 @@ struct GraphTransactionTests {
   @MainActor
   func observationWillSetPrecedesCommittedPublication() {
     let source = Stored(wrappedValue: 0)
-    let willSetStarted = DispatchSemaphore(value: 0)
-    let lateRegistrationFinished = DispatchSemaphore(value: 0)
+    let willSetStarted = TestThreadGate()
+    let lateRegistrationFinished = TestThreadGate()
     let lateObservedValue = LockedBox<Int?>(nil)
     let lateChangeCount = LockedBox(0)
     let didCompleteLateRegistration = LockedBox(false)
 
-    DispatchQueue.global().async {
-      guard willSetStarted.wait(timeout: .now() + .seconds(1)) == .success else {
-        lateRegistrationFinished.signal()
+    Thread {
+      guard willSetStarted.wait(until: Date().addingTimeInterval(5)) else {
+        lateRegistrationFinished.open()
         return
       }
 
@@ -705,17 +751,21 @@ struct GraphTransactionTests {
       } onChange: {
         lateChangeCount.update { $0 += 1 }
       }
-      lateRegistrationFinished.signal()
-    }
+      lateRegistrationFinished.open()
+    }.start()
 
     withObservationTracking {
       _ = source.wrappedValue
     } onChange: {
-      willSetStarted.signal()
+      willSetStarted.open()
+
+      // This synchronous gate is the behavior under test: the Observation
+      // `willSet` callback must remain active while another OS thread registers
+      // against the old committed snapshot.
       didCompleteLateRegistration.update {
         $0 = lateRegistrationFinished.wait(
-          timeout: .now() + .seconds(1)
-        ) == .success
+          until: Date().addingTimeInterval(5)
+        )
       }
     }
 
@@ -734,17 +784,17 @@ struct GraphTransactionTests {
   func computedObservationWillSetPrecedesCommittedPublication() {
     let source = Stored(wrappedValue: 0)
     let computed = Computed { _ in source.wrappedValue }
-    let willSetStarted = DispatchSemaphore(value: 0)
-    let lateRegistrationFinished = DispatchSemaphore(value: 0)
+    let willSetStarted = TestThreadGate()
+    let lateRegistrationFinished = TestThreadGate()
     let lateObservedValue = LockedBox<Int?>(nil)
     let lateChangeCount = LockedBox(0)
     let didCompleteLateRegistration = LockedBox(false)
 
     #expect(computed.wrappedValue == 0)
 
-    DispatchQueue.global().async {
-      guard willSetStarted.wait(timeout: .now() + .seconds(1)) == .success else {
-        lateRegistrationFinished.signal()
+    Thread {
+      guard willSetStarted.wait(until: Date().addingTimeInterval(5)) else {
+        lateRegistrationFinished.open()
         return
       }
 
@@ -753,17 +803,21 @@ struct GraphTransactionTests {
       } onChange: {
         lateChangeCount.update { $0 += 1 }
       }
-      lateRegistrationFinished.signal()
-    }
+      lateRegistrationFinished.open()
+    }.start()
 
     withObservationTracking {
       _ = computed.wrappedValue
     } onChange: {
-      willSetStarted.signal()
+      willSetStarted.open()
+
+      // This synchronous gate is the behavior under test: the Observation
+      // `willSet` callback must remain active while another OS thread registers
+      // against the old committed snapshot.
       didCompleteLateRegistration.update {
         $0 = lateRegistrationFinished.wait(
-          timeout: .now() + .seconds(1)
-        ) == .success
+          until: Date().addingTimeInterval(5)
+        )
       }
     }
 
@@ -783,7 +837,7 @@ struct GraphTransactionTests {
   func observationSnapshotWaitsForAnInFlightComputedRead() async {
     let source = Stored(wrappedValue: 0)
     let descriptorStarted = TestSignal()
-    let resumeDescriptor = DispatchSemaphore(value: 0)
+    let resumeDescriptor = TestThreadGate()
     let shouldPauseDescriptor = LockedBox(true)
     let initialObservedValue = LockedBox<Int?>(nil)
     let observationChangeCount = LockedBox(0)
@@ -799,7 +853,7 @@ struct GraphTransactionTests {
       }
       if shouldPause {
         descriptorStarted.signal()
-        _ = resumeDescriptor.wait(timeout: .now() + .seconds(2))
+        resumeDescriptor.wait(until: Date().addingTimeInterval(5))
       }
       return source.wrappedValue
     }
@@ -823,13 +877,20 @@ struct GraphTransactionTests {
       transactionFinished.signal()
     }.start()
 
-    #expect(
-      GraphTransactionCoordinator.shared.waitForPublisherToBlock(
+    let publisherWaitFinished = TestSignal()
+    let didObserveBlockedPublisher = LockedBox(false)
+    Thread {
+      let didBlock = GraphTransactionCoordinator.shared.waitForPublisherToBlock(
         until: Date().addingTimeInterval(1)
       )
-    )
+      didObserveBlockedPublisher.update { $0 = didBlock }
+      publisherWaitFinished.signal()
+    }.start()
 
-    resumeDescriptor.signal()
+    #expect(await publisherWaitFinished.wait(for: .seconds(5)))
+    #expect(didObserveBlockedPublisher.value)
+
+    resumeDescriptor.open()
 
     #expect(await observerReadFinished.wait(for: .seconds(5)))
     #expect(await transactionFinished.wait(for: .seconds(5)))
@@ -845,21 +906,24 @@ struct GraphTransactionTests {
   func observationCallbackCanWaitForAnotherThreadToReadTheCommittedGraph() async {
     let first = Stored(wrappedValue: 0)
     let second = Stored(wrappedValue: 0)
-    let callbackReadFinished = DispatchSemaphore(value: 0)
+    let callbackReadFinished = TestThreadGate()
     let callbackDidFinishWaiting = LockedBox(false)
     let callbackDelivered = TestSignal()
 
     withObservationTracking {
       _ = first.wrappedValue
     } onChange: {
-      DispatchQueue.global().async {
+      Thread {
         _ = second.wrappedValue
-        callbackReadFinished.signal()
-      }
+        callbackReadFinished.open()
+      }.start()
+
+      // Waiting is the behavior under test: this synchronous Observation
+      // callback must be able to wait for an outside committed-graph reader.
       callbackDidFinishWaiting.update {
         $0 = callbackReadFinished.wait(
-          timeout: .now() + .seconds(1)
-        ) == .success
+          until: Date().addingTimeInterval(5)
+        )
       }
       callbackDelivered.signal()
     }
@@ -934,10 +998,10 @@ struct GraphTransactionTests {
   }
 
   @Test
-  func callbackTriggeredMutationDoesNotDeadlock() {
+  func callbackTriggeredMutationDoesNotDeadlock() async {
     let first = Stored(wrappedValue: 0)
     let second = Stored(wrappedValue: 0)
-    let finished = DispatchSemaphore(value: 0)
+    let finished = TestSignal()
 
     first.onDidSet { _, _ in
       second.wrappedValue = 2
@@ -951,7 +1015,7 @@ struct GraphTransactionTests {
     }
     thread.start()
 
-    #expect(finished.wait(timeout: .now() + .seconds(1)) == .success)
+    #expect(await finished.wait(for: .seconds(5)))
     #expect(first.wrappedValue == 1)
     #expect(second.wrappedValue == 2)
   }
@@ -1030,10 +1094,10 @@ struct GraphTransactionTests {
   }
 
   @Test
-  func ordinaryOnDidSetCanRunATransactionWithoutDeadlocking() {
+  func ordinaryOnDidSetCanRunATransactionWithoutDeadlocking() async {
     let source = Stored(wrappedValue: 0)
     let nested = Stored(wrappedValue: 0)
-    let finished = DispatchSemaphore(value: 0)
+    let finished = TestSignal()
 
     source.onDidSet { _, _ in
       withGraphTransaction {
@@ -1047,25 +1111,30 @@ struct GraphTransactionTests {
     }
     thread.start()
 
-    #expect(finished.wait(timeout: .now() + .seconds(5)) == .success)
+    #expect(await finished.wait(for: .seconds(5)))
     #expect(source.wrappedValue == 1)
     #expect(nested.wrappedValue == 1)
   }
 
   @Test
-  func onDidSetTransactionWaitsForContendingWriterAfterNodeUnlock() {
-    let secondComparatorEntered = DispatchSemaphore(value: 0)
-    let releaseSecondComparator = DispatchSemaphore(value: 0)
-    let firstCallbackEntered = DispatchSemaphore(value: 0)
-    let allowFirstCallbackTransaction = DispatchSemaphore(value: 0)
-    let writersFinished = DispatchSemaphore(value: 0)
+  func onDidSetTransactionWaitsForContendingWriterAfterNodeUnlock() async {
+    let secondComparatorEntered = TestSignal()
+    let releaseSecondComparator = TestThreadGate()
+    let firstCallbackEntered = TestSignal()
+    let allowFirstCallbackTransaction = TestThreadGate()
+    let writersFinished = TestCountdown(count: 2)
     let nested = Stored(wrappedValue: 0)
     let source = Stored(
       wrappedValue: 0,
       shouldNotify: { oldValue, newValue in
         if newValue == 2 {
           secondComparatorEntered.signal()
-          releaseSecondComparator.wait()
+
+          // Holding this comparator open is the behavior under test. Its setter
+          // runs on an explicitly created OS thread.
+          releaseSecondComparator.wait(
+            until: Date().addingTimeInterval(5)
+          )
         }
         return oldValue != newValue
       }
@@ -1074,41 +1143,45 @@ struct GraphTransactionTests {
     source.onDidSet { _, newValue in
       guard newValue == 1 else { return }
       firstCallbackEntered.signal()
-      allowFirstCallbackTransaction.wait()
+
+      // Holding this callback open lets the second writer enter its comparator
+      // before the callback begins its transaction.
+      allowFirstCallbackTransaction.wait(
+        until: Date().addingTimeInterval(5)
+      )
       withGraphTransaction {
         nested.wrappedValue = 1
       }
     }
 
-    DispatchQueue.global().async {
+    Thread {
       source.wrappedValue = 1
       writersFinished.signal()
-    }
+    }.start()
 
-    #expect(firstCallbackEntered.wait(timeout: .now() + .seconds(1)) == .success)
+    #expect(await firstCallbackEntered.wait(for: .seconds(5)))
 
-    DispatchQueue.global().async {
+    Thread {
       source.wrappedValue = 2
       writersFinished.signal()
-    }
+    }.start()
 
-    #expect(secondComparatorEntered.wait(timeout: .now() + .seconds(1)) == .success)
-    allowFirstCallbackTransaction.signal()
-    releaseSecondComparator.signal()
+    #expect(await secondComparatorEntered.wait(for: .seconds(5)))
+    allowFirstCallbackTransaction.open()
+    releaseSecondComparator.open()
 
-    #expect(writersFinished.wait(timeout: .now() + .seconds(1)) == .success)
-    #expect(writersFinished.wait(timeout: .now() + .seconds(1)) == .success)
+    #expect(await writersFinished.wait(for: .seconds(5)))
     #expect(source.wrappedValue == 2)
     #expect(nested.wrappedValue == 1)
   }
 
   @Test
-  func callbackCanWaitForTransactionQueuedBehindItsCompletedTransaction() {
-    let firstTransactionStarted = DispatchSemaphore(value: 0)
-    let releaseFirstTransaction = DispatchSemaphore(value: 0)
-    let secondTransactionCallStarted = DispatchSemaphore(value: 0)
-    let secondTransactionFinished = DispatchSemaphore(value: 0)
-    let sourceWriterFinished = DispatchSemaphore(value: 0)
+  func callbackCanWaitForTransactionQueuedBehindItsCompletedTransaction() async {
+    let firstTransactionStarted = TestSignal()
+    let releaseFirstTransaction = TestThreadGate()
+    let secondTransactionCallStarted = TestSignal()
+    let secondTransactionFinished = TestThreadGate()
+    let sourceWriterFinished = TestSignal()
     let callbackObservedSecondCompletion = LockedBox(false)
     let source = Stored(wrappedValue: 0)
     let firstTarget = Stored(wrappedValue: 0)
@@ -1117,91 +1190,103 @@ struct GraphTransactionTests {
     source.onDidSet { _, _ in
       withGraphTransaction {
         firstTransactionStarted.signal()
-        releaseFirstTransaction.wait()
+
+        // Keep the first transaction active until the competing transaction is
+        // deterministically queued behind it.
+        releaseFirstTransaction.wait(
+          until: Date().addingTimeInterval(5)
+        )
         firstTarget.wrappedValue = 1
       }
 
+      // Waiting after the first transaction returns is the behavior under test:
+      // the queued transaction must be able to complete while this callback remains
+      // on its explicitly created OS thread.
       callbackObservedSecondCompletion.update {
         $0 = secondTransactionFinished.wait(
-          timeout: .now() + .seconds(1)
-        ) == .success
+          until: Date().addingTimeInterval(5)
+        )
       }
     }
 
-    DispatchQueue.global().async {
+    Thread {
       source.wrappedValue = 1
       sourceWriterFinished.signal()
-    }
+    }.start()
 
-    #expect(firstTransactionStarted.wait(timeout: .now() + .seconds(1)) == .success)
+    #expect(await firstTransactionStarted.wait(for: .seconds(5)))
 
-    DispatchQueue.global().async {
+    Thread {
       secondTransactionCallStarted.signal()
       withGraphTransaction {
         secondTarget.wrappedValue = 1
       }
-      secondTransactionFinished.signal()
-    }
+      secondTransactionFinished.open()
+    }.start()
 
-    #expect(
-      secondTransactionCallStarted.wait(timeout: .now() + .seconds(1)) == .success
-    )
+    #expect(await secondTransactionCallStarted.wait(for: .seconds(5)))
 #if DEBUG
-    #expect(
-      GraphTransactionCoordinator.shared.waitForTransactionToBlock(
+    let transactionWaitFinished = TestSignal()
+    let didObserveQueuedTransaction = LockedBox(false)
+    Thread {
+      let didBlock = GraphTransactionCoordinator.shared.waitForTransactionToBlock(
         until: Date().addingTimeInterval(1)
       )
-    )
+      didObserveQueuedTransaction.update { $0 = didBlock }
+      transactionWaitFinished.signal()
+    }.start()
+    #expect(await transactionWaitFinished.wait(for: .seconds(5)))
+    #expect(didObserveQueuedTransaction.value)
 #endif
-    releaseFirstTransaction.signal()
+    releaseFirstTransaction.open()
 
-    #expect(sourceWriterFinished.wait(timeout: .now() + .seconds(2)) == .success)
+    #expect(await sourceWriterFinished.wait(for: .seconds(5)))
     #expect(callbackObservedSecondCompletion.value)
     #expect(firstTarget.wrappedValue == 1)
     #expect(secondTarget.wrappedValue == 1)
   }
 
   @Test
-  func concurrentImmediateWriterCallbacksCanBothStartTransactions() {
+  func concurrentImmediateWriterCallbacksCanBothStartTransactions() async {
     let firstSource = Stored(wrappedValue: 0)
     let secondSource = Stored(wrappedValue: 0)
     let firstNested = Stored(wrappedValue: 0)
     let secondNested = Stored(wrappedValue: 0)
-    let callbacksReady = DispatchSemaphore(value: 0)
-    let startTransactions = DispatchSemaphore(value: 0)
-    let writersFinished = DispatchSemaphore(value: 0)
+    let callbacksReady = TestCountdown(count: 2)
+    let startTransactions = TestThreadGate()
+    let writersFinished = TestCountdown(count: 2)
 
     firstSource.onDidSet { _, _ in
       callbacksReady.signal()
-      startTransactions.wait()
+
+      // Both callbacks must remain active on their OS threads before either one
+      // attempts to acquire the transaction writer slot.
+      startTransactions.wait(until: Date().addingTimeInterval(5))
       withGraphTransaction {
         firstNested.wrappedValue = 1
       }
     }
     secondSource.onDidSet { _, _ in
       callbacksReady.signal()
-      startTransactions.wait()
+      startTransactions.wait(until: Date().addingTimeInterval(5))
       withGraphTransaction {
         secondNested.wrappedValue = 1
       }
     }
 
-    DispatchQueue.global().async {
+    Thread {
       firstSource.wrappedValue = 1
       writersFinished.signal()
-    }
-    DispatchQueue.global().async {
+    }.start()
+    Thread {
       secondSource.wrappedValue = 1
       writersFinished.signal()
-    }
+    }.start()
 
-    #expect(callbacksReady.wait(timeout: .now() + .seconds(1)) == .success)
-    #expect(callbacksReady.wait(timeout: .now() + .seconds(1)) == .success)
-    startTransactions.signal()
-    startTransactions.signal()
+    #expect(await callbacksReady.wait(for: .seconds(5)))
+    startTransactions.open()
 
-    #expect(writersFinished.wait(timeout: .now() + .seconds(1)) == .success)
-    #expect(writersFinished.wait(timeout: .now() + .seconds(1)) == .success)
+    #expect(await writersFinished.wait(for: .seconds(5)))
     #expect(firstNested.wrappedValue == 1)
     #expect(secondNested.wrappedValue == 1)
   }
