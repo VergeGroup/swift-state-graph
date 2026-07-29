@@ -25,11 +25,10 @@ Data normalization involves storing entities in separate collections while maint
 ```swift
 import StateGraphNormalization
 
-// Creating related entity stores with one consistency boundary
-let coordinator = EntityStoreCoordinator()
-let userStore = EntityStore<User>(coordinator: coordinator)
-let postStore = EntityStore<Post>(coordinator: coordinator)
-let commentStore = EntityStore<Comment>(coordinator: coordinator)
+// Creating entity stores for different types
+var userStore = EntityStore<User>()
+var postStore = EntityStore<Post>()
+var commentStore = EntityStore<Comment>()
 
 // Adding entities
 userStore.add(user)
@@ -56,6 +55,12 @@ let count = userStore.count
 // Removing entities
 userStore.delete(userId)
 ```
+
+`EntityStore` is a value type. Mutating a copy's collection does not change the
+original collection, although reference-type entities remain shared unless you
+clone them separately. When an entity collection is shared application state,
+keep the `EntityStore` in a `@GraphStored` property so reads participate in
+dependency tracking and successful writebacks invalidate dependents.
 
 ### EntityStore Operations
 
@@ -119,22 +124,25 @@ let user = userStore.get(by: userId)
 
 ## NormalizedStore
 
-`NormalizedStore` acts as a central repository for managing multiple entity types. `EntityStore` has reference semantics and publishes its own graph updates, so store properties do not need `@GraphStored`. Give related stores one shared `EntityStoreCoordinator` to serialize operations across their tables:
+`NormalizedStore` acts as a central repository for managing multiple entity
+types. Because `EntityStore` has value semantics, the repository owns each
+entity collection in a `@GraphStored` property. Reading a collection from a
+computed value establishes a graph dependency, and mutating it writes the
+updated value back through the graph:
 
 ```swift
 final class NormalizedStore: Sendable {
-  let users: EntityStore<User>
-  let posts: EntityStore<Post>
-  let comments: EntityStore<Comment>
-  let tags: EntityStore<Tag>
+  @GraphStored
+  var users: EntityStore<User> = .init()
 
-  init() {
-    let coordinator = EntityStoreCoordinator()
-    self.users = .init(coordinator: coordinator)
-    self.posts = .init(coordinator: coordinator)
-    self.comments = .init(coordinator: coordinator)
-    self.tags = .init(coordinator: coordinator)
-  }
+  @GraphStored
+  var posts: EntityStore<Post> = .init()
+
+  @GraphStored
+  var comments: EntityStore<Comment> = .init()
+
+  @GraphStored
+  var tags: EntityStore<Tag> = .init()
 }
 
 // Create a single store instance for your app
@@ -510,5 +518,10 @@ userIds.forEach { userId in
   }
 }
 ```
+
+Each mutating call writes the updated `EntityStore` back to its owner. Prefer
+the bulk operations when the input is already available as a sequence. If
+multiple threads can mutate the same owning property, serialize those
+read-modify-write operations at the ownership boundary.
 
 Swift State Graph's normalization module provides a powerful foundation for building applications with complex data relationships while maintaining the benefits of reactive programming.
