@@ -90,6 +90,9 @@ public func withGraphTransaction<Result, Failure: Error>(
 
   let context = GraphTransactionContext()
   let coordinator = GraphTransactionCoordinator.shared
+
+  // Reserve the single transaction-writer slot before installing thread-local
+  // staging. External writes now wait, while committed reads remain available.
   coordinator.beginTransaction(context)
 
   var transactionFinished = false
@@ -97,6 +100,9 @@ public func withGraphTransaction<Result, Failure: Error>(
 
   defer {
     if !transactionFinished {
+      // A thrown outer body rolls back as one unit. Detach staged values while no
+      // other writer can reach their nodes, then release writer admission before
+      // destroying arbitrary values whose deinit may reenter graph mutation.
       ThreadLocal.graphTransaction.replaceValue(previousContext)
       context.prepareRollback()
       coordinator.finishTransaction(context)
@@ -106,11 +112,15 @@ public func withGraphTransaction<Result, Failure: Error>(
 
   let result = try body()
 
+  // The body has finished staging. Callback delivery receives its own fresh
+  // thread-local contexts inside the iterative commit trampoline below.
   ThreadLocal.graphTransaction.replaceValue(previousContext)
   commitTransactionBatches(
     beginningWith: context,
     coordinator: coordinator
   )
+
+  // Callback-generated batches are now empty, so external writers may resume.
   coordinator.finishTransaction(context)
   transactionFinished = true
 
@@ -123,6 +133,12 @@ public func withGraphTransaction<Result, Failure: Error>(
 /// readable on the committing thread, but its graph publication is deferred until
 /// every callback in the current batch has completed. The next batch is drained
 /// before the outer `withGraphTransaction` call returns.
+///
+/// The loop acts as a synchronous trampoline. Callbacks still run on the current
+/// stack, but their mutations never recursively enter the commit pipeline. They
+/// stage into a fresh context that the next loop iteration drains after the current
+/// callback wave returns. This prevents recursive stack growth; it does not make a
+/// callback that continuously stages new mutations terminate.
 private func commitTransactionBatches(
   beginningWith transaction: GraphTransactionContext,
   coordinator: GraphTransactionCoordinator
@@ -130,29 +146,49 @@ private func commitTransactionBatches(
   var batch = transaction
 
   while batch.freezeParticipantsForCommit() {
+    // Mutations made by this batch's callbacks collect here instead of recursively
+    // reentering commit. An empty context makes the next loop condition terminate.
     let nextBatch = GraphTransactionContext()
     ThreadLocal.graphTransaction.withValue(nextBatch) {
+      // Move every participant's staged value into stable commit work before any
+      // comparator runs, so comparator reads see one complete pending snapshot.
       batch.prepareCommit()
       batch.evaluateCommitComparators()
 
+      // Phase 1 captures Observation's pre-mutation traversal without publishing a
+      // Stored value or invoking user callbacks. The short barrier prevents a
+      // committed reader from crossing the snapshot boundary while work is collected.
       let observationDelivery = GraphTransactionObservationDelivery()
       coordinator.withPublicationBarrier(transaction) {
         batch.prepareObservationWillSet(observationDelivery)
       }
 
+      // Observation delivery is outside the condition mutex, reader barrier, and
+      // node locks, although the outer transaction still owns writer admission.
+      // Reentrant assignments stage into `nextBatch` and are visible to later
+      // callbacks. The committing thread sees pending values while outside readers
+      // still see old committed values.
       nextBatch.beginCallbackDelivery()
       observationDelivery.deliver()
 
+      // Phase 2 installs all values and propagates dirty state before committed
+      // readers resume, preventing a reader from observing a partial batch. It only
+      // captures user callbacks; they do not run inside this barrier.
       let callbackDelivery = GraphTransactionCallbackDelivery()
       coordinator.withPublicationBarrier(transaction) {
         batch.publishCommit()
         batch.prepareCommitInvalidations(callbackDelivery)
       }
 
+      // Graph-tracking, onDidSet, and Observation didSet callbacks run after
+      // publication releases its reader barrier. Any mutations they make also join
+      // `nextBatch`.
       callbackDelivery.deliver()
       batch.deliverCommitCallbacks()
     }
 
+    // Continue with callback-generated work iteratively instead of committing from
+    // inside callback delivery.
     batch = nextBatch
   }
 }
@@ -404,7 +440,14 @@ final class GraphTransactionReadScope: @unchecked Sendable {
 /// synchronous post-mutation callback returns the counted slot permanently; a later
 /// setter in that callback reacquires it lazily before mutating.
 final class GraphImmediateWriterScope: @unchecked Sendable {
+
+  /// Whether this thread-local scope currently contributes to the global writer count.
   var isCounted = false
+
+  /// The number of `Stored` node locks currently held by this writer thread.
+  ///
+  /// A transaction may begin from this scope only after the depth returns to zero;
+  /// otherwise it could wait while still blocking another graph operation.
   var nodeLockDepth = 0
 
   var canBeginTransaction: Bool {
@@ -421,23 +464,68 @@ final class GraphImmediateWriterScope: @unchecked Sendable {
 /// reads remain available while the transaction body only stages values.
 ///
 /// No graph-node lock is held while this coordinator waits. Coordinator admission
-/// always precedes node locking, and user callbacks run with neither the condition
-/// nor a node lock held.
+/// always precedes node locking. Callbacks captured by transaction publication run
+/// after the condition mutex, reader barrier, and node locks are released; ordinary
+/// immediate setters retain their existing callback lock semantics.
+///
+/// `NSCondition` supplies both the mutex for the coordination state and a wait queue
+/// for its predicates. Calling `wait()` atomically releases that mutex while the
+/// thread sleeps and reacquires it before the predicate is tested again. It never
+/// protects a node's value; each node continues to use its own `NodeLock`.
+///
+/// The admission predicates are:
+/// - Outer transaction: no active transaction and no active immediate writer.
+/// - Immediate write: no active or waiting transaction.
+/// - Committed read: publication is not in progress.
+/// - Publication: close read admission, then drain every active reader.
+///
+/// A broadcast only means that one of these predicates may have changed. Every
+/// awakened thread must recheck its own predicate in a `while` loop. Broadcasting
+/// is intentional because this one condition hosts several waiter classes; waking
+/// one arbitrary waiter could select a thread whose predicate is still false.
 final class GraphTransactionCoordinator: @unchecked Sendable {
 
   static let shared = GraphTransactionCoordinator()
 
+  /// Protects all coordinator state below and wakes threads when a predicate may change.
   private let condition = NSCondition()
+
+  /// The logical writer owner; the condition mutex is not held for its lifetime.
+  ///
+  /// A non-nil value excludes every immediate writer and implies that
+  /// `activeImmediateWriterCount` is zero.
   private var activeTransaction: GraphTransactionContext?
+
+  /// Ordinary setters admitted before any transaction began waiting.
+  ///
+  /// Multiple setters may run concurrently against different nodes. A transaction
+  /// waits for this count to reach zero before it claims writer ownership.
   private var activeImmediateWriterCount = 0
+
+  /// Transactions that announced writer intent but have not claimed ownership.
+  ///
+  /// A nonzero count prevents new immediate writers from continually overtaking a
+  /// queued transaction while already-admitted writers drain.
   private var waitingTransactionCount = 0
+
 #if DEBUG
+  /// Deterministic test seams for observing each blocking branch.
   private var waitingImmediateWriterCount = 0
   private var waitingPublisherCount = 0
 #endif
+
+  /// Outermost committed read scopes that may currently hold node or Computed locks.
   private var activeReaderCount = 0
+
+  /// Whether new committed reads must wait for a coherent publication boundary.
   private var isPublishing = false
 
+  // MARK: - Outer Transaction
+
+  /// Acquires exclusive graph-writer ownership for an outer transaction.
+  ///
+  /// Once this transaction is counted as waiting, new immediate writers stop at
+  /// their admission predicate. Writers already admitted are allowed to finish.
   func beginTransaction(
     _ transaction: GraphTransactionContext
   ) {
@@ -449,14 +537,21 @@ final class GraphTransactionCoordinator: @unchecked Sendable {
 
     condition.lock()
 
+    // A post-mutation callback may begin a transaction while its thread-local
+    // immediate-writer scope still exists. Once its node lock is released, returning
+    // that counted slot prevents the transaction from waiting for its own thread.
     if let immediateWriterScope, immediateWriterScope.isCounted {
       activeImmediateWriterCount -= 1
       immediateWriterScope.isCounted = false
     }
 
+    // Publish writer preference before waiting so no later ordinary setter can enter
+    // while the currently admitted setters are draining.
     waitingTransactionCount += 1
     condition.broadcast()
 
+    // `wait()` releases the condition mutex. Finishing writers and transactions can
+    // therefore update these predicates and wake this thread without spinning.
     while activeTransaction != nil || activeImmediateWriterCount != 0 {
       condition.wait()
     }
@@ -466,7 +561,11 @@ final class GraphTransactionCoordinator: @unchecked Sendable {
     condition.unlock()
   }
 
-  /// Runs one value or invalidation publication phase after draining current readers.
+  /// Runs one transaction phase after excluding committed readers.
+  ///
+  /// The condition mutex is released before `body` begins. The closure may therefore
+  /// acquire participant node locks without holding both lock domains at once. The
+  /// outer transaction continues to exclude other writers for the entire phase.
   func withPublicationBarrier(
     _ transaction: GraphTransactionContext,
     _ body: () -> Void
@@ -482,6 +581,9 @@ final class GraphTransactionCoordinator: @unchecked Sendable {
 
     precondition(activeTransaction === transaction)
     precondition(!isPublishing)
+
+    // Close admission before draining. Existing readers can now only finish, so the
+    // count moves monotonically toward zero while every new reader waits.
     isPublishing = true
 
 #if DEBUG
@@ -491,6 +593,9 @@ final class GraphTransactionCoordinator: @unchecked Sendable {
       condition.broadcast()
     }
 #endif
+
+    // An existing Computed evaluation may span several node reads. Waiting for its
+    // outer read scope prevents publication from splitting that snapshot.
     while activeReaderCount != 0 {
       condition.wait()
     }
@@ -501,6 +606,7 @@ final class GraphTransactionCoordinator: @unchecked Sendable {
 #endif
   }
 
+  /// Releases writer ownership after every commit batch and callback has drained.
   func finishTransaction(_ transaction: GraphTransactionContext) {
     condition.lock()
     defer { condition.unlock() }
@@ -508,8 +614,10 @@ final class GraphTransactionCoordinator: @unchecked Sendable {
     precondition(activeTransaction === transaction)
     precondition(!isPublishing)
 
-    isPublishing = false
     activeTransaction = nil
+
+    // Both queued transactions and immediate writers may now satisfy their
+    // predicates. Each awakened thread rechecks its own `while` condition.
     condition.broadcast()
   }
 
@@ -520,14 +628,26 @@ final class GraphTransactionCoordinator: @unchecked Sendable {
     defer { condition.unlock() }
 
     precondition(activeTransaction === transaction)
+    precondition(isPublishing)
     isPublishing = false
+
+    // Committed readers may resume, but immediate writers still observe the active
+    // outer transaction and remain suspended.
     condition.broadcast()
   }
 
+  // MARK: - Immediate Writes
+
+  /// Runs an ordinary `Stored` setter after admitting its thread as a graph writer.
+  ///
+  /// Reentrant setters reuse one thread-local scope, so nested callback work is
+  /// counted once rather than appearing as multiple independent writers.
   func withImmediateWrite<Result, Failure: Error>(
     _ body: () throws(Failure) -> Result
   ) throws(Failure) -> Result {
     if let immediateWriterScope = ThreadLocal.graphImmediateWriterScope.value {
+      // Starting a transaction from a post-mutation callback returns the counted
+      // slot. A later ordinary setter in that callback must acquire it again.
       if !immediateWriterScope.isCounted {
         admitImmediateWriter(immediateWriterScope)
       }
@@ -553,6 +673,10 @@ final class GraphTransactionCoordinator: @unchecked Sendable {
     precondition(!immediateWriterScope.isCounted)
 
     condition.lock()
+
+    // A committed Computed read may own its evaluation lock. Waiting for a
+    // transaction from inside that descriptor could invert Computed and coordinator
+    // ordering, so fail before entering the wait branch.
     if ThreadLocal.graphTransactionReadScope.value != nil,
       activeTransaction != nil || waitingTransactionCount != 0
     {
@@ -565,6 +689,9 @@ final class GraphTransactionCoordinator: @unchecked Sendable {
 #if DEBUG
     var isCountedAsWaiting = false
 #endif
+
+    // A queued transaction has priority over new setters. This lets already-admitted
+    // writers drain instead of allowing an unbounded stream of setters to starve it.
     while activeTransaction != nil || waitingTransactionCount != 0 {
 #if DEBUG
       if !isCountedAsWaiting {
@@ -580,6 +707,9 @@ final class GraphTransactionCoordinator: @unchecked Sendable {
       waitingImmediateWriterCount -= 1
     }
 #endif
+
+    // Count admission before releasing the condition mutex so a transaction cannot
+    // claim ownership while this setter is about to acquire its node lock.
     activeImmediateWriterCount += 1
     immediateWriterScope.isCounted = true
     condition.unlock()
@@ -592,22 +722,40 @@ final class GraphTransactionCoordinator: @unchecked Sendable {
     if immediateWriterScope.isCounted {
       immediateWriterScope.isCounted = false
       activeImmediateWriterCount -= 1
+
+      // A transaction waiting for the final active setter can now retest its predicate.
       condition.broadcast()
     }
     condition.unlock()
   }
 
+  // MARK: - Committed Reads
+
+  /// Runs one committed-graph read scope that cannot overlap transaction publication.
+  ///
+  /// A thread-local marker lets every nested `Stored` and `Computed` read remain in
+  /// the same scope. The reader count therefore covers an entire Computed evaluation,
+  /// so a transaction publication cannot split its dependency reads. Ordinary
+  /// immediate writes retain their existing concurrent-read semantics.
   func withReadAccess<Result, Failure: Error>(
     _ body: () throws(Failure) -> Result
   ) throws(Failure) -> Result {
+    // Nested node reads inherit the outer admission and cannot independently cross
+    // a transaction-publication boundary.
     if ThreadLocal.graphTransactionReadScope.value != nil {
       return try body()
     }
 
     condition.lock()
+
+    // Publication closes admission before changing any participant. Waiting here
+    // happens without a node lock, so the publisher can finish and reopen the gate.
     while isPublishing {
       condition.wait()
     }
+
+    // Count this reader before releasing the condition mutex. A publisher can now
+    // either observe it and wait, or close admission only after this scope finishes.
     activeReaderCount += 1
     condition.unlock()
 
@@ -617,6 +765,8 @@ final class GraphTransactionCoordinator: @unchecked Sendable {
       ThreadLocal.graphTransactionReadScope.replaceValue(previousReadScope)
       condition.lock()
       activeReaderCount -= 1
+
+      // Only the final active reader can satisfy a publisher's drain predicate.
       if activeReaderCount == 0 {
         condition.broadcast()
       }
