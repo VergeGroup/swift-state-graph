@@ -220,14 +220,6 @@ public final class Stored<Value: SendableMetatype>: Node, Observable, CustomDebu
     return try mutation(&value)
   }
 
-  /// Use `unsafeModify(_:)`; its name makes the notification and locking risks explicit.
-  @available(*, deprecated, renamed: "unsafeModify")
-  public borrowing func withLock<Result, E>(
-    _ body: (inout Value) throws(E) -> Result
-  ) throws(E) -> Result where E: Error {
-    try unsafeModify(body)
-  }
-
   /// Sets a closure to call after an assignment completes.
   public func onDidSet(_ handler: @escaping (Value, Value) -> Void) {
     lock.lock()
