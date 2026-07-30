@@ -173,6 +173,12 @@ public final class Computed<Value: SendableMetatype>: Node, Observable, CustomDe
     private let observationRegistrar = ObservationRegistrar()
   #endif
 
+  /// Single-use graph work captured when this node first becomes potentially dirty.
+  private struct InvalidationWork: ~Copyable {
+    let outgoingEdges: ContiguousArray<Edge>
+    let trackingRegistrations: Set<TrackingRegistration>
+  }
+
   public var potentiallyDirty: Bool {
     get {
       lock.lock()
@@ -182,21 +188,14 @@ public final class Computed<Value: SendableMetatype>: Node, Observable, CustomDe
       return _potentiallyDirty
     }
     set {
-      lock.lock()
-          
-      let oldValue = _potentiallyDirty
-      _potentiallyDirty = newValue
-      
-      guard _potentiallyDirty, _potentiallyDirty != oldValue else {
+      guard newValue else {
+        lock.lock()
+        _potentiallyDirty = false
         lock.unlock()
         return
       }
 
-      let _outgoingEdges = outgoingEdges
-      let _trackingRegistrations = trackingRegistrations
-      trackingRegistrations.removeAll()
-
-      lock.unlock()
+      guard let invalidationWork = preparePotentiallyDirtyState() else { return }
 
       // Notify observers when becoming potentially dirty, even if the computed value
       // might not actually change. This is necessary for SwiftUI and other Observation
@@ -213,15 +212,31 @@ public final class Computed<Value: SendableMetatype>: Node, Observable, CustomDe
       }
 #endif
 
-      for edge in _outgoingEdges {
+      for edge in invalidationWork.outgoingEdges {
         edge.to?.potentiallyDirty = true
       }
 
-      for registration in _trackingRegistrations {
+      for registration in invalidationWork.trackingRegistrations {
         registration.perform()
       }
             
     }
+  }
+
+  /// Marks this node dirty and captures callbacks while holding only its node lock.
+  private func preparePotentiallyDirtyState() -> InvalidationWork? {
+    lock.lock()
+    defer { lock.unlock() }
+
+    guard !_potentiallyDirty else { return nil }
+    _potentiallyDirty = true
+
+    let work = InvalidationWork(
+      outgoingEdges: outgoingEdges,
+      trackingRegistrations: trackingRegistrations
+    )
+    trackingRegistrations.removeAll()
+    return work
   }
 
   nonisolated(unsafe)
@@ -231,21 +246,51 @@ public final class Computed<Value: SendableMetatype>: Node, Observable, CustomDe
 
   public var wrappedValue: Value {
     get {
-#if canImport(Observation)
-      if #available(macOS 14.0, iOS 17.0, watchOS 10.0, tvOS 17.0, *) {
-        observationRegistrar.access(
-          NodeObservationRoot<Computed<Value>>(),
-          keyPath: \NodeObservationRoot<Computed<Value>>.wrappedValue
-        )
+      if ThreadLocal.graphTransaction.value != nil {
+        return transactionValue()
       }
+
+      return GraphTransactionCoordinator.shared.withReadAccess {
+        committedValue()
+      }
+    }
+  }
+
+  /// Evaluates this node from the transaction's staged `Stored` values without
+  /// changing the committed cache or dependency graph.
+  ///
+  /// A transaction intentionally does not cache `Computed` results. Every read is
+  /// reevaluated so a later staged assignment is immediately visible, while rollback
+  /// cannot leave a transaction-only value or edge in the committed graph.
+  private func transactionValue() -> Value {
+    ThreadLocal.currentNode.withValue(nil) {
+      if ThreadLocal.graphTransaction.value?.recordsDependencies == true {
+        var context = Context(environment: .init())
+        return descriptor.compute(context: &context)
+      }
+
+      return ThreadLocal.registration.withValue(nil) {
+        var context = Context(environment: .init())
+        return descriptor.compute(context: &context)
+      }
+    }
+  }
+
+  private func committedValue() -> Value {
+#if canImport(Observation)
+    if #available(macOS 14.0, iOS 17.0, watchOS 10.0, tvOS 17.0, *) {
+      observationRegistrar.access(
+        NodeObservationRoot<Computed<Value>>(),
+        keyPath: \NodeObservationRoot<Computed<Value>>.wrappedValue
+      )
+    }
 #endif
 
-      recomputeIfNeeded()
+    recomputeIfNeededWithinReadAccess()
 
-      lock.lock()
-      defer { lock.unlock() }
-      return _cachedValue!
-    }
+    lock.lock()
+    defer { lock.unlock() }
+    return _cachedValue!
   }
 
   private let descriptor: any ComputedDescriptor<Value>
@@ -377,7 +422,19 @@ public final class Computed<Value: SendableMetatype>: Node, Observable, CustomDe
   }
 
   public func recomputeIfNeeded() {
+    guard ThreadLocal.graphTransaction.value == nil else {
+      // Transaction reads intentionally evaluate without changing committed cache
+      // state or dependency edges.
+      return
+    }
 
+    GraphTransactionCoordinator.shared.withReadAccess {
+      recomputeIfNeededWithinReadAccess()
+    }
+  }
+
+  /// Recomputes while the caller owns one committed-graph read scope.
+  private func recomputeIfNeededWithinReadAccess() {
     lock.lock()
     defer { lock.unlock() }
 
@@ -457,6 +514,58 @@ public final class Computed<Value: SendableMetatype>: Node, Observable, CustomDe
     return "Computed<\(Value.self)>(name=\(info.name.map(String.init) ?? "noname"), value=\(String(describing: cachedValue)))"
   }
   
+}
+
+extension Computed: GraphTransactionInvalidatableNode {
+
+  /// Delivers Observation's existing pre-mutation notification without making the
+  /// committed cache dirty before publication.
+  func prepareGraphTransactionObservationWillSet(
+    _ observationWillSetDelivery: GraphTransactionObservationWillSetDelivery
+  ) {
+    lock.lock()
+    guard !_potentiallyDirty else {
+      lock.unlock()
+      return
+    }
+    let outgoingEdges = self.outgoingEdges
+    lock.unlock()
+
+#if canImport(Observation)
+    if #available(macOS 14.0, iOS 17.0, watchOS 10.0, tvOS 17.0, *) {
+      observationWillSetDelivery.appendWillSetOperation { [observationRegistrar] in
+        withMainActor {
+          observationRegistrar.willSet(
+            NodeObservationRoot<Computed<Value>>(),
+            keyPath: \NodeObservationRoot<Computed<Value>>.wrappedValue
+          )
+        }
+      }
+    }
+#endif
+
+    for edge in outgoingEdges {
+      observationWillSetDelivery.prepareWillSet(for: edge)
+    }
+  }
+
+  /// Marks the committed cache dirty while deferring graph-tracking callbacks until
+  /// after transaction publication releases its global read barrier.
+  func prepareGraphTransactionInvalidation(
+    _ callbackDelivery: GraphTransactionCallbackDelivery
+  ) {
+    guard let invalidationWork = preparePotentiallyDirtyState() else { return }
+
+    for edge in invalidationWork.outgoingEdges {
+      callbackDelivery.prepareInvalidation(for: edge)
+    }
+
+    for registration in invalidationWork.trackingRegistrations {
+      callbackDelivery.append {
+        registration.perform()
+      }
+    }
+  }
 }
 
 extension Computed {

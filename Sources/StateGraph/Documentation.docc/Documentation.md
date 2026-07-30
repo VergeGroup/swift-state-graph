@@ -56,6 +56,7 @@ final class CounterViewModel {
 - ``Node``
 - ``GraphStored``
 - ``GraphComputed``
+- ``withGraphTransaction(_:_:_:_:)``
 
 ### Persistence and Storage
 
