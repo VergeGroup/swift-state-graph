@@ -48,6 +48,7 @@ let package = Package(
       name: "StateGraphNormalization",
       dependencies: [
         "StateGraph",
+        "StateGraphMacro",
         .product(name: "TypedIdentifier", package: "swift-typed-identifier")
       ]
     ),
