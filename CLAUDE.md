@@ -20,6 +20,18 @@ swift build -c release
 
 # Clean build artifacts
 swift package clean
+
+# Generate the iOS development app project
+mise install
+mise exec -- tuist install
+mise exec -- tuist generate --no-open
+
+# Build the iOS development app
+xcodebuild \
+  -project Development.xcodeproj \
+  -scheme Development \
+  -destination 'generic/platform=iOS Simulator' \
+  CODE_SIGNING_ALLOWED=NO build
 ```
 
 ### Package Management
@@ -30,8 +42,11 @@ swift package update
 # Resolve dependencies
 swift package resolve
 
-# Generate Xcode project (if needed)
-swift package generate-xcodeproj
+# Install or update dependencies declared by Package.swift
+mise exec -- tuist install
+
+# Regenerate the iOS development app after changing Project.swift
+mise exec -- tuist generate --no-open
 ```
 
 ## Architecture Overview

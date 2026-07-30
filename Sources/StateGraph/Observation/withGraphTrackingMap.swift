@@ -13,6 +13,12 @@
  - The projected value is passed through a `DistinctFilter` (for `Equatable` types)
  - `onChange` is only called when the filtered value passes through (i.e., when it's different)
 
+ - Important: A synchronous mutation that invalidates an accessed node does not
+   re-execute this map for its own mutation. Peer registrations are notified, but its
+   one-shot registration is not restored to the invalidated node. Tracking for that node is
+   re-established only if another tracked change later re-executes the map. A DEBUG warning
+   is emitted unless ``StateGraphDiagnostics/isSelfInvalidationWarningEnabled`` is `false`.
+
  ## Example: Computed Value Tracking
  ```swift
  let firstName = Stored(wrappedValue: "John")
@@ -240,6 +246,12 @@ public func withGraphTrackingMap<Dependency: AnyObject, Projection>(
  - The projected value is passed through the provided filter
  - `onChange` is only called when the filtered value passes through
 
+ - Important: A synchronous mutation that invalidates an accessed node does not
+   re-execute this map for its own mutation. Peer registrations are notified, but its
+   one-shot registration is not restored to the invalidated node. Tracking for that node is
+   re-established only if another tracked change later re-executes the map. A DEBUG warning
+   is emitted unless ``StateGraphDiagnostics/isSelfInvalidationWarningEnabled`` is `false`.
+
  ## Example with Custom Filter
  ```swift
  struct ThresholdFilter: Filter {
@@ -301,7 +313,7 @@ public func withGraphTrackingMap<Dependency: AnyObject, Projection>(
     return
   }
 
-  weak var weakDependency = from
+  weak let weakDependency = from
 
   var filter = filter
 

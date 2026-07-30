@@ -116,33 +116,35 @@ struct CounterView: View {
 
 ## Bonus: Persistent Storage
 
-Want your state to persist across app launches? Use backing storage:
+Want your state to persist across app launches? Compose UserDefaults
+synchronization with an internal `Stored` node:
 
 ```swift
 final class SettingsViewModel {
-  // This value persists to UserDefaults automatically
-  @GraphStored(backed: .userDefaults(key: "theme"))
+  @GraphUserDefault("theme")
   var theme: String = "light"
-  
+
   @GraphComputed
   var isDarkMode: Bool
-  
+
   init() {
-    self.$isDarkMode = .init { [$theme] _ in
+    $isDarkMode = .init { [$theme] _ in
       $theme.wrappedValue == "dark"
     }
   }
 }
 ```
 
-Changes to `theme` are automatically saved to UserDefaults and restored when your app launches!
+Changes to `theme` are saved to UserDefaults. `$theme` is a reference-identity
+`GraphUserDefault<String>` handle whose reads delegate to its internal
+`Stored<String>` dependency.
 
 ## Next Steps
 
 Now that you've seen the basics, explore:
 
 - <doc:Core-Concepts> - Understand stored vs computed nodes in depth
-- <doc:Backing-Storage> - Learn about persistent storage options
+- <doc:UserDefaults> - Persist graph-aware values in UserDefaults
 - <doc:Describing-Models> - Build more complex reactive models
 - <doc:SwiftUI-Integration> - Learn advanced SwiftUI patterns
 - <doc:Migration-from-Observable> - Migrate from `@Observable` if you're already using it
@@ -156,4 +158,4 @@ Now that you've seen the basics, explore:
 **A:** Swift State Graph is designed for performance - it only recalculates what's needed, when it's needed, using intelligent caching.
 
 ### Q: Can I use this with UIKit?
-**A:** Absolutely! Use `withGraphTracking` to observe changes. See <doc:UIKit-Integration> for details. 
+**A:** Absolutely! Use `withGraphTracking` to observe changes. See <doc:UIKit-Integration> for details.

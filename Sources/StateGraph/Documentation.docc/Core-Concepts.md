@@ -50,22 +50,21 @@ profile.email = "john@example.com"
 profile.age = 30
 ```
 
-### Persistent Storage
+### Persistent Values
 
-`@GraphStored` properties can also use persistent backing storage like UserDefaults:
+`Stored` intentionally owns only in-memory state. Use `@GraphUserDefault` when a
+model value should synchronize with UserDefaults:
 
 ```swift
 final class AppSettings {
-  // This value persists across app launches
-  @GraphStored(backed: .userDefaults(key: "userName"))
+  @GraphUserDefault("userName")
   var userName: String = ""
-  
-  // Computed properties work with persistent storage too
+
   @GraphComputed
   var welcomeMessage: String
-  
+
   init() {
-    self.$welcomeMessage = .init { [$userName] _ in
+    $welcomeMessage = .init { [$userName] _ in
       let name = $userName.wrappedValue
       return name.isEmpty ? "Welcome!" : "Welcome, \(name)!"
     }
@@ -73,7 +72,10 @@ final class AppSettings {
 }
 ```
 
-See <doc:Backing-Storage> for comprehensive coverage of storage options.
+`$userName` is the reference-identity `GraphUserDefault<String>` handle. Reading
+its value delegates to an internal `Stored<String>` node, so dependency tracking
+is identical to an in-memory `@GraphStored` property. See <doc:UserDefaults> for
+store injection, suites, and custom value types.
 
 ### Characteristics of Stored Nodes
 
@@ -81,6 +83,88 @@ See <doc:Backing-Storage> for comprehensive coverage of storage options.
 - **Source Nodes**: They don't depend on other nodes
 - **Change Propagation**: When their value changes, all dependent nodes are notified
 - **Observable**: They integrate with SwiftUI and other observation systems
+
+### Graph Transactions
+
+Use `withGraphTransaction` when a synchronous operation must publish several
+`Stored` assignments without exposing a partial commit:
+
+```swift
+withGraphTransaction {
+  profile.$name.wrappedValue = "Taylor"
+  profile.$age.wrappedValue = 30
+
+  // Reads in this scope see both staged assignments.
+  print(profile.$name.wrappedValue)
+}
+```
+
+The outermost call stages assignments in each `Stored` node. Its body reads the
+latest staged value, while other threads continue to read the previously
+committed graph. When the body returns normally, StateGraph snapshots affected
+Observation nodes after current readers finish, then invokes the existing `willSet`
+delivery path before publication. A synchronously delivered handler on the
+committing thread reads the complete staged snapshot while other threads still
+read the old committed graph. All final values are then installed before
+StateGraph tracking invalidation and Observation's `didSet` delivery. Other
+writers wait until that work finishes, and readers briefly wait during
+publication so a computed value cannot observe a partial commit.
+
+`Stored.onDidSet(_:)` and `@GraphStored` property observers remain assignment
+observers. They run synchronously for every staged assignment, including repeated
+or comparator-equivalent assignments. `willSet` reads the preceding staged
+snapshot; `didSet` and `Stored.onDidSet(_:)` read the newly staged value. Ordinary
+`Stored` assignments made by any of these observers join the same transaction. A
+rollback discards those assignments but cannot undo other side effects already
+performed by the observer.
+
+Each `Stored` value uses its existing comparator and graph notification pipeline
+once at commit, comparing the committed old value with the final staged value.
+
+The API is synchronous and thread-local; it does not cross `await`, task
+creation, or executor hops. Nested calls join the outer transaction rather than
+creating savepoints. An inner error that the outer body catches leaves its staged
+assignments in place; only an error that escapes the outermost call rolls all
+staged `Stored` assignments back.
+
+Transaction-time `Computed` reads are evaluated from the staged `Stored` values
+without updating the committed cache or dependency edges. A mutation made by a
+synchronously delivered Observation handler during commit joins a following
+commit batch: it is immediately readable by later synchronous handlers on the
+committing thread, and every resulting batch is published before the outer call
+returns. These handlers run while other threads' graph writes remain suspended,
+but neither a comparator nor a handler may wait synchronously for another thread
+to finish a graph write. Handlers that existing tracking APIs schedule
+asynchronously do not inherit the thread-local transaction. The same applies when
+existing Observation delivery hops to MainActor: that handler reads the coherent
+committed snapshot current when it runs rather than transaction-local staged
+storage.
+
+Rollback cannot undo side effects outside ordinary `Stored` assignment. For
+example, mutating a property through reference storage reachable from a
+`Stored` value changes that object immediately and is not reversible by the
+transaction. This includes a class stored directly or as an entity in a
+value-semantic collection. `Stored.unsafeModify(_:)` also changes committed
+storage directly and bypasses transaction staging and notifications.
+
+Do not mutate `GraphUserDefault`, databases, or other externally committed
+sources inside `withGraphTransaction`. Their persistence, locking,
+notification, and rollback semantics are outside this Stored-level API.
+Likewise, accessing an externally locked store from the body while another
+thread mutates it is outside the transaction's lock-order guarantees.
+
+Keep committed `Computed` descriptors free of graph mutations. Descriptors own
+their node's evaluation lock, so beginning a transaction, or blocking on one
+through a `Stored` assignment, conflicts with writer lock ordering. StateGraph
+fails fast in those cases instead of deadlocking; initiate mutations from the
+descriptor's caller.
+
+An ordinary immediate assignment evaluates its `Stored` comparator and
+synchronously delivered Observation `willSet` handlers while a node lock is held.
+Do not begin a transaction there or from `Stored.unsafeModify(_:)`; start it from
+`onDidSet(_:)` or another post-mutation callback instead. Transaction commit
+evaluates comparators and delivers its Observation callbacks outside node locks,
+but comparators should remain free of mutation side effects.
 
 ## Computed Value Nodes
 
@@ -301,6 +385,7 @@ let subscription = withGraphTracking {
 - Must be called within a `withGraphTracking` scope
 - The handler should perform side effects, not return values
 - All subscriptions are cleaned up when the returned cancellable is cancelled
+- See <doc:Tracking-Registrations> for the lifecycle of the one-shot registrations used by each execution
 
 ## Memory Management
 
@@ -333,4 +418,4 @@ Now that you understand the core concepts:
 
 - <doc:Describing-Models> - Learn to build complex reactive models
 - <doc:Advanced-Patterns> - Explore advanced usage patterns
-- <doc:Performance-Optimization> - Optimize your state graphs for performance 
+- <doc:Performance-Optimization> - Optimize your state graphs for performance

@@ -6,6 +6,49 @@ import Observation
 @MainActor
 struct ObservationKeyPathTests {
 
+  @Test("Separate registrars isolate the shared node wrapped-value key path")
+  func separateRegistrarsIsolateSharedNodeWrappedValueKeyPath() async {
+    let root = NodeObservationRoot<Stored<Int>>()
+    let keyPath = \NodeObservationRoot<Stored<Int>>.wrappedValue
+    let firstRegistrar = ObservationRegistrar()
+    let secondRegistrar = ObservationRegistrar()
+
+    await confirmation(expectedCount: 1) { confirmation in
+      withObservationTracking {
+        firstRegistrar.access(root, keyPath: keyPath)
+      } onChange: {
+        confirmation.confirm()
+      }
+
+      secondRegistrar.willSet(root, keyPath: keyPath)
+      try? await Task.sleep(for: .milliseconds(10))
+
+      firstRegistrar.willSet(root, keyPath: keyPath)
+      try? await Task.sleep(for: .milliseconds(10))
+    }
+  }
+
+#if compiler(>=6.4)
+  @Test("Node deinit ends its Observation lifetime")
+  @available(macOS 27.0, iOS 27.0, watchOS 27.0, tvOS 27.0, *)
+  func nodeDeinitEndsObservationLifetime() async {
+    var node: Stored<Int>? = Stored(wrappedValue: 0)
+
+    await confirmation(expectedCount: 1) { confirmation in
+      withObservationTracking(options: [.deinit]) {
+        _ = node?.wrappedValue
+      } onChange: { event in
+        if event.kind == .deinit {
+          confirmation.confirm()
+        }
+      }
+
+      node = nil
+      try? await Task.sleep(for: .milliseconds(10))
+    }
+  }
+#endif
+
   @Test("Direct Stored observation ignores another same-type instance")
   func directStoredObservationIgnoresAnotherSameTypeInstance() async {
     let observed = Stored(wrappedValue: 0)

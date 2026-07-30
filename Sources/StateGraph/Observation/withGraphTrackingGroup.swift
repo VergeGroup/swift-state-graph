@@ -12,6 +12,15 @@
  - The handler closure is executed initially and re-executed whenever any tracked node changes
  - Only nodes accessed during execution are tracked for the next iteration
  - Nodes are dynamically added/removed from tracking based on runtime conditions
+
+ ## Self-Mutation
+
+ If the handler synchronously mutates graph state that invalidates a node accessed in
+ the same execution, the mutation is applied and peer tracking registrations are notified.
+ This handler is not re-executed for its own mutation. Its one-shot registration is not
+ restored to the invalidated node, so tracking for that node is re-established only if
+ another tracked change later re-executes the handler. A DEBUG warning is emitted unless
+ ``StateGraphDiagnostics/isSelfInvalidationWarningEnabled`` is `false`.
  
  ## Example: Group Tracking
  ```swift

@@ -2,6 +2,7 @@ import Testing
 @testable import StateGraphNormalization
 import StateGraph
 import Foundation
+import os
 
 extension ComputedEnvironmentValues {
   
@@ -130,19 +131,191 @@ final class Comment: TypedIdentifiable, Sendable {
 final class NormalizedStore: ComputedEnvironmentKey, Sendable {
   
   typealias Value = NormalizedStore
-  
+
   @GraphStored
-  var users: EntityStore<User> = .init()  
+  var users: EntityStore<User> = .init()
+
   @GraphStored
   var posts: EntityStore<Post> = .init()
+
   @GraphStored
   var comments: EntityStore<Comment> = .init()
-  
-  
+}
+
+private struct ValueEntity: TypedIdentifiable, Sendable {
+
+  typealias TypedIdentifierRawValue = Int
+
+  let typedID: TypedID
+  var value: Int
+
+  init(id: Int, value: Int) {
+    self.typedID = .init(id)
+    self.value = value
+  }
+}
+
+private enum MutationError: Error {
+  case expected
+}
+
+/// Owns a value-semantic entity store at the StateGraph mutation boundary.
+private final class ValueStoreOwner: Sendable {
+
+  @GraphStored
+  var entities: EntityStore<ValueEntity> = .init()
 }
 
 @Suite
 struct NormalizationTests {
+
+  @Test func copiedStoresMutateIndependently() {
+    var original = EntityStore<ValueEntity>()
+    original.add(.init(id: 1, value: 1))
+
+    var copy = original
+    copy.modify(.init(1)) { entity in
+      entity.value = 2
+    }
+    copy.add(.init(id: 2, value: 2))
+
+    #expect(original.get(by: .init(1))?.value == 1)
+    #expect(!original.contains(.init(2)))
+    #expect(copy.get(by: .init(1))?.value == 2)
+    #expect(copy.contains(.init(2)))
+  }
+
+  @Test func crudAndBatchOperations() {
+    var store = EntityStore<ValueEntity>()
+
+    #expect(store.isEmpty)
+
+    store.add(.init(id: 1, value: 1))
+    store.add([
+      .init(id: 2, value: 2),
+      .init(id: 3, value: 3),
+    ])
+
+    #expect(store.count == 3)
+    #expect(store.contains(.init(1)))
+    #expect(store.get(by: .init(2))?.value == 2)
+    #expect(store[.init(3)]?.value == 3)
+
+    store.modify(.init(1)) { entity in
+      entity.value = 10
+    }
+    store.update(.init(id: 2, value: 20))
+    store[.init(3)] = .init(id: 3, value: 30)
+
+    #expect(store.get(by: .init(1))?.value == 10)
+    #expect(store.get(by: .init(2))?.value == 20)
+    #expect(store.get(by: .init(3))?.value == 30)
+    #expect(store.filter { $0.value >= 20 }.count == 2)
+
+    store.delete(.init(2))
+
+    #expect(!store.contains(.init(2)))
+    #expect(store.count == 2)
+  }
+
+  @Test func updateOrCreateUpdatesOrInserts() {
+    var store = EntityStore<ValueEntity>(
+      entities: [.init(1): .init(id: 1, value: 1)]
+    )
+
+    let updated = store.updateOrCreate(
+      id: .init(1),
+      update: { $0.value = 2 },
+      create: { .init(id: 1, value: 999) }
+    )
+    let created = store.updateOrCreate(
+      id: .init(2),
+      update: { $0.value = 999 },
+      create: { .init(id: 2, value: 3) }
+    )
+
+    #expect(updated.value == 2)
+    #expect(created.value == 3)
+    #expect(store.get(by: .init(1))?.value == 2)
+    #expect(store.get(by: .init(2))?.value == 3)
+  }
+
+  @Test func failedValueUpdateDoesNotCommit() {
+    var store = EntityStore<ValueEntity>(
+      entities: [.init(1): .init(id: 1, value: 1)]
+    )
+
+    #expect(throws: MutationError.self) {
+      try store.updateOrCreate(
+        id: .init(1),
+        update: { entity throws(MutationError) in
+          entity.value = 2
+          throw .expected
+        },
+        create: { () throws(MutationError) -> ValueEntity in
+          .init(id: 1, value: 2)
+        }
+      )
+    }
+
+    #expect(store.get(by: .init(1))?.value == 1)
+
+    #expect(throws: MutationError.self) {
+      try store.updateOrCreate(
+        id: .init(2),
+        update: { _ throws(MutationError) in },
+        create: { () throws(MutationError) -> ValueEntity in
+          throw .expected
+        }
+      )
+    }
+
+    #expect(!store.contains(.init(2)))
+  }
+
+  @Test func graphStoredOwnerInvalidatesComputed() {
+    let owner = ValueStoreOwner()
+    let computationCount = OSAllocatedUnfairLock(initialState: 0)
+    let count = Computed { _ in
+      computationCount.withLock { $0 += 1 }
+      return owner.entities.count
+    }
+
+    #expect(count.wrappedValue == 0)
+
+    owner.entities.add(.init(id: 1, value: 1))
+
+    #expect(count.wrappedValue == 1)
+    #expect(computationCount.withLock { $0 } == 2)
+  }
+
+  @Test func batchMutationInvalidatesGraphTracking() async {
+    let owner = ValueStoreOwner()
+    let stream = withStateGraphTrackingStream {
+      owner.entities.count
+    }
+    var iterator = stream.makeAsyncIterator()
+
+    #expect(await iterator.next() == 0)
+
+    owner.entities.add([
+      .init(id: 1, value: 1),
+      .init(id: 2, value: 2),
+    ])
+
+    #expect(await iterator.next() == 2)
+  }
+
+  @Test func getAllReturnsIndependentSnapshot() {
+    var store = EntityStore<ValueEntity>()
+    store.add(.init(id: 1, value: 1))
+
+    let snapshot = store.getAll()
+    store.add(.init(id: 2, value: 2))
+
+    #expect(snapshot.map(\.typedID) == [.init(1)])
+    #expect(Set(store.getAll().map(\.typedID)) == [.init(1), .init(2)])
+  }
 
   @MainActor
   @Test func basic() async {

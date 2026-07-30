@@ -9,103 +9,13 @@ import Foundation.NSLock
  https://talk.objc.io/episodes/S01E429-attribute-graph-part-1
  */
 
-/// A node that functions as an endpoint in a Directed Acyclic Graph (DAG).
+/// Describes how a computed node produces and compares values.
 ///
-/// `Stored` can have its value set directly from the outside, and changes to its value
-/// automatically propagate to dependent nodes. This node doesn't perform any computations
-/// and serves purely as a value container with in-memory storage.
-///
-/// - When value changes: Changes propagate to all dependent nodes, triggering recalculations
-/// - When value is accessed: Dependencies are recorded, automatically building the graph structure
-public typealias Stored<Value> = _Stored<Value, InMemoryStorage<Value>>
-
-extension _Stored where S == InMemoryStorage<Value> {
-  /// Convenience initializer with wrappedValue (non-Equatable types)
-  public convenience init(
-    _ file: StaticString = #fileID,
-    _ line: UInt = #line,
-    _ column: UInt = #column,
-    name: StaticString? = nil,
-    wrappedValue: Value
-  ) {
-    let storage = InMemoryStorage(initialValue: wrappedValue)
-    self.init(
-      file,
-      line,
-      column,
-      name: name,
-      storage: storage
-    )
-  }
-}
-
-extension _Stored where S == InMemoryStorage<Value>, Value: Equatable {
-  /// Convenience initializer with wrappedValue for Equatable types
-  /// Automatically skips notifications when the value hasn't changed.
-  public convenience init(
-    _ file: StaticString = #fileID,
-    _ line: UInt = #line,
-    _ column: UInt = #column,
-    name: StaticString? = nil,
-    wrappedValue: Value
-  ) {
-    let storage = InMemoryStorage(initialValue: wrappedValue)
-    self.init(
-      file,
-      line,
-      column,
-      name: name,
-      storage: storage
-    )
-  }
-}
-
-extension _Stored where S == InMemoryStorage<Value>, Value: AnyObject {
-  /// Convenience initializer with wrappedValue for reference types
-  /// Automatically skips notifications when the reference identity hasn't changed.
-  public convenience init(
-    _ file: StaticString = #fileID,
-    _ line: UInt = #line,
-    _ column: UInt = #column,
-    name: StaticString? = nil,
-    wrappedValue: Value
-  ) {
-    let storage = InMemoryStorage(initialValue: wrappedValue)
-    self.init(
-      file,
-      line,
-      column,
-      name: name,
-      storage: storage
-    )
-  }
-}
-
-extension _Stored where S == InMemoryStorage<Value>, Value: Equatable & AnyObject {
-  /// Convenience initializer with wrappedValue for Equatable reference types
-  /// Uses value equality (Equatable) rather than reference identity.
-  public convenience init(
-    _ file: StaticString = #fileID,
-    _ line: UInt = #line,
-    _ column: UInt = #column,
-    name: StaticString? = nil,
-    wrappedValue: Value
-  ) {
-    let storage = InMemoryStorage(initialValue: wrappedValue)
-    self.init(
-      file,
-      line,
-      column,
-      name: name,
-      storage: storage,
-      shouldNotify: { $0 != $1 }
-    )
-  }
-}
-
+/// `Value` itself does not need to conform to `Sendable`. `SendableMetatype` allows the
+/// descriptor's sendable closures to use generic conformances safely.
 public protocol ComputedDescriptor<Value>: Sendable {
   
-  associatedtype Value
+  associatedtype Value: SendableMetatype
   
   func compute(context: inout Computed<Value>.Context) -> Value
   
@@ -115,14 +25,14 @@ public protocol ComputedDescriptor<Value>: Sendable {
 extension ComputedDescriptor {
   
   @Sendable
-  public static func any<Value>(
+  public static func any<Value: SendableMetatype>(
     _ compute: @Sendable @escaping (inout Computed<Value>.Context) -> Value
   ) -> Self where Self == AnyComputedDescriptor<Value> {
     AnyComputedDescriptor(compute: compute, isEqual: { _, _ in false })
   }
   
   @Sendable
-  public static func any<Value>(
+  public static func any<Value: SendableMetatype>(
     _ compute: @Sendable @escaping (
       inout Computed<Value>.Context
     ) -> Value
@@ -132,7 +42,7 @@ extension ComputedDescriptor {
   
 }
 
-public struct AnyComputedDescriptor<Value>: ComputedDescriptor {
+public struct AnyComputedDescriptor<Value: SendableMetatype>: ComputedDescriptor {
 
   private let computeClosure: @Sendable (inout Computed<Value>.Context) -> Value
   private let isEqualClosure: @Sendable (Value, Value) -> Bool
@@ -147,7 +57,7 @@ public struct AnyComputedDescriptor<Value>: ComputedDescriptor {
   
   public init(
     compute: @escaping @Sendable (inout Computed<Value>.Context) -> Value
-  ) where Value : Equatable {
+  ) where Value: Equatable {
     self.computeClosure = compute  
     self.isEqualClosure = { $0 == $1 }
   }
@@ -209,8 +119,10 @@ public enum StateGraphGlobal {
 /// - Value is lazily computed: Calculations only occur when the value is accessed
 /// - Dependencies are tracked: The node automatically tracks which nodes it depends on
 /// - Changes propagate: When this node's value changes, downstream nodes are notified
-/// ```
-public final class Computed<Value>: Node, Observable, CustomDebugStringConvertible {
+///
+/// `Value` itself does not need to conform to `Sendable`. `SendableMetatype` allows the
+/// node's isolated closures to use generic conformances safely.
+public final class Computed<Value: SendableMetatype>: Node, Observable, CustomDebugStringConvertible {
     
   public struct Context {
     
@@ -258,10 +170,14 @@ public final class Computed<Value>: Node, Observable, CustomDebugStringConvertib
   
   #if canImport(Observation)
     @available(macOS 14.0, iOS 17.0, watchOS 10.0, tvOS 17.0, *)
-    private var observationRegistrar: ObservationRegistrar {
-      return .shared
-    }
+    private let observationRegistrar = ObservationRegistrar()
   #endif
+
+  /// Single-use graph work captured when this node first becomes potentially dirty.
+  private struct InvalidationWork: ~Copyable {
+    let outgoingEdges: ContiguousArray<Edge>
+    let trackingRegistrations: Set<TrackingRegistration>
+  }
 
   public var potentiallyDirty: Bool {
     get {
@@ -272,21 +188,14 @@ public final class Computed<Value>: Node, Observable, CustomDebugStringConvertib
       return _potentiallyDirty
     }
     set {
-      lock.lock()
-          
-      let oldValue = _potentiallyDirty
-      _potentiallyDirty = newValue
-      
-      guard _potentiallyDirty, _potentiallyDirty != oldValue else {
+      guard newValue else {
+        lock.lock()
+        _potentiallyDirty = false
         lock.unlock()
         return
       }
 
-      let _outgoingEdges = outgoingEdges
-      let _trackingRegistrations = trackingRegistrations
-      trackingRegistrations.removeAll()
-
-      lock.unlock()
+      guard let invalidationWork = preparePotentiallyDirtyState() else { return }
 
       // Notify observers when becoming potentially dirty, even if the computed value
       // might not actually change. This is necessary for SwiftUI and other Observation
@@ -294,21 +203,40 @@ public final class Computed<Value>: Node, Observable, CustomDebugStringConvertib
       // is checked during recomputation to avoid unnecessary downstream propagation.
 #if canImport(Observation)
       if #available(macOS 14.0, iOS 17.0, watchOS 10.0, tvOS 17.0, *) {
-        withMainActor { [observationRegistrar, keyPath = _keyPath(self)] in   
-          observationRegistrar.willSet(PointerKeyPathRoot<Computed<Value>>.shared, keyPath: keyPath)
+        withMainActor { [observationRegistrar] in
+          observationRegistrar.willSet(
+            NodeObservationRoot<Computed<Value>>(),
+            keyPath: \NodeObservationRoot<Computed<Value>>.wrappedValue
+          )
         }
       }
 #endif
 
-      for edge in _outgoingEdges {
-        edge.to.potentiallyDirty = true
+      for edge in invalidationWork.outgoingEdges {
+        edge.to?.potentiallyDirty = true
       }
 
-      for registration in _trackingRegistrations {
+      for registration in invalidationWork.trackingRegistrations {
         registration.perform()
       }
             
     }
+  }
+
+  /// Marks this node dirty and captures callbacks while holding only its node lock.
+  private func preparePotentiallyDirtyState() -> InvalidationWork? {
+    lock.lock()
+    defer { lock.unlock() }
+
+    guard !_potentiallyDirty else { return nil }
+    _potentiallyDirty = true
+
+    let work = InvalidationWork(
+      outgoingEdges: outgoingEdges,
+      trackingRegistrations: trackingRegistrations
+    )
+    trackingRegistrations.removeAll()
+    return work
   }
 
   nonisolated(unsafe)
@@ -318,17 +246,51 @@ public final class Computed<Value>: Node, Observable, CustomDebugStringConvertib
 
   public var wrappedValue: Value {
     get {
-      #if canImport(Observation)
-        if #available(macOS 14.0, iOS 17.0, watchOS 10.0, tvOS 17.0, *) {
-          observationRegistrar.access(PointerKeyPathRoot<Computed<Value>>.shared, keyPath: _keyPath(self))   
-        }
-      #endif
-      recomputeIfNeeded()
-      
-      lock.lock()
-      defer { lock.unlock() }
-      return _cachedValue!
+      if ThreadLocal.graphTransaction.value != nil {
+        return transactionValue()
+      }
+
+      return GraphTransactionCoordinator.shared.withReadAccess {
+        committedValue()
+      }
     }
+  }
+
+  /// Evaluates this node from the transaction's staged `Stored` values without
+  /// changing the committed cache or dependency graph.
+  ///
+  /// A transaction intentionally does not cache `Computed` results. Every read is
+  /// reevaluated so a later staged assignment is immediately visible, while rollback
+  /// cannot leave a transaction-only value or edge in the committed graph.
+  private func transactionValue() -> Value {
+    ThreadLocal.currentNode.withValue(nil) {
+      if ThreadLocal.graphTransaction.value?.recordsDependencies == true {
+        var context = Context(environment: .init())
+        return descriptor.compute(context: &context)
+      }
+
+      return ThreadLocal.registration.withValue(nil) {
+        var context = Context(environment: .init())
+        return descriptor.compute(context: &context)
+      }
+    }
+  }
+
+  private func committedValue() -> Value {
+#if canImport(Observation)
+    if #available(macOS 14.0, iOS 17.0, watchOS 10.0, tvOS 17.0, *) {
+      observationRegistrar.access(
+        NodeObservationRoot<Computed<Value>>(),
+        keyPath: \NodeObservationRoot<Computed<Value>>.wrappedValue
+      )
+    }
+#endif
+
+    recomputeIfNeededWithinReadAccess()
+
+    lock.lock()
+    defer { lock.unlock() }
+    return _cachedValue!
   }
 
   private let descriptor: any ComputedDescriptor<Value>
@@ -368,7 +330,8 @@ public final class Computed<Value>: Node, Observable, CustomDebugStringConvertib
     self.lock = .init()
 
 #if DEBUG
-    Task {
+    Task { [weak self] in
+      guard let self else { return }
       await NodeStore.shared.register(node: self)
     }
 #endif
@@ -400,7 +363,8 @@ public final class Computed<Value>: Node, Observable, CustomDebugStringConvertib
     self.lock = .init()
 
 #if DEBUG
-    Task {
+    Task { [weak self] in
+      guard let self else { return }
       await NodeStore.shared.register(node: self)
     }
 #endif
@@ -432,21 +396,45 @@ public final class Computed<Value>: Node, Observable, CustomDebugStringConvertib
     self.lock = .init()
    
 #if DEBUG
-    Task {
+    Task { [weak self] in
+      guard let self else { return }
       await NodeStore.shared.register(node: self)
     }
 #endif
   }
   
-    deinit {
-//      Log.generic.debug("Deinit Computed: \(self.info.name.map(String.init) ?? "noname")")
-      for edge in incomingEdges {
-        edge.from.outgoingEdges.removeAll(where: { $0 === edge })
-      }
+  deinit {
+//    Log.generic.debug("Deinit Computed: \(self.info.name.map(String.init) ?? "noname")")
+    lock.lock()
+    let incomingEdges = self.incomingEdges
+    let outgoingEdges = self.outgoingEdges
+    self.incomingEdges.removeAll()
+    self.outgoingEdges.removeAll()
+    lock.unlock()
+
+    for edge in incomingEdges {
+      edge.from?.removeOutgoingEdge(edge)
     }
 
-  public func recomputeIfNeeded() {
+    for edge in outgoingEdges {
+      edge.to?.removeIncomingEdge(edge)
+    }
+  }
 
+  public func recomputeIfNeeded() {
+    guard ThreadLocal.graphTransaction.value == nil else {
+      // Transaction reads intentionally evaluate without changing committed cache
+      // state or dependency edges.
+      return
+    }
+
+    GraphTransactionCoordinator.shared.withReadAccess {
+      recomputeIfNeededWithinReadAccess()
+    }
+  }
+
+  /// Recomputes while the caller owns one committed-graph read scope.
+  private func recomputeIfNeededWithinReadAccess() {
     lock.lock()
     defer { lock.unlock() }
 
@@ -464,11 +452,15 @@ public final class Computed<Value>: Node, Observable, CustomDebugStringConvertib
 
     if !_potentiallyDirty && _cachedValue != nil { return }
 
+    incomingEdges.removeAll(where: { $0.from == nil })
+
     for edge in incomingEdges {
-      edge.from.recomputeIfNeeded()
+      edge.from?.recomputeIfNeeded()
     }
 
-    let hasPendingIncomingEdge = incomingEdges.contains(where: \.isPending)
+    let hasPendingIncomingEdge = incomingEdges.contains {
+      $0.from != nil && $0.isPending
+    }
 
     if hasPendingIncomingEdge || _cachedValue == nil {
 
@@ -506,18 +498,74 @@ public final class Computed<Value>: Node, Observable, CustomDebugStringConvertib
   }
 
   private func removeIncomingEdges() {
+    let incomingEdges = self.incomingEdges
+    self.incomingEdges.removeAll()
+
     for edge in incomingEdges {
-      edge.from.lock.lock()
-      edge.from.outgoingEdges.removeAll(where: { $0 === edge })
-      edge.from.lock.unlock()
+      edge.from?.removeOutgoingEdge(edge)
     }
-    incomingEdges.removeAll()
   }
    
   public var debugDescription: String {
-    "Computed<\(Value.self)>(name=\(info.name.map(String.init) ?? "noname"), value=\(String(describing: _cachedValue)))"
+    lock.lock()
+    let cachedValue = _cachedValue
+    lock.unlock()
+
+    return "Computed<\(Value.self)>(name=\(info.name.map(String.init) ?? "noname"), value=\(String(describing: cachedValue)))"
   }
   
+}
+
+extension Computed: GraphTransactionInvalidatableNode {
+
+  /// Delivers Observation's existing pre-mutation notification without making the
+  /// committed cache dirty before publication.
+  func prepareGraphTransactionObservationWillSet(
+    _ observationWillSetDelivery: GraphTransactionObservationWillSetDelivery
+  ) {
+    lock.lock()
+    guard !_potentiallyDirty else {
+      lock.unlock()
+      return
+    }
+    let outgoingEdges = self.outgoingEdges
+    lock.unlock()
+
+#if canImport(Observation)
+    if #available(macOS 14.0, iOS 17.0, watchOS 10.0, tvOS 17.0, *) {
+      observationWillSetDelivery.appendWillSetOperation { [observationRegistrar] in
+        withMainActor {
+          observationRegistrar.willSet(
+            NodeObservationRoot<Computed<Value>>(),
+            keyPath: \NodeObservationRoot<Computed<Value>>.wrappedValue
+          )
+        }
+      }
+    }
+#endif
+
+    for edge in outgoingEdges {
+      observationWillSetDelivery.prepareWillSet(for: edge)
+    }
+  }
+
+  /// Marks the committed cache dirty while deferring graph-tracking callbacks until
+  /// after transaction publication releases its global read barrier.
+  func prepareGraphTransactionInvalidation(
+    _ callbackDelivery: GraphTransactionCallbackDelivery
+  ) {
+    guard let invalidationWork = preparePotentiallyDirtyState() else { return }
+
+    for edge in invalidationWork.outgoingEdges {
+      callbackDelivery.prepareInvalidation(for: edge)
+    }
+
+    for registration in invalidationWork.trackingRegistrations {
+      callbackDelivery.append {
+        registration.perform()
+      }
+    }
+  }
 }
 
 extension Computed {
@@ -567,11 +615,11 @@ extension Computed {
   
 }
 
-@DebugDescription
+/// A dependency link whose lifetime does not keep either endpoint alive.
 public final class Edge: CustomDebugStringConvertible {
 
-  unowned let from: any TypeErasedNode
-  unowned let to: any TypeErasedNode
+  weak var from: (any TypeErasedNode)?
+  weak var to: (any TypeErasedNode)?
   
   private let lock: OSAllocatedUnfairLock<Void> = .init()
   
@@ -596,7 +644,11 @@ public final class Edge: CustomDebugStringConvertible {
   }
 
   public var debugDescription: String {
-    "\(from.debugDescription) -> \(to.debugDescription)"
+    guard let from, let to else {
+      return "Edge(deallocated endpoint)"
+    }
+
+    return "\(from.debugDescription) -> \(to.debugDescription)"
   }
 
   deinit {

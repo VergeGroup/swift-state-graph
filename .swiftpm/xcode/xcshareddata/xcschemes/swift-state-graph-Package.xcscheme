@@ -83,6 +83,16 @@
                ReferencedContainer = "container:">
             </BuildableReference>
          </TestableReference>
+         <TestableReference
+            skipped = "NO">
+            <BuildableReference
+               BuildableIdentifier = "primary"
+               BlueprintIdentifier = "StateGraphNormalizationMacroTests"
+               BuildableName = "StateGraphNormalizationMacroTests"
+               BlueprintName = "StateGraphNormalizationMacroTests"
+               ReferencedContainer = "container:">
+            </BuildableReference>
+         </TestableReference>
       </Testables>
    </TestAction>
    <LaunchAction

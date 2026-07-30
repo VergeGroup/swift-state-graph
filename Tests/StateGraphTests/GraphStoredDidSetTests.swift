@@ -50,12 +50,80 @@ struct GraphStoredDidSetTests {
     #expect(model.history[0].1 == 12)
   }
 
-  @Test func didSet_runs_with_userDefaults_backing() {
+  @Test func didSet_stored_mutation_joins_transaction_and_rolls_back() {
+    enum TestError: Error {
+      case rollback
+    }
+
+    final class Model {
+      @GraphStored
+      var source: Int = 0 {
+        didSet {
+          derived += source - oldValue
+        }
+      }
+
+      @GraphStored
+      var derived: Int = 0
+    }
+
+    let model = Model()
+    var didRollBack = false
+
+    do {
+      try withGraphTransaction { () throws(TestError) -> Void in
+        model.source = 2
+        model.source = 5
+
+        #expect(model.source == 5)
+        #expect(model.derived == 5)
+
+        throw .rollback
+      }
+    } catch {
+      didRollBack = true
+      // Both GraphStored assignments are staged in the same transaction.
+    }
+
+    #expect(didRollBack)
+    #expect(model.source == 0)
+    #expect(model.derived == 0)
+  }
+
+  @Test func didSet_and_onDidSet_share_transaction_assignment_semantics() {
+    final class Model {
+      @GraphStored
+      var count: Int = 0 {
+        didSet {
+          propertyObserverEvents.append("\(oldValue)->\(count)")
+        }
+      }
+
+      var propertyObserverEvents: [String] = []
+    }
+
+    let model = Model()
+    var nodeObserverEvents: [String] = []
+    model.$count.onDidSet { oldValue, newValue in
+      nodeObserverEvents.append("\(oldValue)->\(newValue)")
+    }
+
+    withGraphTransaction {
+      model.count = 1
+      model.count = 1
+      model.count = 3
+    }
+
+    #expect(model.propertyObserverEvents == ["0->1", "1->1", "1->3"])
+    #expect(nodeObserverEvents == model.propertyObserverEvents)
+  }
+
+  @Test func didSet_runs_with_graphUserDefault() {
     let key = "GraphStoredDidSetTests.username"
     UserDefaults.standard.removeObject(forKey: key)
 
     final class Settings {
-      @GraphStored(backed: .userDefaults(key: "GraphStoredDidSetTests.username"))
+      @GraphUserDefault("GraphStoredDidSetTests.username")
       var username: String = "anonymous" {
         didSet {
           history.append((oldValue, username))
@@ -148,12 +216,12 @@ struct GraphStoredDidSetTests {
     #expect(model.history[1].2 == 4)
   }
 
-  @Test func willSet_runs_with_userDefaults_backing() {
+  @Test func willSet_runs_with_graphUserDefault() {
     let key = "GraphStoredWillSetTests.username"
     UserDefaults.standard.removeObject(forKey: key)
 
     final class Settings {
-      @GraphStored(backed: .userDefaults(key: "GraphStoredWillSetTests.username"))
+      @GraphUserDefault("GraphStoredWillSetTests.username")
       var username: String = "anonymous" {
         willSet {
           history.append((username, newValue))

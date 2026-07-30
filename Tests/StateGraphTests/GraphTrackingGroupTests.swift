@@ -30,6 +30,38 @@ struct GraphTrackingGroupTests {
   }
 
   @Test
+  func nonisolatedGroupEnqueuesRerun() async {
+    let node = Stored(wrappedValue: 0)
+    let rerunFinished = TestSignal()
+    let setterStackMarker = "StateGraphTests.nonisolatedGroupEnqueuesRerun.\(UUID())"
+    let callbackObservedSetterStack = OSAllocatedUnfairLock(initialState: false)
+
+    let cancellable = withGraphTracking {
+      withGraphTrackingGroup(
+        {
+          guard node.wrappedValue == 1 else { return }
+          callbackObservedSetterStack.withLock {
+            $0 = Thread.current.threadDictionary[setterStackMarker] != nil
+          }
+          rerunFinished.signal()
+        },
+        isolation: nil
+      )
+    }
+    defer { cancellable.cancel() }
+
+    func setNodeFromMarkedStack() {
+      Thread.current.threadDictionary[setterStackMarker] = true
+      defer { Thread.current.threadDictionary.removeObject(forKey: setterStackMarker) }
+      node.wrappedValue = 1
+    }
+
+    setNodeFromMarkedStack()
+    #expect(await rerunFinished.wait(for: .seconds(5)))
+    #expect(callbackObservedSetterStack.withLock { $0 } == false)
+  }
+
+  @Test
   func basicConditionalTracking() async throws {
     let node1 = Stored(wrappedValue: 5)  // condition node
     let node2 = Stored(wrappedValue: 10)  // conditional node
@@ -174,56 +206,55 @@ struct GraphTrackingGroupTests {
 
   @Test
   @MainActor
-  func infiniteLoopWhenSettingSameValue() async throws {
+  func sameEquatableValueDoesNotNotifyTrackingGroups() async throws {
     let node = Stored(wrappedValue: 42)
-    let callCounter = CallCounter()
+    let readingCallCounter = CallCounter()
+    let mutatingCallCounter = CallCounter()
     let maxIterations = 10
 
-    let cancellable = withGraphTracking {
+    let readingCancellable = withGraphTracking {
       withGraphTrackingGroup {
-        let currentCount = callCounter.count
+        _ = node.wrappedValue
+        readingCallCounter.increment()
+      }
+    }
 
-        // Safety guard: stop after maxIterations to prevent actual infinite loop during testing
+    let mutatingCancellable = withGraphTracking {
+      withGraphTrackingGroup {
+        let currentCount = mutatingCallCounter.count
+
+        // Keep a combined regression in equality filtering and re-entry protection
+        // from hanging the test process.
         guard currentCount < maxIterations else {
           return
         }
 
-        callCounter.increment()
-        print("=== Handler called, count: \(callCounter.count) ===")
+        mutatingCallCounter.increment()
 
-        // Read the current value
         let value = node.wrappedValue
-
-        // Set the same value back - this should NOT trigger re-execution
-        // but currently causes an infinite loop (bug)
         node.wrappedValue = value
       }
     }
 
-    // Wait a short time for any potential iterations
+    // A notification would re-run a tracking group asynchronously.
     try await Task.sleep(nanoseconds: 100_000_000)  // 100ms
 
-    // Expected behavior: handler should only be called once (initial setup)
-    // Setting the same value should NOT trigger re-execution
-    print("\nFinal count: \(callCounter.count)")
-    print("Expected: 1 (initial call only)")
-    print("Actual: \(callCounter.count)")
+    #expect(
+      mutatingCallCounter.count == 1,
+      "The mutating tracking group should run only for its initial setup."
+    )
+    #expect(
+      readingCallCounter.count == 1,
+      "An equal assignment must be filtered before any tracking registration is invalidated."
+    )
 
-    if callCounter.count > 1 {
-      print("❌ INFINITE LOOP DETECTED: Handler was called \(callCounter.count) times")
-      print("This indicates that setting an unchanged value triggers re-execution")
-    }
-
-    // This expectation will FAIL with current implementation (infinite loop bug)
-    // It should PASS once the bug is fixed
-    #expect(callCounter.count == 1, "Setting unchanged value should not trigger re-execution, but handler was called \(callCounter.count) times indicating an infinite loop")
-
-    cancellable.cancel()
+    readingCancellable.cancel()
+    mutatingCancellable.cancel()
   }
 
   @Test
   @MainActor
-  func infiniteLoopWithMultipleProperties() async throws {
+  func multipleSameEquatableValuesDoNotNotifyTrackingGroup() async throws {
     let node1 = Stored(wrappedValue: 10)
     let node2 = Stored(wrappedValue: 20)
     let node3 = Stored(wrappedValue: 30)
@@ -247,8 +278,8 @@ struct GraphTrackingGroupTests {
         let value2 = node2.wrappedValue
         let value3 = node3.wrappedValue
 
-        // Set all three values back to the same values
-        // Without re-entry prevention, this would cause infinite loop
+        // Each equal assignment is filtered by its node's Equatable
+        // notification predicate before re-entry protection is involved.
         node1.wrappedValue = value1
         node2.wrappedValue = value2
         node3.wrappedValue = value3
@@ -265,9 +296,66 @@ struct GraphTrackingGroupTests {
       print("❌ INFINITE LOOP with multiple properties")
     }
 
-    #expect(callCounter.count == 1, "Setting multiple unchanged values should not trigger re-execution, but handler was called \(callCounter.count) times")
+    #expect(
+      callCounter.count == 1,
+      "Equal assignments must not invalidate the tracking group."
+    )
 
     cancellable.cancel()
+  }
+
+  @Test
+  @MainActor
+  func nonEquatableAssignmentNotifiesPeersWithoutReenteringItself() async throws {
+
+    /// A payload without an equality predicate, so every assignment is
+    /// notification-worthy even when its stored properties are unchanged.
+    struct NonEquatableValue: Sendable {
+      let rawValue: Int
+    }
+
+    let node = Stored(wrappedValue: NonEquatableValue(rawValue: 0))
+    let readingCallCounter = CallCounter()
+    let mutatingCallCounter = CallCounter()
+    let maxIterations = 10
+
+    let readingCancellable = withGraphTracking {
+      withGraphTrackingGroup {
+        _ = node.wrappedValue
+        readingCallCounter.increment()
+      }
+    }
+
+    let mutatingCancellable = withGraphTracking {
+      withGraphTrackingGroup {
+        let currentCount = mutatingCallCounter.count
+
+        // Keep a re-entry regression from hanging the test process.
+        guard currentCount < maxIterations else {
+          return
+        }
+
+        mutatingCallCounter.increment()
+
+        let value = node.wrappedValue
+        node.wrappedValue = value
+      }
+    }
+
+    // The peer notification is scheduled in a task; allow it to run before asserting.
+    try await Task.sleep(nanoseconds: 100_000_000)  // 100ms
+
+    #expect(
+      mutatingCallCounter.count == 1,
+      "The active tracking registration must not re-enter itself."
+    )
+    #expect(
+      readingCallCounter.count == 2,
+      "A notification-worthy assignment must still invalidate other registrations."
+    )
+
+    readingCancellable.cancel()
+    mutatingCancellable.cancel()
   }
 
   @Test
@@ -292,13 +380,12 @@ struct GraphTrackingGroupTests {
         let value1 = node1.wrappedValue
         let value2 = node2.wrappedValue
 
-        // Set node1 to same value (unchanged)
+        // The equal assignment is filtered by the Equatable predicate.
         node1.wrappedValue = value1
 
-        // Set node2 to same value too
-        // Even if we changed it, the re-entry guard would prevent re-execution
-        // during the same handler execution context
-        node2.wrappedValue = value2
+        // The changed assignment notifies other registrations, while the active
+        // registration is protected from re-entering itself.
+        node2.wrappedValue = value2 + 1
       }
     }
 
@@ -308,9 +395,12 @@ struct GraphTrackingGroupTests {
     print("Expected: 1 (initial call only)")
     print("Actual: \(callCounter.count)")
 
-    // Re-entry guard prevents triggering the same handler during its execution
-    // Even if a value changes within the handler, it won't re-trigger itself
-    #expect(callCounter.count == 1, "Mixed scenario: handler was called \(callCounter.count) times, expected 1")
+    #expect(node1.wrappedValue == 10)
+    #expect(node2.wrappedValue == 21)
+    #expect(
+      callCounter.count == 1,
+      "A notification-worthy mutation must not re-enter its active tracking group."
+    )
 
     cancellable.cancel()
   }
@@ -388,7 +478,7 @@ struct GraphTrackingGroupTests {
         // Read the struct
         let state = node.wrappedValue
 
-        // Set it back (even though the struct is equal, no equality check in setter)
+        // The Equatable predicate filters this assignment before notifying.
         node.wrappedValue = state
       }
     }
@@ -474,8 +564,8 @@ struct GraphTrackingGroupTests {
     print("Expected: 2 (initial + external change)")
     print("Actual: \(callCounter.count)")
 
-    // External changes should still trigger the handler
-    // Re-entry guard only prevents same handler from triggering itself
+    // Equatable filtering suppresses only equal assignments. A different value
+    // assigned outside the handler still invalidates the registration.
     #expect(callCounter.count == 2, "External change should trigger handler: was called \(callCounter.count) times, expected 2")
 
     cancellable.cancel()
@@ -503,6 +593,7 @@ struct ContinuousTrackingTests {
   func observation_api() async throws {
 
     let model = Model()
+    let observedChange = TestSignal()
 
     await confirmation(expectedCount: 1) { c in
 
@@ -512,12 +603,13 @@ struct ContinuousTrackingTests {
       } onChange: {
         print(model.count1, model.count2)
         c.confirm()
+        observedChange.signal()
       }
 
       model.count1 += 1
       model.count2 += 1
 
-      try? await Task.sleep(for: .milliseconds(100))
+      #expect(await observedChange.wait(for: .seconds(5)))
 
     }
   }
@@ -634,7 +726,9 @@ struct ContinuousTrackingTests {
 
 }
 
-@Suite
+// These tests intentionally suspend a tracking handler. Running them concurrently can
+// exhaust the execution contexts needed by another test to resume its handler on small CI machines.
+@Suite(.serialized)
 struct IssuesTrackingOnHeavyOperation {
 
   final class Model: Sendable {
@@ -645,10 +739,91 @@ struct IssuesTrackingOnHeavyOperation {
   }
 
   @Test
+  func concurrentGroupKeepsTrackingAcrossSerializedRerun() async {
+    let value = Stored(wrappedValue: 0)
+    let secondInvocationStarted = DispatchSemaphore(value: 0)
+    let thirdInvocationReadValue = DispatchSemaphore(value: 0)
+    let fourthInvocationReadValue = DispatchSemaphore(value: 0)
+    let resumeSecondInvocation = DispatchSemaphore(value: 0)
+    let coordinatorFinished = TestSignal()
+    let scenarioResult = OSAllocatedUnfairLock(
+      initialState: (
+        secondInvocationStarted: false,
+        thirdInvocationReadValue: false,
+        fourthInvocationReadValue: false
+      )
+    )
+
+    let cancellable = withGraphTracking {
+      withGraphTrackingGroup(
+        {
+          switch value.wrappedValue {
+          case 1:
+            secondInvocationStarted.signal()
+            resumeSecondInvocation.wait()
+          case 2:
+            thirdInvocationReadValue.signal()
+          case 3:
+            fourthInvocationReadValue.signal()
+          default:
+            break
+          }
+        },
+        isolation: nil
+      )
+    }
+    defer {
+      resumeSecondInvocation.signal()
+      cancellable.cancel()
+    }
+
+    // Keep every write on one nonisolated synchronous producer. The coordinator uses a Dispatch
+    // queue so it can release the blocked handler even when Swift's cooperative pool has one worker.
+    DispatchQueue.global().async {
+      defer {
+        resumeSecondInvocation.signal()
+        coordinatorFinished.signal()
+      }
+
+      value.wrappedValue = 1
+      let secondStarted =
+        secondInvocationStarted.wait(timeout: .now() + .seconds(5)) == .success
+      scenarioResult.withLock { $0.secondInvocationStarted = secondStarted }
+      guard secondStarted else { return }
+
+      // Invalidate the pass registration while its handler is still active, then let the enqueued
+      // rerun continue. No timing delay is needed: the setter has already requested the callback.
+      value.wrappedValue = 2
+      resumeSecondInvocation.signal()
+
+      let didReadValueInThirdInvocation =
+        thirdInvocationReadValue.wait(timeout: .now() + .seconds(5)) == .success
+      scenarioResult.withLock { $0.thirdInvocationReadValue = didReadValueInThirdInvocation }
+      guard didReadValueInThirdInvocation else { return }
+
+      // The rerun must install a fresh registration for this later update.
+      value.wrappedValue = 3
+      let didReadValueInFourthInvocation =
+        fourthInvocationReadValue.wait(timeout: .now() + .seconds(5)) == .success
+      scenarioResult.withLock { $0.fourthInvocationReadValue = didReadValueInFourthInvocation }
+    }
+
+    #expect(await coordinatorFinished.wait(for: .seconds(20)))
+    let result = scenarioResult.withLock { $0 }
+    #expect(result.secondInvocationStarted)
+    #expect(result.thirdInvocationReadValue)
+    #expect(result.fourthInvocationReadValue)
+  }
+
+  @Test
   func stuck() async {
 
     let model = Model()
-
+    let handlerStarted = DispatchSemaphore(value: 0)
+    let handlerFinished = TestSignal()
+    let resumeHandler = DispatchSemaphore(value: 0)
+    let coordinatorFinished = TestSignal()
+    let coordinatorObservedHandler = OSAllocatedUnfairLock(initialState: false)
     var cancellable: AnyCancellable?
 
     await confirmation(expectedCount: 1) { c in
@@ -658,26 +833,32 @@ struct IssuesTrackingOnHeavyOperation {
 
           if model.count2 == 2 {
             c.confirm()
+            handlerFinished.signal()
           }
 
-          if model.count1 == 1 {
-            Thread.sleep(forTimeInterval: 2)
+          if model.count1 == 1, model.count2 != 2 {
+            handlerStarted.signal()
+            resumeHandler.wait()
           }
 
         }
       }
-      Task.detached {
-        print("Update count1")
-        model.count1 = 1
-        Task.detached {
-          try? await Task.sleep(for: .milliseconds(100))
-          print("Update count2")
+
+      DispatchQueue.global().async {
+        let didObserveHandler = handlerStarted.wait(timeout: .now() + .seconds(5)) == .success
+        coordinatorObservedHandler.withLock { $0 = didObserveHandler }
+        if didObserveHandler {
           model.count2 = 2
         }
+        resumeHandler.signal()
+        coordinatorFinished.signal()
       }
 
-      try? await Task.sleep(for: .seconds(3))
+      model.count1 = 1
 
+      #expect(await handlerFinished.wait(for: .seconds(5)))
+      #expect(await coordinatorFinished.wait(for: .seconds(5)))
+      #expect(coordinatorObservedHandler.withLock { $0 })
       #expect(model.count2 == 2)
     }
 
@@ -689,6 +870,12 @@ struct IssuesTrackingOnHeavyOperation {
   func stuckMain() async {
 
     let model = Model()
+    let trackingStarted = TestSignal()
+    let handlerStarted = DispatchSemaphore(value: 0)
+    let handlerFinished = TestSignal()
+    let resumeHandler = DispatchSemaphore(value: 0)
+    let coordinatorFinished = TestSignal()
+    let coordinatorObservedHandler = OSAllocatedUnfairLock(initialState: false)
 
     await confirmation(expectedCount: 1) { c in
 
@@ -700,18 +887,16 @@ struct IssuesTrackingOnHeavyOperation {
         
         let _cancellable = withGraphTracking {
           withGraphTrackingGroup {
-            print("💥 In")
             #expect(Thread.isMainThread)
             if model.count2 == 2 {
-              print("✨ confirm")
               c.confirm()
+              handlerFinished.signal()
             }
             
-            if model.count1 == 1 {
-              print("😪 sleep")
-              Thread.sleep(forTimeInterval: 2)
+            if model.count1 == 1, model.count2 != 2 {
+              handlerStarted.signal()
+              resumeHandler.wait()
             }
-            print("💥 out")
             
           }
         }
@@ -719,24 +904,28 @@ struct IssuesTrackingOnHeavyOperation {
         cancellable.withLockUnchecked {
           $0 = _cancellable
         }
+        trackingStarted.signal()
       }
 
-      Task {        
-        try? await Task.sleep(for: .milliseconds(100))
-        print("Update count1")
-        model.count1 = 1
-        Task {
-          try? await Task.sleep(for: .milliseconds(100))
-          print("Update count2")
+      #expect(await trackingStarted.wait(for: .seconds(5)))
+
+      DispatchQueue.global().async {
+        let didObserveHandler = handlerStarted.wait(timeout: .now() + .seconds(5)) == .success
+        coordinatorObservedHandler.withLock { $0 = didObserveHandler }
+        if didObserveHandler {
           model.count2 = 2
         }
-
-        withExtendedLifetime(cancellable) {}
+        resumeHandler.signal()
+        coordinatorFinished.signal()
       }
 
-      try? await Task.sleep(for: .seconds(4))
+      model.count1 = 1
+      #expect(await handlerFinished.wait(for: .seconds(5)))
+      #expect(await coordinatorFinished.wait(for: .seconds(5)))
+      #expect(coordinatorObservedHandler.withLock { $0 })
       #expect(model.count2 == 2)
 
+      withExtendedLifetime(cancellable) {}
     }
 
   }

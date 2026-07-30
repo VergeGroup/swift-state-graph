@@ -1,4 +1,4 @@
-// swift-tools-version: 6.0
+// swift-tools-version: 6.3
 // The swift-tools-version declares the minimum version of Swift required to build this package.
 
 import CompilerPluginSupport
@@ -27,12 +27,19 @@ let package = Package(
   ],
   dependencies: [
     .package(url: "https://github.com/VergeGroup/swift-typed-identifier.git", from: "2.0.4"),
-    .package(url: "https://github.com/swiftlang/swift-syntax.git", "600.0.0"..<"603.0.0"),
-    .package(url: "https://github.com/pointfreeco/swift-macro-testing.git", from: "0.5.2"),
+    .package(url: "https://github.com/swiftlang/swift-syntax.git", "600.0.0"..<"605.0.0"),
+    .package(url: "https://github.com/pointfreeco/swift-macro-testing.git", from: "0.6.5"),
   ],
   targets: [
     .macro(
       name: "StateGraphMacro",
+      dependencies: [
+        .product(name: "SwiftSyntaxMacros", package: "swift-syntax"),
+        .product(name: "SwiftCompilerPlugin", package: "swift-syntax"),
+      ]
+    ),
+    .macro(
+      name: "StateGraphNormalizationMacro",
       dependencies: [
         .product(name: "SwiftSyntaxMacros", package: "swift-syntax"),
         .product(name: "SwiftCompilerPlugin", package: "swift-syntax"),
@@ -48,6 +55,7 @@ let package = Package(
       name: "StateGraphNormalization",
       dependencies: [
         "StateGraph",
+        "StateGraphNormalizationMacro",
         .product(name: "TypedIdentifier", package: "swift-typed-identifier")
       ]
     ),
@@ -55,6 +63,14 @@ let package = Package(
       name: "StateGraphMacroTests",
       dependencies: [
         "StateGraphMacro",
+        .product(name: "SwiftSyntaxMacrosTestSupport", package: "swift-syntax"),
+        .product(name: "MacroTesting", package: "swift-macro-testing"),
+      ]
+    ),
+    .testTarget(
+      name: "StateGraphNormalizationMacroTests",
+      dependencies: [
+        "StateGraphNormalizationMacro",
         .product(name: "SwiftSyntaxMacrosTestSupport", package: "swift-syntax"),
         .product(name: "MacroTesting", package: "swift-macro-testing"),
       ]

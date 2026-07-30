@@ -9,6 +9,6 @@ struct Plugin: CompilerPlugin {
     GraphViewMacro.self,
     ComputedMacro.self,
     IgnoredMacro.self,
-    UnifiedStoredMacro.self,
+    GraphStoredMacro.self,
   ]
 }

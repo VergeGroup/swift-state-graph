@@ -127,19 +127,19 @@ final class Comment: TypedIdentifiable, Sendable {
   }
 }
 
-// Normalized store using StateGraph
+/// Graph-owned entity collections used by the normalization demo.
 final class NormalizedStore: ComputedEnvironmentKey, Sendable {
-  
+
   typealias Value = NormalizedStore
-  
+
   @GraphStored
-  var users: EntityStore<User> = .init()  
+  var users: EntityStore<User> = .init()
+
   @GraphStored
   var posts: EntityStore<Post> = .init()
+
   @GraphStored
   var comments: EntityStore<Comment> = .init()
-  
-  
 }
 
 // MARK: Service
@@ -252,11 +252,11 @@ final class MockServerService {
 
 // MARK: Views
 
+/// Provides graph-derived presentation state for the posts demo.
 @MainActor
 final class PostListViewModel: ObservableObject {
-  
-  @GraphStored
-  var store: NormalizedStore
+
+  let store: NormalizedStore
   
   @GraphComputed
   var posts: [Post]     
@@ -275,12 +275,12 @@ final class PostListViewModel: ObservableObject {
     self.store = store
     self.mockServer = .init(store: store)
     
-    self.$posts = store.$posts.map { _, value in
-      value.getAll().sorted(by: { $0.createdAt > $1.createdAt })            
+    self.$posts = .init(name: "posts") { _ in
+      store.posts.getAll().sorted(by: { $0.createdAt > $1.createdAt })
     }
-    
-    self.$postsCount = store.$posts.map { _, value in
-      value.count
+
+    self.$postsCount = .init(name: "postsCount") { _ in
+      store.posts.count
     }
     
     // isAutoAddEnabledの変化を監視し、start/stopを呼ぶ
@@ -467,4 +467,3 @@ struct CommentView: View {
     .padding(.leading, 8)
   }
 }
-

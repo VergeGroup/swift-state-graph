@@ -5,6 +5,18 @@ import Testing
 
 @Suite("GraphTrackingCancellation Tests")
 struct GraphTrackingCancellationTests {
+
+  private final class Counter: @unchecked Sendable {
+    private let value = OSAllocatedUnfairLock(initialState: 0)
+
+    var current: Int {
+      value.withLock { $0 }
+    }
+
+    func increment() {
+      value.withLock { $0 += 1 }
+    }
+  }
   
   final class Resource {
     deinit {
@@ -172,6 +184,37 @@ struct GraphTrackingCancellationTests {
 
     subscription.cancel()
 
+  }
+
+  @Test
+  func cancellationCallbackCanCancelTheSameCancellable() {
+    let holder = OSAllocatedUnfairLock<GraphTrackingCancellable?>(initialState: nil)
+    let cancellationCount = Counter()
+    let cancellable = GraphTrackingCancellable {
+      cancellationCount.increment()
+      holder.withLock { $0 }?.cancel()
+    }
+    holder.withLock { $0 = cancellable }
+
+    cancellable.cancel()
+    cancellable.cancel()
+
+    #expect(cancellationCount.current == 1)
+  }
+
+  @Test
+  func childAddedAfterParentCancellationIsCancelledImmediately() {
+    let cancellationCount = Counter()
+    let parent = GraphTrackingCancellable()
+    let child = GraphTrackingCancellable {
+      cancellationCount.increment()
+    }
+
+    parent.cancel()
+    parent.addChild(child)
+    child.cancel()
+
+    #expect(cancellationCount.current == 1)
   }
 
 }

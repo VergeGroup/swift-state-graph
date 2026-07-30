@@ -84,7 +84,7 @@ Migrate from `@Observable` and gain automatic computed property updates:
 
 // After: Automatic reactivity
 final class UserViewModel {
-  @GraphStored var name = ""
+  @GraphStored var name: String = ""
   @GraphComputed var isValid: Bool
   init() {
     $isValid = .init { [$name] _ in !$name.wrappedValue.isEmpty }
@@ -92,14 +92,18 @@ final class UserViewModel {
 }
 ```
 
-### Persistent Storage Built-in
+### UserDefaults Composition
 
-Back your state with UserDefaults seamlessly:
+Persist a graph-aware value without changing the `Stored` primitive:
 
 ```swift
-@GraphStored(backed: .userDefaults(key: "theme"))
+@GraphUserDefault("theme")
 var theme: String = "light"
 ```
+
+The projected value, `$theme`, is the reference-identity
+`GraphUserDefault<String>` handle. Its reads participate in graph dependency
+tracking, and its writes persist to UserDefaults.
 
 ## Installation
 
@@ -249,7 +253,7 @@ For detailed guides, see the [Documentation](Sources/StateGraph/Documentation.do
 - [Core Concepts](Sources/StateGraph/Documentation.docc/Core-Concepts.md) - Stored, Computed, and dependency tracking
 - [SwiftUI Integration](Sources/StateGraph/Documentation.docc/SwiftUI-Integration.md) - Bindings, GraphObject, Environment
 - [UIKit Integration](Sources/StateGraph/Documentation.docc/UIKit-Integration.md) - withGraphTracking patterns
-- [Backing Storage](Sources/StateGraph/Documentation.docc/Backing-Storage.md) - UserDefaults persistence
+- [UserDefaults](Sources/StateGraph/Documentation.docc/UserDefaults.md) - Persistent values composed with Stored nodes
 - [Data Normalization](Sources/StateGraph/Documentation.docc/Data-Normalization.md) - EntityStore for relational data
 - [Migration from Observable](Sources/StateGraph/Documentation.docc/Migration-from-Observable.md) - Step-by-step guide
 
