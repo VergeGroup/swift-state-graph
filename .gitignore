@@ -9,4 +9,6 @@ DerivedData/
 Derived
 settings.local.json
 swift-state-graph.xcodeproj
+/Development.xcodeproj
+/Development.xcworkspace
 implementation-notes.md

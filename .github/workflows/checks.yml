@@ -36,12 +36,17 @@ jobs:
         with:
           xcode-version: "26.4"
       - uses: actions/checkout@v4
+      - uses: jdx/mise-action@v3
+      - name: Install Development dependencies
+        run: mise exec -- tuist install
+      - name: Generate Development project
+        run: mise exec -- tuist generate --no-open
       - name: Build Development project
         run: |
           xcodebuild \
             -skipMacroValidation \
             -skipPackagePluginValidation \
-            -project Development/Development.xcodeproj \
+            -project Development.xcodeproj \
             -scheme Development \
             -destination 'generic/platform=iOS Simulator' \
             CODE_SIGNING_ALLOWED=NO build

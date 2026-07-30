@@ -27,8 +27,8 @@ let package = Package(
   ],
   dependencies: [
     .package(url: "https://github.com/VergeGroup/swift-typed-identifier.git", from: "2.0.4"),
-    .package(url: "https://github.com/swiftlang/swift-syntax.git", "600.0.0"..<"603.0.0"),
-    .package(url: "https://github.com/pointfreeco/swift-macro-testing.git", from: "0.5.2"),
+    .package(url: "https://github.com/swiftlang/swift-syntax.git", "600.0.0"..<"605.0.0"),
+    .package(url: "https://github.com/pointfreeco/swift-macro-testing.git", from: "0.6.5"),
   ],
   targets: [
     .macro(
