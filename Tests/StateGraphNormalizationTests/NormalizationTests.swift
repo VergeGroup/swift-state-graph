@@ -1,7 +1,6 @@
 import Testing
 @testable import StateGraphNormalization
 import StateGraph
-import Dispatch
 import Foundation
 import os
 
@@ -133,27 +132,14 @@ final class NormalizedStore: ComputedEnvironmentKey, Sendable {
   
   typealias Value = NormalizedStore
 
-  let users: EntityStore<User>
-  let posts: EntityStore<Post>
-  let comments: EntityStore<Comment>
+  @GraphStored
+  var users: EntityStore<User> = .init()
 
-  init() {
-    let coordinator = EntityStoreCoordinator()
-    self.users = .init(coordinator: coordinator)
-    self.posts = .init(coordinator: coordinator)
-    self.comments = .init(coordinator: coordinator)
-  }
-}
+  @GraphStored
+  var posts: EntityStore<Post> = .init()
 
-private final class ConcurrentEntity: TypedIdentifiable, Sendable {
-
-  typealias TypedIdentifierRawValue = Int
-
-  let typedID: TypedID
-
-  init(id: Int) {
-    self.typedID = .init(id)
-  }
+  @GraphStored
+  var comments: EntityStore<Comment> = .init()
 }
 
 private struct ValueEntity: TypedIdentifiable, Sendable {
@@ -173,170 +159,92 @@ private enum MutationError: Error {
   case expected
 }
 
-private actor ConcurrentStartGate {
+/// Owns a value-semantic entity store at the StateGraph mutation boundary.
+private final class ValueStoreOwner: Sendable {
 
-  private let participantCount: Int
-  private var continuations: [CheckedContinuation<Void, Never>] = []
-
-  init(participantCount: Int) {
-    self.participantCount = participantCount
-  }
-
-  func wait() async {
-    if continuations.count + 1 == participantCount {
-      let continuations = self.continuations
-      self.continuations.removeAll()
-      continuations.forEach { $0.resume() }
-      return
-    }
-
-    await withCheckedContinuation { continuation in
-      continuations.append(continuation)
-    }
-  }
-}
-
-/// A one-shot signal that lets synchronous store callbacks resume async test code.
-///
-/// Waiting suspends the test task, which avoids exhausting cooperative-executor threads
-/// when synchronization tests run in parallel with the rest of the package.
-private final class TestSignal: @unchecked Sendable {
-
-  private struct State {
-    var isSignaled = false
-    var waiters: [UUID: CheckedContinuation<Bool, Never>] = [:]
-  }
-
-  private let state = OSAllocatedUnfairLock(initialState: State())
-
-  func signal() {
-    let waiters = state.withLock { state in
-      guard !state.isSignaled else { return [CheckedContinuation<Bool, Never>]() }
-
-      state.isSignaled = true
-      let waiters = Array(state.waiters.values)
-      state.waiters.removeAll()
-      return waiters
-    }
-
-    waiters.forEach { $0.resume(returning: true) }
-  }
-
-  func wait(for timeout: Duration) async -> Bool {
-    let id = UUID()
-
-    return await withCheckedContinuation { continuation in
-      let isAlreadySignaled = state.withLock { state in
-        guard !state.isSignaled else { return true }
-        state.waiters[id] = continuation
-        return false
-      }
-
-      guard !isAlreadySignaled else {
-        continuation.resume(returning: true)
-        return
-      }
-
-      Task.detached { [self] in
-        try? await Task.sleep(for: timeout)
-        let waiter = state.withLock { state in
-          state.waiters.removeValue(forKey: id)
-        }
-        waiter?.resume(returning: false)
-      }
-    }
-  }
+  @GraphStored
+  var entities: EntityStore<ValueEntity> = .init()
 }
 
 @Suite
 struct NormalizationTests {
 
-  @Test func concurrentDistinctIDInsertionsAreNotLost() async {
-    let participantCount = 250
-    let gate = ConcurrentStartGate(participantCount: participantCount)
-    let store = EntityStore<ConcurrentEntity>()
+  @Test func copiedStoresMutateIndependently() {
+    var original = EntityStore<ValueEntity>()
+    original.add(.init(id: 1, value: 1))
 
-    await withTaskGroup(of: Void.self) { group in
-      for id in 0..<participantCount {
-        group.addTask {
-          await gate.wait()
-          store.add(.init(id: id))
-        }
-      }
+    var copy = original
+    copy.modify(.init(1)) { entity in
+      entity.value = 2
     }
+    copy.add(.init(id: 2, value: 2))
 
-    #expect(store.count == participantCount)
-    for id in 0..<participantCount {
-      #expect(store.contains(.init(id)))
-    }
+    #expect(original.get(by: .init(1))?.value == 1)
+    #expect(!original.contains(.init(2)))
+    #expect(copy.get(by: .init(1))?.value == 2)
+    #expect(copy.contains(.init(2)))
   }
 
-  @Test func concurrentSameIDUpdatesReturnOneCanonicalReference() async {
-    let participantCount = 100
-    let gate = ConcurrentStartGate(participantCount: participantCount)
-    let store = EntityStore<ConcurrentEntity>()
+  @Test func crudAndBatchOperations() {
+    var store = EntityStore<ValueEntity>()
 
-    let returnedEntities = await withTaskGroup(
-      of: ConcurrentEntity.self,
-      returning: [ConcurrentEntity].self
-    ) { group in
-      for _ in 0..<participantCount {
-        group.addTask {
-          await gate.wait()
-          return store.updateOrCreate(
-            id: .init(1),
-            update: { _ in },
-            create: { .init(id: 1) }
-          )
-        }
-      }
+    #expect(store.isEmpty)
 
-      return await group.reduce(into: []) { result, entity in
-        result.append(entity)
-      }
+    store.add(.init(id: 1, value: 1))
+    store.add([
+      .init(id: 2, value: 2),
+      .init(id: 3, value: 3),
+    ])
+
+    #expect(store.count == 3)
+    #expect(store.contains(.init(1)))
+    #expect(store.get(by: .init(2))?.value == 2)
+    #expect(store[.init(3)]?.value == 3)
+
+    store.modify(.init(1)) { entity in
+      entity.value = 10
     }
+    store.update(.init(id: 2, value: 20))
+    store[.init(3)] = .init(id: 3, value: 30)
 
-    let canonicalEntity = try! #require(store.get(by: .init(1)))
-    #expect(returnedEntities.allSatisfy { $0 === canonicalEntity })
+    #expect(store.get(by: .init(1))?.value == 10)
+    #expect(store.get(by: .init(2))?.value == 20)
+    #expect(store.get(by: .init(3))?.value == 30)
+    #expect(store.filter { $0.value >= 20 }.count == 2)
+
+    store.delete(.init(2))
+
+    #expect(!store.contains(.init(2)))
+    #expect(store.count == 2)
   }
 
-  @Test func batchMutationPublishesOneGraphUpdate() async {
-    let store = EntityStore<ValueEntity>()
-    let observedCounts = OSAllocatedUnfairLock(initialState: [Int]())
-
-    await confirmation(expectedCount: 2) { updates in
-      let stream = withStateGraphTrackingStream(apply: { store.count })
-      let trackingTask = Task {
-        for await count in stream {
-          observedCounts.withLock { $0.append(count) }
-          updates.confirm()
-          if count == 2 {
-            break
-          }
-        }
-      }
-
-      store.add([
-        .init(id: 1, value: 1),
-        .init(id: 2, value: 2),
-      ])
-      await trackingTask.value
-    }
-
-    #expect(observedCounts.withLock { $0 } == [0, 2])
-  }
-
-  @Test func failedValueUpdateDoesNotCommitOrPublish() {
-    let store = EntityStore<ValueEntity>(
+  @Test func updateOrCreateUpdatesOrInserts() {
+    var store = EntityStore<ValueEntity>(
       entities: [.init(1): .init(id: 1, value: 1)]
     )
-    let computationCount = OSAllocatedUnfairLock(initialState: 0)
-    let value = Computed { _ in
-      computationCount.withLock { $0 += 1 }
-      return store.get(by: .init(1))?.value
-    }
 
-    #expect(value.wrappedValue == 1)
+    let updated = store.updateOrCreate(
+      id: .init(1),
+      update: { $0.value = 2 },
+      create: { .init(id: 1, value: 999) }
+    )
+    let created = store.updateOrCreate(
+      id: .init(2),
+      update: { $0.value = 999 },
+      create: { .init(id: 2, value: 3) }
+    )
+
+    #expect(updated.value == 2)
+    #expect(created.value == 3)
+    #expect(store.get(by: .init(1))?.value == 2)
+    #expect(store.get(by: .init(2))?.value == 3)
+  }
+
+  @Test func failedValueUpdateDoesNotCommit() {
+    var store = EntityStore<ValueEntity>(
+      entities: [.init(1): .init(id: 1, value: 1)]
+    )
+
     #expect(throws: MutationError.self) {
       try store.updateOrCreate(
         id: .init(1),
@@ -351,135 +259,55 @@ struct NormalizationTests {
     }
 
     #expect(store.get(by: .init(1))?.value == 1)
-    #expect(value.wrappedValue == 1)
-    #expect(computationCount.withLock { $0 } == 1)
-  }
 
-  @Test func sharedCoordinatorSupportsNestedStoreMutation() {
-    let coordinator = EntityStoreCoordinator()
-    let parentStore = EntityStore<ValueEntity>(coordinator: coordinator)
-    let childStore = EntityStore<ValueEntity>(coordinator: coordinator)
-
-    parentStore.updateOrCreate(
-      id: .init(1),
-      update: { _ in },
-      create: {
-        childStore.add(.init(id: 2, value: 2))
-        return .init(id: 1, value: 1)
-      }
-    )
-
-    #expect(parentStore.contains(.init(1)))
-    #expect(childStore.contains(.init(2)))
-  }
-
-  @Test func readWaitsForCoordinatedMutation() async {
-    let coordinator = EntityStoreCoordinator()
-    let store = EntityStore<ValueEntity>(
-      entities: [.init(1): .init(id: 1, value: 1)],
-      coordinator: coordinator
-    )
-    let mutationStarted = TestSignal()
-    let allowMutationToFinish = DispatchSemaphore(value: 0)
-    let readStarted = TestSignal()
-    let readFinished = TestSignal()
-    let work = DispatchGroup()
-    let workFinished = TestSignal()
-    let readValue = OSAllocatedUnfairLock<Int?>(initialState: nil)
-
-    work.enter()
-    DispatchQueue.global().async {
-      store.updateOrCreate(
-        id: .init(1),
-        update: { entity in
-          entity.value = 2
-          mutationStarted.signal()
-          _ = allowMutationToFinish.wait(timeout: .now() + .seconds(5))
-        },
-        create: { .init(id: 1, value: 2) }
+    #expect(throws: MutationError.self) {
+      try store.updateOrCreate(
+        id: .init(2),
+        update: { _ throws(MutationError) in },
+        create: { () throws(MutationError) -> ValueEntity in
+          throw .expected
+        }
       )
-      work.leave()
     }
 
-    #expect(await mutationStarted.wait(for: .seconds(5)))
-
-    work.enter()
-    DispatchQueue.global().async {
-      readStarted.signal()
-      readValue.withLock { $0 = store.get(by: .init(1))?.value }
-      readFinished.signal()
-      work.leave()
-    }
-
-    work.notify(queue: .global()) {
-      workFinished.signal()
-    }
-
-    #expect(await readStarted.wait(for: .seconds(5)))
-    #expect(await !readFinished.wait(for: .milliseconds(100)))
-
-    allowMutationToFinish.signal()
-
-    #expect(await readFinished.wait(for: .seconds(5)))
-    #expect(await workFinished.wait(for: .seconds(5)))
-    #expect(readValue.withLock { $0 } == 2)
+    #expect(!store.contains(.init(2)))
   }
 
-  @Test func sharedCoordinatorBlocksReadsAcrossStores() async {
-    let coordinator = EntityStoreCoordinator()
-    let mutatingStore = EntityStore<ValueEntity>(
-      entities: [.init(1): .init(id: 1, value: 1)],
-      coordinator: coordinator
-    )
-    let readingStore = EntityStore<ValueEntity>(
-      entities: [.init(2): .init(id: 2, value: 2)],
-      coordinator: coordinator
-    )
-    let mutationStarted = TestSignal()
-    let allowMutationToFinish = DispatchSemaphore(value: 0)
-    let readStarted = TestSignal()
-    let readFinished = TestSignal()
-    let work = DispatchGroup()
-    let workFinished = TestSignal()
-
-    work.enter()
-    DispatchQueue.global().async {
-      mutatingStore.updateOrCreate(
-        id: .init(1),
-        update: { _ in
-          mutationStarted.signal()
-          _ = allowMutationToFinish.wait(timeout: .now() + .seconds(5))
-        },
-        create: { .init(id: 1, value: 1) }
-      )
-      work.leave()
+  @Test func graphStoredOwnerInvalidatesComputed() {
+    let owner = ValueStoreOwner()
+    let computationCount = OSAllocatedUnfairLock(initialState: 0)
+    let count = Computed { _ in
+      computationCount.withLock { $0 += 1 }
+      return owner.entities.count
     }
 
-    #expect(await mutationStarted.wait(for: .seconds(5)))
+    #expect(count.wrappedValue == 0)
 
-    work.enter()
-    DispatchQueue.global().async {
-      readStarted.signal()
-      _ = readingStore.get(by: .init(2))
-      readFinished.signal()
-      work.leave()
+    owner.entities.add(.init(id: 1, value: 1))
+
+    #expect(count.wrappedValue == 1)
+    #expect(computationCount.withLock { $0 } == 2)
+  }
+
+  @Test func batchMutationInvalidatesGraphTracking() async {
+    let owner = ValueStoreOwner()
+    let stream = withStateGraphTrackingStream {
+      owner.entities.count
     }
+    var iterator = stream.makeAsyncIterator()
 
-    work.notify(queue: .global()) {
-      workFinished.signal()
-    }
+    #expect(await iterator.next() == 0)
 
-    #expect(await readStarted.wait(for: .seconds(5)))
-    #expect(await !readFinished.wait(for: .milliseconds(100)))
+    owner.entities.add([
+      .init(id: 1, value: 1),
+      .init(id: 2, value: 2),
+    ])
 
-    allowMutationToFinish.signal()
-
-    #expect(await readFinished.wait(for: .seconds(5)))
-    #expect(await workFinished.wait(for: .seconds(5)))
+    #expect(await iterator.next() == 2)
   }
 
   @Test func getAllReturnsIndependentSnapshot() {
-    let store = EntityStore<ValueEntity>()
+    var store = EntityStore<ValueEntity>()
     store.add(.init(id: 1, value: 1))
 
     let snapshot = store.getAll()

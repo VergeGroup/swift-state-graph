@@ -12,6 +12,15 @@
  - The handler closure is executed initially and re-executed whenever any tracked node changes
  - Only nodes accessed during execution are tracked for the next iteration
  - Nodes are dynamically added/removed from tracking based on runtime conditions
+
+ ## Self-Mutation
+
+ If the handler synchronously mutates graph state that invalidates a node accessed in
+ the same execution, the mutation is applied and peer tracking registrations are notified.
+ This handler is not re-executed for its own mutation. Its one-shot registration is not
+ restored to the invalidated node, so tracking for that node is re-established only if
+ another tracked change later re-executes the handler. A DEBUG warning is emitted unless
+ ``StateGraphDiagnostics/isSelfInvalidationWarningEnabled`` is `false`.
  
  ## Example: Group Tracking
  ```swift
@@ -95,11 +104,13 @@ public func withGraphTrackingGroup(
     return
   }
 
-  let trackingHandler = GraphTrackingHandler(handler)
+  let _handlerBox = OSAllocatedUnfairLock<ClosureBox<Void>?>(
+    uncheckedState: ClosureBox(handler)
+  )
 
   // Create a cancellable for this scope that manages nested tracking
   let scopeCancellable = GraphTrackingCancellable {
-    trackingHandler.cancel()
+    _handlerBox.withLock { $0 = nil }
   }
 
   withContinuousStateGraphTracking(
@@ -110,11 +121,13 @@ public func withGraphTrackingGroup(
       // Set this scope's cancellable as the current parent for nested tracking
       // Nested groups/maps will register with this parent via addChild()
       ThreadLocal.currentCancellable.withValue(scopeCancellable) {
-        trackingHandler.invoke()
+        _handlerBox.withLock {
+          $0?()
+        }
       }
     },
     didChange: {
-      guard !trackingHandler.isCancelled else { return .stop }
+      guard !_handlerBox.withLock({ $0 == nil }) else { return .stop }
       return .next
     },
     isolation: isolation

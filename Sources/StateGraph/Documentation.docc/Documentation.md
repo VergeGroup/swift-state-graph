@@ -56,6 +56,7 @@ final class CounterViewModel {
 - ``Node``
 - ``GraphStored``
 - ``GraphComputed``
+- ``withGraphTransaction(_:_:_:_:)``
 
 ### Persistence and Storage
 
@@ -95,8 +96,10 @@ final class CounterViewModel {
 ### Observation and Tracking
 
 - ``withGraphTracking(_:)``
-- ``withGraphTrackingGroup(_:)``
+- ``withGraphTrackingGroup(_:isolation:)``
 - ``Node/onChange(_:)``
+- <doc:Tracking-Registrations>
+- ``TrackingRegistration``
 - <doc:Observation-Patterns>
 
 ### Utilities

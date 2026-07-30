@@ -127,21 +127,19 @@ final class Comment: TypedIdentifiable, Sendable {
   }
 }
 
-/// Related entity stores that share one consistency boundary.
+/// Graph-owned entity collections used by the normalization demo.
 final class NormalizedStore: ComputedEnvironmentKey, Sendable {
 
   typealias Value = NormalizedStore
 
-  let users: EntityStore<User>
-  let posts: EntityStore<Post>
-  let comments: EntityStore<Comment>
+  @GraphStored
+  var users: EntityStore<User> = .init()
 
-  init() {
-    let coordinator = EntityStoreCoordinator()
-    self.users = .init(coordinator: coordinator)
-    self.posts = .init(coordinator: coordinator)
-    self.comments = .init(coordinator: coordinator)
-  }
+  @GraphStored
+  var posts: EntityStore<Post> = .init()
+
+  @GraphStored
+  var comments: EntityStore<Comment> = .init()
 }
 
 // MARK: Service

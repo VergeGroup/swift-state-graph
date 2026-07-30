@@ -13,6 +13,12 @@
  - The projected value is passed through a `DistinctFilter` (for `Equatable` types)
  - `onChange` is only called when the filtered value passes through (i.e., when it's different)
 
+ - Important: A synchronous mutation that invalidates an accessed node does not
+   re-execute this map for its own mutation. Peer registrations are notified, but its
+   one-shot registration is not restored to the invalidated node. Tracking for that node is
+   re-established only if another tracked change later re-executes the map. A DEBUG warning
+   is emitted unless ``StateGraphDiagnostics/isSelfInvalidationWarningEnabled`` is `false`.
+
  ## Example: Computed Value Tracking
  ```swift
  let firstName = Stored(wrappedValue: "John")
@@ -137,17 +143,19 @@ public func withGraphTrackingMap<Projection>(
 
   var filter = filter
 
-  let trackingHandler = GraphTrackingHandler {
-    let result = applier()
-    let filtered = filter.send(value: result)
-    if let filtered {
-      onChange(filtered)
-    }
-  }
+  let _handlerBox = OSAllocatedUnfairLock<ClosureBox<Void>?>(
+    uncheckedState: ClosureBox({
+      let result = applier()
+      let filtered = filter.send(value: result)
+      if let filtered {
+        onChange(filtered)
+      }
+    })
+  )
 
   // Create a cancellable for this scope that manages nested tracking
   let scopeCancellable = GraphTrackingCancellable {
-    trackingHandler.cancel()
+    _handlerBox.withLock { $0 = nil }
   }
 
   withContinuousStateGraphTracking(
@@ -158,11 +166,11 @@ public func withGraphTrackingMap<Projection>(
       // Set this scope's cancellable as the current parent for nested tracking
       // Nested groups/maps will register with this parent via addChild()
       ThreadLocal.currentCancellable.withValue(scopeCancellable) {
-        trackingHandler.invoke()
+        _handlerBox.withLock { $0?() }
       }
     },
     didChange: {
-      guard !trackingHandler.isCancelled else { return .stop }
+      guard !_handlerBox.withLock({ $0 == nil }) else { return .stop }
       return .next
     },
     isolation: isolation
@@ -238,6 +246,12 @@ public func withGraphTrackingMap<Dependency: AnyObject, Projection>(
  - The projected value is passed through the provided filter
  - `onChange` is only called when the filtered value passes through
 
+ - Important: A synchronous mutation that invalidates an accessed node does not
+   re-execute this map for its own mutation. Peer registrations are notified, but its
+   one-shot registration is not restored to the invalidated node. Tracking for that node is
+   re-established only if another tracked change later re-executes the map. A DEBUG warning
+   is emitted unless ``StateGraphDiagnostics/isSelfInvalidationWarningEnabled`` is `false`.
+
  ## Example with Custom Filter
  ```swift
  struct ThresholdFilter: Filter {
@@ -303,26 +317,28 @@ public func withGraphTrackingMap<Dependency: AnyObject, Projection>(
 
   var filter = filter
 
-  let trackingHandler = GraphTrackingHandler {
-    guard let dependency = weakDependency else {
-      return
-    }
-    let result = map(dependency)
-    let filtered = filter.send(value: result)
-    if let filtered {
-      onChange(filtered)
-    }
-  }
+  let _handlerBox = OSAllocatedUnfairLock<ClosureBox<Void>?>(
+    uncheckedState: ClosureBox({
+      guard let dependency = weakDependency else {
+        return
+      }
+      let result = map(dependency)
+      let filtered = filter.send(value: result)
+      if let filtered {
+        onChange(filtered)
+      }
+    })
+  )
 
   // Create a cancellable for this scope that manages nested tracking
   let scopeCancellable = GraphTrackingCancellable {
-    trackingHandler.cancel()
+    _handlerBox.withLock { $0 = nil }
   }
 
   withContinuousStateGraphTracking(
     apply: {
       guard weakDependency != nil else {
-        trackingHandler.cancel()
+        _handlerBox.withLock { $0 = nil }
         return
       }
       // Cancel all children before re-executing (cleans up nested subscriptions)
@@ -331,11 +347,11 @@ public func withGraphTrackingMap<Dependency: AnyObject, Projection>(
       // Set this scope's cancellable as the current parent for nested tracking
       // Nested groups/maps will register with this parent via addChild()
       ThreadLocal.currentCancellable.withValue(scopeCancellable) {
-        trackingHandler.invoke()
+        _handlerBox.withLock { $0?() }
       }
     },
     didChange: {
-      guard !trackingHandler.isCancelled else { return .stop }
+      guard !_handlerBox.withLock({ $0 == nil }) else { return .stop }
       guard weakDependency != nil else { return .stop }
       return .next
     },
