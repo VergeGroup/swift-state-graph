@@ -578,26 +578,7 @@ public final class Stored<Value: SendableMetatype>: Node, Observable, CustomDebu
     }
   }
 
-  /// Use `unsafeModify(_:)`; its name makes the notification and locking risks explicit.
-  @available(*, deprecated, renamed: "unsafeModify")
-  public borrowing func withLock<Result, E>(
-    _ body: (inout Value) throws(E) -> Result
-  ) throws(E) -> Result where E: Error {
-    try unsafeModify(body)
-  }
-
-  /// Sets the closure invoked after each assignment completes.
-  ///
-  /// The handler runs synchronously after the new value becomes readable and after
-  /// the node lock is released. It runs for every assignment, including assignments
-  /// that the node's comparator considers equivalent.
-  ///
-  /// Inside ``withGraphTransaction(_:_:_:_:)``, the assigned value is staged before
-  /// the handler runs. Reads made by the handler observe that staged value, and any
-  /// ordinary `Stored` assignments made by the handler join the same transaction.
-  /// Those assignments are discarded if the outer transaction rolls back. The
-  /// handler itself is not deferred, so rollback cannot undo its non-`Stored` side
-  /// effects.
+  /// Sets a closure to call after an assignment completes.
   public func onDidSet(_ handler: @escaping (Value, Value) -> Void) {
     lock.lock()
     defer { lock.unlock() }
