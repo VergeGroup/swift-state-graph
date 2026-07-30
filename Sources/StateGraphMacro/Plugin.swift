@@ -10,8 +10,5 @@ struct Plugin: CompilerPlugin {
     ComputedMacro.self,
     IgnoredMacro.self,
     GraphStoredMacro.self,
-    InitAndUpdateMacro.self,
-    OnInitMarkerMacro.self,
-    OnUpdateMarkerMacro.self,
   ]
 }

@@ -29,7 +29,7 @@
 @attached(body)
 @attached(peer, names: named(update))
 public macro InitAndUpdate() = #externalMacro(
-  module: "StateGraphMacro",
+  module: "StateGraphNormalizationMacro",
   type: "InitAndUpdateMacro"
 )
 
@@ -40,7 +40,7 @@ public macro InitAndUpdate() = #externalMacro(
 /// direct statement in an initializer annotated with ``InitAndUpdate``.
 @freestanding(expression)
 public macro onInit(_ body: () -> Void) -> Void = #externalMacro(
-  module: "StateGraphMacro",
+  module: "StateGraphNormalizationMacro",
   type: "OnInitMarkerMacro"
 )
 
@@ -51,6 +51,6 @@ public macro onInit(_ body: () -> Void) -> Void = #externalMacro(
 /// with ``InitAndUpdate``.
 @freestanding(expression)
 public macro onUpdate(_ body: () -> Void) -> Void = #externalMacro(
-  module: "StateGraphMacro",
+  module: "StateGraphNormalizationMacro",
   type: "OnUpdateMarkerMacro"
 )

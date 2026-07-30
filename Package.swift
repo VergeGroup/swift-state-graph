@@ -38,6 +38,13 @@ let package = Package(
         .product(name: "SwiftCompilerPlugin", package: "swift-syntax"),
       ]
     ),
+    .macro(
+      name: "StateGraphNormalizationMacro",
+      dependencies: [
+        .product(name: "SwiftSyntaxMacros", package: "swift-syntax"),
+        .product(name: "SwiftCompilerPlugin", package: "swift-syntax"),
+      ]
+    ),
     .target(
       name: "StateGraph",
       dependencies: [
@@ -48,7 +55,7 @@ let package = Package(
       name: "StateGraphNormalization",
       dependencies: [
         "StateGraph",
-        "StateGraphMacro",
+        "StateGraphNormalizationMacro",
         .product(name: "TypedIdentifier", package: "swift-typed-identifier")
       ]
     ),
@@ -56,6 +63,14 @@ let package = Package(
       name: "StateGraphMacroTests",
       dependencies: [
         "StateGraphMacro",
+        .product(name: "SwiftSyntaxMacrosTestSupport", package: "swift-syntax"),
+        .product(name: "MacroTesting", package: "swift-macro-testing"),
+      ]
+    ),
+    .testTarget(
+      name: "StateGraphNormalizationMacroTests",
+      dependencies: [
+        "StateGraphNormalizationMacro",
         .product(name: "SwiftSyntaxMacrosTestSupport", package: "swift-syntax"),
         .product(name: "MacroTesting", package: "swift-macro-testing"),
       ]

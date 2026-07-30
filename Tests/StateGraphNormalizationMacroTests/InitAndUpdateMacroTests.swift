@@ -1,6 +1,6 @@
 import MacroTesting
 import XCTest
-@testable import StateGraphMacro
+@testable import StateGraphNormalizationMacro
 
 final class InitAndUpdateMacroTests: XCTestCase {
 
