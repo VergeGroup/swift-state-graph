@@ -13,7 +13,13 @@ struct ContentView: View {
   var body: some View {
     NavigationStack {
       Form {
-        
+
+        NavigationLink {
+          GraphTransactionDemoView()
+        } label: {
+          Text("Graph transaction")
+        }
+
         NavigationLink {
           Observe_specific(model: .init(name: "A", count: 1))
         } label: { 
