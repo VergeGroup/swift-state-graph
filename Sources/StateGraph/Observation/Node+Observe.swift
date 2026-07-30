@@ -24,7 +24,7 @@
 // }
 //
 // // Method 2: AsyncSequence-based
-// for try await value in node.observe() {
+// for await value in node.observe() {
 //   print("Value: \(value)")
 // }
 // ```
@@ -52,7 +52,7 @@
 // }
 // ```
 
-extension Node {
+extension Node where Value: Sendable {
   
   /**
    Creates an async sequence that emits the node's value whenever it changes.
@@ -65,7 +65,7 @@ extension Node {
    ```swift
    let node = Stored(wrappedValue: 0)
    
-   for try await value in node.observe() {
+   for await value in node.observe() {
      print("Value: \(value)")
      // Handle the value...
    }
@@ -74,7 +74,7 @@ extension Node {
    ## With Async Processing
    ```swift
    Task {
-     for try await value in node.observe() {
+     for await value in node.observe() {
        await processValue(value)
      }
    }
@@ -85,16 +85,16 @@ extension Node {
    let stream = node.observe()
    var iterator = stream.makeAsyncIterator()
    
-   let initialValue = try await iterator.next()
-   let nextValue = try await iterator.next()
+   let initialValue = await iterator.next()
+   let nextValue = await iterator.next()
    ```
    
-   - Returns: An async sequence that emits the node's value on changes
+   - Returns: A graph observation that emits the node's value on changes
    - Note: The sequence starts with the current value, then emits subsequent changes
    - Note: The sequence continues indefinitely until cancelled or the node is deallocated
    */
-  public func observe() -> AsyncStream<Self.Value> {
-    withStateGraphTrackingStream { self.wrappedValue }
+  public func observe() -> GraphObservation<Self.Value> {
+    GraphObservation { self.wrappedValue }
   }
   
 }
@@ -109,8 +109,8 @@ extension AsyncSequence {
 /**
  An async sequence that emits an initial value before proceeding with the base sequence.
  
- This is used internally by `Node.observe()` to ensure that the current value is emitted
- immediately, followed by subsequent changes from the base tracking stream.
+ This sequence can be used when a base sequence needs to emit a known initial value
+ before yielding later values from its iterator.
  */
 public struct AsyncStartWithSequence<Base: AsyncSequence>: AsyncSequence {
   
