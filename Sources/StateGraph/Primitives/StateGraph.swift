@@ -452,15 +452,14 @@ public final class Computed<Value: SendableMetatype>: Node, Observable, CustomDe
 
     if !_potentiallyDirty && _cachedValue != nil { return }
 
-    incomingEdges.removeAll(where: { $0.from == nil })
-
     for edge in incomingEdges {
       edge.from?.recomputeIfNeeded()
     }
 
     let hasPendingIncomingEdge = incomingEdges.contains {
-      $0.from != nil && $0.isPending
+      $0.isPending
     }
+    incomingEdges.removeAll(where: { $0.from == nil })
 
     if hasPendingIncomingEdge || _cachedValue == nil {
 

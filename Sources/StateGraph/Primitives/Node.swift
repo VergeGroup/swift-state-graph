@@ -35,6 +35,10 @@ extension TypeErasedNode {
 
   /// Removes an incoming edge while holding the owning node's lock.
   func removeIncomingEdge(_ edge: Edge) {
+    // A dirty target still needs this edge's pending bit to decide whether to
+    // recompute after the source has finished deinitializing.
+    guard !edge.isPending else { return }
+
     lock.lock()
     incomingEdges.removeAll(where: { $0 === edge })
     lock.unlock()
