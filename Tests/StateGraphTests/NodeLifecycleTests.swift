@@ -8,15 +8,14 @@ import os.lock
 struct NodeLifecycleTests {
 
   @Test
-  func releasingUpstreamComputedRemovesDownstreamEdge() async {
-    let trigger = Stored(wrappedValue: 0)
-    var upstream: Computed<Int>? = Computed { _ in 10 }
+  func releasingUpstreamComputedUsesDownstreamFallback() async {
+    var upstream: Computed<String>? = Computed { _ in "upstream" }
     weak let weakUpstream = upstream
     let downstream = Computed { [weak upstream] _ in
-      (upstream?.wrappedValue ?? 0) + trigger.wrappedValue
+      return upstream?.wrappedValue ?? "fallback"
     }
 
-    #expect(downstream.wrappedValue == 10)
+    #expect(downstream.wrappedValue == "upstream")
 
     upstream = nil
 
@@ -25,9 +24,7 @@ struct NodeLifecycleTests {
     }
 
     #expect(weakUpstream == nil)
-
-    trigger.wrappedValue = 1
-    #expect(downstream.wrappedValue == 1)
+    #expect(downstream.wrappedValue == "fallback")
   }
 
   @Test(
@@ -37,71 +34,71 @@ struct NodeLifecycleTests {
   func releasingChangedSourcePreservesPendingInvalidation(
     usesTransaction: Bool
   ) {
-    var source: Stored<Int>? = Stored(wrappedValue: 1)
+    var source: Stored<String>? = Stored(wrappedValue: "initial")
     weak let weakSource = source
     let reader = WeakStoredFallbackReader(source: source.unsafelyUnwrapped)
     let downstream = Computed { _ in
       reader.value
     }
 
-    #expect(downstream.wrappedValue == 1)
+    #expect(downstream.wrappedValue == "initial")
 
     if usesTransaction {
       withGraphTransaction {
-        source.unsafelyUnwrapped.wrappedValue = 2
+        source.unsafelyUnwrapped.wrappedValue = "updated"
       }
     } else {
-      source.unsafelyUnwrapped.wrappedValue = 2
+      source.unsafelyUnwrapped.wrappedValue = "updated"
     }
 
-    #expect(reader.value == 2)
+    #expect(reader.value == "updated")
     source = nil
 
     #expect(weakSource == nil)
-    #expect(downstream.wrappedValue == 2)
+    #expect(downstream.wrappedValue == "updated")
   }
 
   @Test("Releasing an unchanged source invalidates a weak downstream read")
   func releasingUnchangedSourceInvalidatesWeakDownstreamRead() {
-    var source: Stored<Int>? = Stored(wrappedValue: 1)
+    var source: Stored<String>? = Stored(wrappedValue: "source")
     let downstream = Computed { [weak source] _ in
-      source?.wrappedValue ?? 0
+      source?.wrappedValue ?? "fallback"
     }
 
-    #expect(downstream.wrappedValue == 1)
+    #expect(downstream.wrappedValue == "source")
 
     source = nil
 
-    #expect(downstream.wrappedValue == 0)
+    #expect(downstream.wrappedValue == "fallback")
   }
 
   @Test("Releasing a dirty computed source preserves downstream invalidation")
   func releasingDirtyComputedSourcePreservesDownstreamInvalidation() {
-    let source = Stored(wrappedValue: 1)
-    var intermediate: Computed<Int>? = Computed { _ in
+    let source = Stored(wrappedValue: "initial")
+    var intermediate: Computed<String>? = Computed { _ in
       source.wrappedValue
     }
     let downstream = Computed { [weak intermediate] _ in
       intermediate?.wrappedValue ?? source.wrappedValue
     }
 
-    #expect(downstream.wrappedValue == 1)
+    #expect(downstream.wrappedValue == "initial")
 
-    source.wrappedValue = 2
+    source.wrappedValue = "updated"
     intermediate = nil
 
-    #expect(downstream.wrappedValue == 2)
+    #expect(downstream.wrappedValue == "updated")
   }
 
   @Test("Releasing a computed source during transaction willSet preserves invalidation")
   @MainActor
   func releasingComputedSourceDuringTransactionWillSetPreservesInvalidation() {
-    let source = Stored(wrappedValue: 1)
-    let intermediateHolder = OSAllocatedUnfairLock<Computed<Int>?>(
+    let source = Stored(wrappedValue: "initial")
+    let intermediateHolder = OSAllocatedUnfairLock<Computed<String>?>(
       uncheckedState: nil
     )
-    weak var weakIntermediate: Computed<Int>?
-    let downstream: Computed<Int> = {
+    weak var weakIntermediate: Computed<String>?
+    let downstream: Computed<String> = {
       let intermediate = Computed { _ in
         source.wrappedValue
       }
@@ -113,7 +110,7 @@ struct NodeLifecycleTests {
       }
     }()
 
-    #expect(downstream.wrappedValue == 1)
+    #expect(downstream.wrappedValue == "initial")
 
     withObservationTracking {
       _ = source.wrappedValue
@@ -122,7 +119,7 @@ struct NodeLifecycleTests {
     }
 
     withGraphTransaction {
-      source.wrappedValue = 2
+      source.wrappedValue = "updated"
     }
 
     let intermediateWasReleased = weakIntermediate == nil
@@ -137,17 +134,17 @@ struct NodeLifecycleTests {
     #expect(incomingEdgeCount == 1)
     #expect(sourceWasDetached)
     #expect(edgeWasPending)
-    #expect(resolvedValue == 2)
+    #expect(resolvedValue == "updated")
   }
 }
 
 /// Reads through a weak source while preserving the last live result as a fallback.
 private final class WeakStoredFallbackReader: @unchecked Sendable {
 
-  private weak var source: Stored<Int>?
-  private let fallback: OSAllocatedUnfairLock<Int>
+  private weak var source: Stored<String>?
+  private let fallback: OSAllocatedUnfairLock<String>
 
-  var value: Int {
+  var value: String {
     guard let source else {
       return fallback.withLock { $0 }
     }
@@ -157,7 +154,7 @@ private final class WeakStoredFallbackReader: @unchecked Sendable {
     return value
   }
 
-  init(source: Stored<Int>) {
+  init(source: Stored<String>) {
     self.source = source
     self.fallback = .init(initialState: source.wrappedValue)
   }
