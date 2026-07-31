@@ -33,15 +33,14 @@ extension TypeErasedNode {
     lock.unlock()
   }
 
-  /// Removes an incoming edge while holding the owning node's lock.
-  func removeIncomingEdge(_ edge: Edge) {
-    // A dirty target still needs this edge's pending bit to decide whether to
-    // recompute after the source has finished deinitializing.
-    guard !edge.isPending else { return }
-
-    lock.lock()
-    incomingEdges.removeAll(where: { $0 === edge })
-    lock.unlock()
+  /// Publishes the release of an incoming edge's source to its target.
+  ///
+  /// The target retains the detached edge as a pending tombstone until its next
+  /// read. This matters even when the source had no pending value change because
+  /// a weak source read may switch to a fallback when the source disappears.
+  func sourceDidRelease(_ edge: Edge) {
+    edge.isPending = true
+    potentiallyDirty = true
   }
 }
 

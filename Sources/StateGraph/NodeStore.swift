@@ -15,8 +15,14 @@ public actor NodeStore {
     nodes.removeAll()
   }
 
-  func register(node: any TypeErasedNode) {
-    guard isEnabled else { return }
+  /// Registers a node without making DEBUG instrumentation extend its lifetime.
+  ///
+  /// The provider is resolved only after entering the actor. A node released while
+  /// the registration task is waiting therefore disappears normally.
+  func register(
+    nodeProvider: @Sendable () -> (any TypeErasedNode)?
+  ) {
+    guard isEnabled, let node = nodeProvider() else { return }
     nodes.append(.init(node))
     compact()  
   }

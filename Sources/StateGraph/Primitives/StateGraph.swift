@@ -331,8 +331,7 @@ public final class Computed<Value: SendableMetatype>: Node, Observable, CustomDe
 
 #if DEBUG
     Task { [weak self] in
-      guard let self else { return }
-      await NodeStore.shared.register(node: self)
+      await NodeStore.shared.register { [weak self] in self }
     }
 #endif
   }
@@ -364,8 +363,7 @@ public final class Computed<Value: SendableMetatype>: Node, Observable, CustomDe
 
 #if DEBUG
     Task { [weak self] in
-      guard let self else { return }
-      await NodeStore.shared.register(node: self)
+      await NodeStore.shared.register { [weak self] in self }
     }
 #endif
   }
@@ -397,8 +395,7 @@ public final class Computed<Value: SendableMetatype>: Node, Observable, CustomDe
    
 #if DEBUG
     Task { [weak self] in
-      guard let self else { return }
-      await NodeStore.shared.register(node: self)
+      await NodeStore.shared.register { [weak self] in self }
     }
 #endif
   }
@@ -417,7 +414,7 @@ public final class Computed<Value: SendableMetatype>: Node, Observable, CustomDe
     }
 
     for edge in outgoingEdges {
-      edge.to?.removeIncomingEdge(edge)
+      edge.to?.sourceDidRelease(edge)
     }
   }
 

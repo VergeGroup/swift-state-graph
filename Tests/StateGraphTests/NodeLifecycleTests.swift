@@ -1,6 +1,8 @@
-import StateGraph
+import Observation
 import Testing
 import os.lock
+
+@testable import StateGraph
 
 @Suite("Node Lifecycle Tests")
 struct NodeLifecycleTests {
@@ -57,6 +59,85 @@ struct NodeLifecycleTests {
 
     #expect(weakSource == nil)
     #expect(downstream.wrappedValue == 2)
+  }
+
+  @Test("Releasing an unchanged source invalidates a weak downstream read")
+  func releasingUnchangedSourceInvalidatesWeakDownstreamRead() {
+    var source: Stored<Int>? = Stored(wrappedValue: 1)
+    let downstream = Computed { [weak source] _ in
+      source?.wrappedValue ?? 0
+    }
+
+    #expect(downstream.wrappedValue == 1)
+
+    source = nil
+
+    #expect(downstream.wrappedValue == 0)
+  }
+
+  @Test("Releasing a dirty computed source preserves downstream invalidation")
+  func releasingDirtyComputedSourcePreservesDownstreamInvalidation() {
+    let source = Stored(wrappedValue: 1)
+    var intermediate: Computed<Int>? = Computed { _ in
+      source.wrappedValue
+    }
+    let downstream = Computed { [weak intermediate] _ in
+      intermediate?.wrappedValue ?? source.wrappedValue
+    }
+
+    #expect(downstream.wrappedValue == 1)
+
+    source.wrappedValue = 2
+    intermediate = nil
+
+    #expect(downstream.wrappedValue == 2)
+  }
+
+  @Test("Releasing a computed source during transaction willSet preserves invalidation")
+  @MainActor
+  func releasingComputedSourceDuringTransactionWillSetPreservesInvalidation() {
+    let source = Stored(wrappedValue: 1)
+    let intermediateHolder = OSAllocatedUnfairLock<Computed<Int>?>(
+      uncheckedState: nil
+    )
+    weak var weakIntermediate: Computed<Int>?
+    let downstream: Computed<Int> = {
+      let intermediate = Computed { _ in
+        source.wrappedValue
+      }
+      weakIntermediate = intermediate
+      intermediateHolder.withLock { $0 = intermediate }
+
+      return Computed { [weak intermediate] _ in
+        intermediate?.wrappedValue ?? source.wrappedValue
+      }
+    }()
+
+    #expect(downstream.wrappedValue == 1)
+
+    withObservationTracking {
+      _ = source.wrappedValue
+    } onChange: {
+      intermediateHolder.withLock { $0 = nil }
+    }
+
+    withGraphTransaction {
+      source.wrappedValue = 2
+    }
+
+    let intermediateWasReleased = weakIntermediate == nil
+    let downstreamWasDirty = downstream.potentiallyDirty
+    let incomingEdgeCount = downstream.incomingEdges.count
+    let sourceWasDetached = downstream.incomingEdges.first?.from == nil
+    let edgeWasPending = downstream.incomingEdges.first?.isPending == true
+    let resolvedValue = downstream.wrappedValue
+
+    #expect(intermediateWasReleased)
+    #expect(downstreamWasDirty)
+    #expect(incomingEdgeCount == 1)
+    #expect(sourceWasDetached)
+    #expect(edgeWasPending)
+    #expect(resolvedValue == 2)
   }
 }
 

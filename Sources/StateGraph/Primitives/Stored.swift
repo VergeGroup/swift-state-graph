@@ -506,8 +506,7 @@ public final class Stored<Value: SendableMetatype>: Node, Observable, CustomDebu
 
 #if DEBUG
     Task { [weak self] in
-      guard let self else { return }
-      await NodeStore.shared.register(node: self)
+      await NodeStore.shared.register { [weak self] in self }
     }
 #endif
   }
@@ -519,7 +518,7 @@ public final class Stored<Value: SendableMetatype>: Node, Observable, CustomDebu
     lock.unlock()
 
     for edge in outgoingEdges {
-      edge.to?.removeIncomingEdge(edge)
+      edge.to?.sourceDidRelease(edge)
     }
   }
 
