@@ -463,10 +463,48 @@ final class GraphTransactionCallbackDelivery {
 /// Marks an outer committed-graph read so nested node reads keep the same
 /// publication snapshot while a writer begins its barrier.
 final class GraphTransactionReadScope: @unchecked Sendable {
-  static let shared = GraphTransactionReadScope()
 
-  private init() {
+  /// Actions are appended and drained by the one thread that owns this scope.
+  private var deferredActions: [() -> Void] = []
+
+  func append(_ action: @escaping () -> Void) {
+    deferredActions.append(action)
   }
+
+  func finish() {
+    let actions = deferredActions
+    deferredActions = []
+
+    for action in actions {
+      action()
+    }
+  }
+}
+
+/// Defers work until the current committed graph read has released its barrier.
+///
+/// A `Computed` evaluation and all of its nested node reads share one committed
+/// graph read scope. When called from that scope, `action` runs after the scope's
+/// thread-local marker, reader admission, and node locks have been released. This
+/// is useful for ending the lifetime of values whose `deinit` may read the graph.
+///
+/// Graph transactions do not use the committed read scope. When no such scope is
+/// active, the function returns the original action without ending the lifetime of
+/// its captures. The caller can then transfer that action to another safe execution
+/// context.
+///
+/// - Parameter action: Work to perform after the current read completes.
+/// - Returns: `nil` when `action` was deferred, or the unconsumed action when no
+///   committed graph read is active.
+public func deferUntilGraphReadCompletes(
+  _ action: @escaping () -> Void
+) -> (() -> Void)? {
+  guard let scope = ThreadLocal.graphTransactionReadScope.value else {
+    return action
+  }
+
+  scope.append(action)
+  return nil
 }
 
 /// Marks one immediate writer admitted by the coordinator.
@@ -824,7 +862,8 @@ final class GraphTransactionCoordinator: @unchecked Sendable {
     activeReaderCount += 1
     condition.unlock()
 
-    let previousReadScope = ThreadLocal.graphTransactionReadScope.replaceValue(.shared)
+    let readScope = GraphTransactionReadScope()
+    let previousReadScope = ThreadLocal.graphTransactionReadScope.replaceValue(readScope)
 
     defer {
       ThreadLocal.graphTransactionReadScope.replaceValue(previousReadScope)
@@ -836,6 +875,7 @@ final class GraphTransactionCoordinator: @unchecked Sendable {
         condition.broadcast()
       }
       condition.unlock()
+      readScope.finish()
     }
 
     return try body()
