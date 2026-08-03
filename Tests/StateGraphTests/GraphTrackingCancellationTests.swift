@@ -186,6 +186,185 @@ struct GraphTrackingCancellationTests {
 
   }
 
+  /// Cancels a group's root subscription from that group's rerun handler.
+  ///
+  /// The admitted invocation continues after `cancel()` returns. The same subscription
+  /// must not attempt to reacquire its nonrecursive execution gate during cancellation.
+  @Test
+  func groupScopeSelfCancellationReturns() async {
+    let invalidationTrigger = Stored(wrappedValue: 0)
+    let rootSubscription = OSAllocatedUnfairLock<AnyCancellable?>(uncheckedState: nil)
+
+    await withCheckedContinuation { continuation in
+      let subscription = withGraphTracking {
+        withGraphTrackingGroup(
+          {
+            guard invalidationTrigger.wrappedValue == 1 else { return }
+
+            rootSubscription.withLockUnchecked { $0 }?.cancel()
+            continuation.resume()
+          },
+          isolation: nil
+        )
+      }
+
+      rootSubscription.withLockUnchecked { $0 = subscription }
+      invalidationTrigger.wrappedValue = 1
+    }
+  }
+
+  /// Allows an admitted map pipeline to finish after its applier cancels the scope.
+  @Test
+  func mapPipelineFinishesAfterSelfCancellation() async {
+    let invalidationTrigger = Stored(wrappedValue: 0)
+    let rootSubscription = OSAllocatedUnfairLock<AnyCancellable?>(uncheckedState: nil)
+
+    await withCheckedContinuation { continuation in
+      let subscription = withGraphTracking {
+        withGraphTrackingMap(
+          {
+            let value = invalidationTrigger.wrappedValue
+            if value == 1 {
+              rootSubscription.withLockUnchecked { $0 }?.cancel()
+            }
+            return value
+          },
+          onChange: { value in
+            guard value == 1 else { return }
+            continuation.resume()
+          },
+          isolation: nil
+        )
+      }
+
+      rootSubscription.withLockUnchecked { $0 = subscription }
+      invalidationTrigger.wrappedValue = 1
+    }
+  }
+
+  /// Does not treat `cancel()` as a barrier for an invocation that already started.
+  @Test
+  func cancellationReturnsBeforeAdmittedHandlerFinishes() async {
+    let invalidationTrigger = Stored(wrappedValue: 0)
+    let handlerStarted = TestSignal()
+    let resumeHandler = DispatchSemaphore(value: 0)
+    let handlerFinished = TestSignal()
+    let cancellationReturned = TestSignal()
+    let rootSubscription = OSAllocatedUnfairLock<AnyCancellable?>(uncheckedState: nil)
+
+    let subscription = withGraphTracking {
+      withGraphTrackingGroup(
+        {
+          guard invalidationTrigger.wrappedValue == 1 else { return }
+
+          handlerStarted.signal()
+          resumeHandler.wait()
+          handlerFinished.signal()
+        },
+        isolation: nil
+      )
+    }
+    rootSubscription.withLockUnchecked { $0 = subscription }
+    defer {
+      resumeHandler.signal()
+      subscription.cancel()
+    }
+
+    invalidationTrigger.wrappedValue = 1
+    #expect(await handlerStarted.wait(for: .seconds(5)))
+
+    DispatchQueue.global().async {
+      rootSubscription.withLockUnchecked { $0 }?.cancel()
+      cancellationReturned.signal()
+    }
+
+    #expect(await cancellationReturned.wait(for: .seconds(5)))
+    resumeHandler.signal()
+    #expect(await handlerFinished.wait(for: .seconds(5)))
+  }
+
+  /// Rejects a nested handler created after its current parent was cancelled.
+  @Test
+  func nestedHandlerCreatedAfterCancellationDoesNotStart() async {
+    let invalidationTrigger = Stored(wrappedValue: 0)
+    let nestedGroupInvocationCount = Counter()
+    let nestedMapInvocationCount = Counter()
+    let rootSubscription = OSAllocatedUnfairLock<AnyCancellable?>(uncheckedState: nil)
+
+    await withCheckedContinuation { continuation in
+      let subscription = withGraphTracking {
+        withGraphTrackingGroup(
+          {
+            guard invalidationTrigger.wrappedValue == 1 else { return }
+
+            rootSubscription.withLockUnchecked { $0 }?.cancel()
+
+            withGraphTrackingGroup {
+              nestedGroupInvocationCount.increment()
+            }
+
+            withGraphTrackingMap(
+              {
+                nestedMapInvocationCount.increment()
+                return 0
+              },
+              onChange: { _ in },
+              isolation: nil
+            )
+
+            continuation.resume()
+          },
+          isolation: nil
+        )
+      }
+
+      rootSubscription.withLockUnchecked { $0 = subscription }
+      invalidationTrigger.wrappedValue = 1
+    }
+
+    #expect(nestedGroupInvocationCount.current == 0)
+    #expect(nestedMapInvocationCount.current == 0)
+  }
+
+  /// Prevents a pass contending for the execution gate from starting after cancellation.
+  @Test
+  func invocationContendingForExecutionGateDoesNotStartAfterCancellation() async {
+    let trackingHandler = GraphTrackingHandler {}
+    let firstInvocationStarted = TestSignal()
+    let releaseFirstInvocation = DispatchSemaphore(value: 0)
+    let firstInvocationFinished = TestSignal()
+    let secondInvocationIsReady = TestSignal()
+    let secondInvocationReturned = TestSignal()
+    let secondInvocationCount = Counter()
+
+    DispatchQueue.global().async {
+      trackingHandler.executeIfActive { _ in
+        firstInvocationStarted.signal()
+        releaseFirstInvocation.wait()
+      }
+      firstInvocationFinished.signal()
+    }
+    defer { releaseFirstInvocation.signal() }
+
+    #expect(await firstInvocationStarted.wait(for: .seconds(5)))
+
+    DispatchQueue.global().async {
+      secondInvocationIsReady.signal()
+      trackingHandler.executeIfActive { _ in
+        secondInvocationCount.increment()
+      }
+      secondInvocationReturned.signal()
+    }
+
+    #expect(await secondInvocationIsReady.wait(for: .seconds(5)))
+    trackingHandler.cancel()
+    releaseFirstInvocation.signal()
+
+    #expect(await firstInvocationFinished.wait(for: .seconds(5)))
+    #expect(await secondInvocationReturned.wait(for: .seconds(5)))
+    #expect(secondInvocationCount.current == 0)
+  }
+
   @Test
   func cancellationCallbackCanCancelTheSameCancellable() {
     let holder = OSAllocatedUnfairLock<GraphTrackingCancellable?>(initialState: nil)
