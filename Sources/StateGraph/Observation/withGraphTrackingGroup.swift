@@ -104,40 +104,39 @@ public func withGraphTrackingGroup(
     return
   }
 
-  let _handlerBox = OSAllocatedUnfairLock<ClosureBox<Void>?>(
-    uncheckedState: ClosureBox(handler)
-  )
+  let trackingHandler = GraphTrackingHandler(handler)
 
   // Create a cancellable for this scope that manages nested tracking
   let scopeCancellable = GraphTrackingCancellable {
-    _handlerBox.withLock { $0 = nil }
+    trackingHandler.cancel()
   }
 
-  withContinuousStateGraphTracking(
-    apply: {
-      // Cancel all children before re-executing (cleans up nested subscriptions)
-      scopeCancellable.cancelChildren()
-
-      // Set this scope's cancellable as the current parent for nested tracking
-      // Nested groups/maps will register with this parent via addChild()
-      ThreadLocal.currentCancellable.withValue(scopeCancellable) {
-        _handlerBox.withLock {
-          $0?()
-        }
-      }
-    },
-    didChange: {
-      guard !_handlerBox.withLock({ $0 == nil }) else { return .stop }
-      return .next
-    },
-    isolation: isolation
-  )
-
-  // Register with parent or root subscriptions
+  // Register before the initial invocation. A child created after its parent was
+  // cancelled is cancelled immediately and never executes its initial handler.
   if let parent = parentCancellable {
     parent.addChild(scopeCancellable)
   } else {
     subscriptions!.append(AnyCancellable(scopeCancellable))
   }
+
+  withContinuousStateGraphTracking(
+    apply: {
+      trackingHandler.executeIfActive { handler in
+        // Cancel all children before re-executing (cleans up nested subscriptions)
+        scopeCancellable.cancelChildren()
+
+        // Set this scope's cancellable as the current parent for nested tracking
+        // Nested groups/maps will register with this parent via addChild()
+        ThreadLocal.currentCancellable.withValue(scopeCancellable) {
+          handler()
+        }
+      }
+    },
+    didChange: {
+      guard !trackingHandler.isCancelled else { return .stop }
+      return .next
+    },
+    isolation: isolation
+  )
 
 }

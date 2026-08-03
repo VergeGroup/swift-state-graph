@@ -59,6 +59,10 @@
  - The returned `AnyCancellable` manages all subscriptions created within the scope
  - Subscriptions are automatically cancelled when the cancellable is deallocated
  - Use `cancellable.cancel()` for explicit cleanup
+ - Cancellation prevents later group/map handler invocations and releases stored
+   handler captures when they are no longer used by an admitted invocation
+ - An invocation that already started may finish after `cancel()` returns;
+   cancellation does not wait for in-flight handler completion
 
  - Parameter scope: A closure where you set up your node observations
  - Returns: An `AnyCancellable` that manages all subscriptions created within the scope
