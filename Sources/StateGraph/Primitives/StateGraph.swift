@@ -330,10 +330,7 @@ public final class Computed<Value: SendableMetatype>: Node, Observable, CustomDe
     self.lock = .init()
 
 #if DEBUG
-    Task { [weak self] in
-      guard let self else { return }
-      await NodeStore.shared.register(node: self)
-    }
+    NodeStore.shared.register(self)
 #endif
   }
   
@@ -363,10 +360,7 @@ public final class Computed<Value: SendableMetatype>: Node, Observable, CustomDe
     self.lock = .init()
 
 #if DEBUG
-    Task { [weak self] in
-      guard let self else { return }
-      await NodeStore.shared.register(node: self)
-    }
+    NodeStore.shared.register(self)
 #endif
   }
 
@@ -396,10 +390,7 @@ public final class Computed<Value: SendableMetatype>: Node, Observable, CustomDe
     self.lock = .init()
    
 #if DEBUG
-    Task { [weak self] in
-      guard let self else { return }
-      await NodeStore.shared.register(node: self)
-    }
+    NodeStore.shared.register(self)
 #endif
   }
   
@@ -417,7 +408,7 @@ public final class Computed<Value: SendableMetatype>: Node, Observable, CustomDe
     }
 
     for edge in outgoingEdges {
-      edge.to?.removeIncomingEdge(edge)
+      edge.to?.sourceDidRelease(edge)
     }
   }
 
@@ -452,15 +443,14 @@ public final class Computed<Value: SendableMetatype>: Node, Observable, CustomDe
 
     if !_potentiallyDirty && _cachedValue != nil { return }
 
-    incomingEdges.removeAll(where: { $0.from == nil })
-
     for edge in incomingEdges {
       edge.from?.recomputeIfNeeded()
     }
 
     let hasPendingIncomingEdge = incomingEdges.contains {
-      $0.from != nil && $0.isPending
+      $0.isPending
     }
+    incomingEdges.removeAll(where: { $0.from == nil })
 
     if hasPendingIncomingEdge || _cachedValue == nil {
 

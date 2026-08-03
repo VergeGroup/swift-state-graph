@@ -15,9 +15,21 @@ public actor NodeStore {
     nodes.removeAll()
   }
 
-  func register(node: any TypeErasedNode) {
+  /// Schedules a weak node registration without extending the node's lifetime.
+  ///
+  /// The weak reference is created synchronously before the actor hop. A node
+  /// released while the registration task is waiting therefore disappears normally.
+  nonisolated func register(_ node: any TypeErasedNode) {
+    let weakNode = WeakNode(node)
+
+    Task {
+      await register(weakNode: weakNode)
+    }
+  }
+
+  private func register(weakNode: WeakNode) {
     guard isEnabled else { return }
-    nodes.append(.init(node))
+    nodes.append(weakNode)
     compact()  
   }
 
@@ -59,7 +71,7 @@ public actor NodeStore {
 
 }
 
-private struct WeakNode: Equatable {
+private struct WeakNode: Equatable, Sendable {
 
   static func == (lhs: WeakNode, rhs: WeakNode) -> Bool {
     return lhs.value === rhs.value
