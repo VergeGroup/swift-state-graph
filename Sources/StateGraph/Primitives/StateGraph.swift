@@ -330,9 +330,7 @@ public final class Computed<Value: SendableMetatype>: Node, Observable, CustomDe
     self.lock = .init()
 
 #if DEBUG
-    Task { [weak self] in
-      await NodeStore.shared.register { [weak self] in self }
-    }
+    NodeStore.shared.register(self)
 #endif
   }
   
@@ -362,9 +360,7 @@ public final class Computed<Value: SendableMetatype>: Node, Observable, CustomDe
     self.lock = .init()
 
 #if DEBUG
-    Task { [weak self] in
-      await NodeStore.shared.register { [weak self] in self }
-    }
+    NodeStore.shared.register(self)
 #endif
   }
 
@@ -394,9 +390,7 @@ public final class Computed<Value: SendableMetatype>: Node, Observable, CustomDe
     self.lock = .init()
    
 #if DEBUG
-    Task { [weak self] in
-      await NodeStore.shared.register { [weak self] in self }
-    }
+    NodeStore.shared.register(self)
 #endif
   }
   

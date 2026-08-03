@@ -505,9 +505,7 @@ public final class Stored<Value: SendableMetatype>: Node, Observable, CustomDebu
     self.shouldNotify = shouldNotify
 
 #if DEBUG
-    Task { [weak self] in
-      await NodeStore.shared.register { [weak self] in self }
-    }
+    NodeStore.shared.register(self)
 #endif
   }
 
