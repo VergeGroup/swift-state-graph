@@ -777,9 +777,9 @@ struct IssuesTrackingOnHeavyOperation {
       cancellable.cancel()
     }
 
-    // Keep every write on one nonisolated synchronous producer. The coordinator uses a Dispatch
-    // queue so it can release the blocked handler even when Swift's cooperative pool has one worker.
-    DispatchQueue.global().async {
+    // Keep every write on one nonisolated synchronous producer. A dedicated OS thread can
+    // release the blocked handler without depending on either shared executor's available width.
+    Thread {
       defer {
         resumeSecondInvocation.signal()
         coordinatorFinished.signal()
@@ -806,7 +806,7 @@ struct IssuesTrackingOnHeavyOperation {
       let didReadValueInFourthInvocation =
         fourthInvocationReadValue.wait(timeout: .now() + .seconds(5)) == .success
       scenarioResult.withLock { $0.fourthInvocationReadValue = didReadValueInFourthInvocation }
-    }
+    }.start()
 
     #expect(await coordinatorFinished.wait(for: .seconds(20)))
     let result = scenarioResult.withLock { $0 }
@@ -844,7 +844,7 @@ struct IssuesTrackingOnHeavyOperation {
         }
       }
 
-      DispatchQueue.global().async {
+      Thread {
         let didObserveHandler = handlerStarted.wait(timeout: .now() + .seconds(5)) == .success
         coordinatorObservedHandler.withLock { $0 = didObserveHandler }
         if didObserveHandler {
@@ -852,7 +852,7 @@ struct IssuesTrackingOnHeavyOperation {
         }
         resumeHandler.signal()
         coordinatorFinished.signal()
-      }
+      }.start()
 
       model.count1 = 1
 
@@ -909,7 +909,7 @@ struct IssuesTrackingOnHeavyOperation {
 
       #expect(await trackingStarted.wait(for: .seconds(5)))
 
-      DispatchQueue.global().async {
+      Thread {
         let didObserveHandler = handlerStarted.wait(timeout: .now() + .seconds(5)) == .success
         coordinatorObservedHandler.withLock { $0 = didObserveHandler }
         if didObserveHandler {
@@ -917,7 +917,7 @@ struct IssuesTrackingOnHeavyOperation {
         }
         resumeHandler.signal()
         coordinatorFinished.signal()
-      }
+      }.start()
 
       model.count1 = 1
       #expect(await handlerFinished.wait(for: .seconds(5)))
@@ -1036,36 +1036,39 @@ struct IssuesObservationsObservableObject {
   @MainActor
   func observation() async {
     let model = ObservableModel()
-    await confirmation { c in
-      Task {
-        let s = Observations<Void, Never>.untilFinished {
-          print("Up")
+    await confirmation { confirmation in
+      let initialObservation = TestSignal()
+      let count1Observation = TestSignal()
+      let observationFinished = TestSignal()
+      let observationTask = Task {
+        let observations = Observations<Void, Never>.untilFinished {
+          initialObservation.signal()
+
           if model.count2 == 2 {
             return .finish
           }
+
           if model.count1 == 1 {
-            Thread.sleep(forTimeInterval: 2)
-            return .next(())
+            count1Observation.signal()
           }
+
           return .next(())
         }
-        var eventCount: Int = 0
-        for await e in s {
-          eventCount += 1
-        }
-        c.confirm()
-      }
 
-      Task {
-        print("Update count1")
-        model.count1 = 1
-        Task {
-          try? await Task.sleep(for: .milliseconds(100))
-          print("Update count2")
-          model.count2 = 2
-        }
+        for await _ in observations {}
+        confirmation.confirm()
+        observationFinished.signal()
       }
-      try? await Task.sleep(for: .seconds(5))
+      defer { observationTask.cancel() }
+
+      #expect(await initialObservation.wait(for: .seconds(5)))
+
+      model.count1 = 1
+      #expect(await count1Observation.wait(for: .seconds(5)))
+
+      model.count2 = 2
+      #expect(await observationFinished.wait(for: .seconds(5)))
+      await observationTask.value
     }
 
   }

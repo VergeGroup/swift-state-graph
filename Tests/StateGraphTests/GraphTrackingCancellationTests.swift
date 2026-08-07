@@ -246,10 +246,13 @@ struct GraphTrackingCancellationTests {
   @Test
   func cancellationReturnsBeforeAdmittedHandlerFinishes() async {
     let invalidationTrigger = Stored(wrappedValue: 0)
-    let handlerStarted = TestSignal()
+    let handlerStarted = DispatchSemaphore(value: 0)
     let resumeHandler = DispatchSemaphore(value: 0)
     let handlerFinished = TestSignal()
-    let cancellationReturned = TestSignal()
+    let coordinatorFinished = TestSignal()
+    let handlerDidFinish = OSAllocatedUnfairLock(initialState: false)
+    let didObserveHandlerStart = OSAllocatedUnfairLock(initialState: false)
+    let cancellationReturnedBeforeHandlerFinished = OSAllocatedUnfairLock(initialState: false)
     let rootSubscription = OSAllocatedUnfairLock<AnyCancellable?>(uncheckedState: nil)
 
     let subscription = withGraphTracking {
@@ -259,6 +262,7 @@ struct GraphTrackingCancellationTests {
 
           handlerStarted.signal()
           resumeHandler.wait()
+          handlerDidFinish.withLock { $0 = true }
           handlerFinished.signal()
         },
         isolation: nil
@@ -270,16 +274,30 @@ struct GraphTrackingCancellationTests {
       subscription.cancel()
     }
 
-    invalidationTrigger.wrappedValue = 1
-    #expect(await handlerStarted.wait(for: .seconds(5)))
+    // Complete the blocking handoff without requiring the test task to resume on the
+    // cooperative executor while the admitted handler occupies one of its workers.
+    Thread {
+      defer {
+        resumeHandler.signal()
+        coordinatorFinished.signal()
+      }
 
-    DispatchQueue.global().async {
+      let didStart = handlerStarted.wait(timeout: .now() + .seconds(5)) == .success
+      didObserveHandlerStart.withLock { $0 = didStart }
+      guard didStart else { return }
+
       rootSubscription.withLockUnchecked { $0 }?.cancel()
-      cancellationReturned.signal()
-    }
+      let didFinishBeforeCancellationReturned = handlerDidFinish.withLock { $0 }
+      cancellationReturnedBeforeHandlerFinished.withLock {
+        $0 = !didFinishBeforeCancellationReturned
+      }
+    }.start()
 
-    #expect(await cancellationReturned.wait(for: .seconds(5)))
-    resumeHandler.signal()
+    invalidationTrigger.wrappedValue = 1
+
+    #expect(await coordinatorFinished.wait(for: .seconds(5)))
+    #expect(didObserveHandlerStart.withLock { $0 })
+    #expect(cancellationReturnedBeforeHandlerFinished.withLock { $0 })
     #expect(await handlerFinished.wait(for: .seconds(5)))
   }
 
@@ -330,38 +348,75 @@ struct GraphTrackingCancellationTests {
   @Test
   func invocationContendingForExecutionGateDoesNotStartAfterCancellation() async {
     let trackingHandler = GraphTrackingHandler {}
-    let firstInvocationStarted = TestSignal()
+    let firstInvocationStarted = DispatchSemaphore(value: 0)
     let releaseFirstInvocation = DispatchSemaphore(value: 0)
-    let firstInvocationFinished = TestSignal()
-    let secondInvocationIsReady = TestSignal()
-    let secondInvocationReturned = TestSignal()
+    let firstInvocationFinished = DispatchSemaphore(value: 0)
+    let secondInvocationIsReady = DispatchSemaphore(value: 0)
+    let secondInvocationReturned = DispatchSemaphore(value: 0)
     let secondInvocationCount = Counter()
+    let coordinatorFinished = TestSignal()
+    let scenarioResult = OSAllocatedUnfairLock(
+      initialState: (
+        firstInvocationStarted: false,
+        secondInvocationIsReady: false,
+        firstInvocationFinished: false,
+        secondInvocationReturned: false
+      )
+    )
 
-    DispatchQueue.global().async {
+    Thread {
       trackingHandler.executeIfActive { _ in
         firstInvocationStarted.signal()
         releaseFirstInvocation.wait()
       }
       firstInvocationFinished.signal()
-    }
-    defer { releaseFirstInvocation.signal() }
+    }.start()
 
-    #expect(await firstInvocationStarted.wait(for: .seconds(5)))
-
-    DispatchQueue.global().async {
-      secondInvocationIsReady.signal()
-      trackingHandler.executeIfActive { _ in
-        secondInvocationCount.increment()
+    // Sequence the two blocking invocations on dedicated OS threads. The async test task
+    // only resumes after every synchronous handoff has completed.
+    Thread {
+      defer {
+        releaseFirstInvocation.signal()
+        coordinatorFinished.signal()
       }
-      secondInvocationReturned.signal()
-    }
 
-    #expect(await secondInvocationIsReady.wait(for: .seconds(5)))
-    trackingHandler.cancel()
-    releaseFirstInvocation.signal()
+      let firstDidStart =
+        firstInvocationStarted.wait(timeout: .now() + .seconds(5)) == .success
+      scenarioResult.withLock { $0.firstInvocationStarted = firstDidStart }
+      guard firstDidStart else { return }
 
-    #expect(await firstInvocationFinished.wait(for: .seconds(5)))
-    #expect(await secondInvocationReturned.wait(for: .seconds(5)))
+      Thread {
+        secondInvocationIsReady.signal()
+        trackingHandler.executeIfActive { _ in
+          secondInvocationCount.increment()
+        }
+        secondInvocationReturned.signal()
+      }.start()
+
+      let secondIsReady =
+        secondInvocationIsReady.wait(timeout: .now() + .seconds(5)) == .success
+      scenarioResult.withLock { $0.secondInvocationIsReady = secondIsReady }
+      guard secondIsReady else { return }
+
+      trackingHandler.cancel()
+      releaseFirstInvocation.signal()
+
+      let firstDidFinish =
+        firstInvocationFinished.wait(timeout: .now() + .seconds(5)) == .success
+      let secondDidReturn =
+        secondInvocationReturned.wait(timeout: .now() + .seconds(5)) == .success
+      scenarioResult.withLock {
+        $0.firstInvocationFinished = firstDidFinish
+        $0.secondInvocationReturned = secondDidReturn
+      }
+    }.start()
+
+    #expect(await coordinatorFinished.wait(for: .seconds(20)))
+    let result = scenarioResult.withLock { $0 }
+    #expect(result.firstInvocationStarted)
+    #expect(result.secondInvocationIsReady)
+    #expect(result.firstInvocationFinished)
+    #expect(result.secondInvocationReturned)
     #expect(secondInvocationCount.current == 0)
   }
 

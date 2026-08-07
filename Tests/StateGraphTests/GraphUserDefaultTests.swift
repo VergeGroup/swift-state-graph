@@ -59,12 +59,12 @@ struct GraphUserDefaultTests {
 
     func verifyConcurrentOperation(_ operation: @escaping @Sendable () -> Void) {
       let operationFinished = DispatchSemaphore(value: 0)
-      DispatchQueue.global().async {
+      Thread {
         operation()
         operationFinished.signal()
-      }
+      }.start()
 
-      let didComplete = operationFinished.wait(timeout: .now() + 1) == .success
+      let didComplete = operationFinished.wait(timeout: .now() + 5) == .success
       state.withLock {
         $0.didRun = true
         $0.concurrentOperationCompleted = didComplete
@@ -395,7 +395,7 @@ struct GraphUserDefaultTests {
   }
 
   @Test
-  func refreshesChangeMadeBetweenInitialReadAndObserverInstallation() {
+  func refreshesChangeMadeBetweenInitialReadAndObserverInstallation() async {
     let key = makeTestKey()
     let userDefaults = makeTestUserDefaults()
     let userDefaultsReference = UserDefaultsReference(userDefaults)
@@ -407,7 +407,7 @@ struct GraphUserDefaultTests {
 
     let valueBox = ValueBox<GraphUserDefault<BlockingValue>>()
     let initializationFinished = DispatchSemaphore(value: 0)
-    DispatchQueue.global().async {
+    Thread {
       valueBox.store(
         GraphUserDefault(
           wrappedValue: initialValue,
@@ -416,14 +416,39 @@ struct GraphUserDefaultTests {
         )
       )
       initializationFinished.signal()
-    }
+    }.start()
 
-    #expect(controller.didStart.wait(timeout: .now() + 1) == .success)
-    userDefaults.set("during-initialization", forKey: key)
-    controller.resume.signal()
+    let coordinatorFinished = TestSignal()
+    let scenarioResult = OSAllocatedUnfairLock(
+      initialState: (
+        initialReadStarted: false,
+        initializationFinished: false,
+        initializedValue: BlockingValue?.none
+      )
+    )
+    Thread {
+      defer { coordinatorFinished.signal() }
 
-    #expect(initializationFinished.wait(timeout: .now() + 1) == .success)
-    #expect(valueBox.current?.wrappedValue == .init(rawValue: "during-initialization"))
+      let initialReadStarted = controller.didStart.wait(timeout: .now() + 20) == .success
+      scenarioResult.withLock { $0.initialReadStarted = initialReadStarted }
+      guard initialReadStarted else { return }
+
+      userDefaultsReference.value.set("during-initialization", forKey: key)
+      controller.resume.signal()
+
+      let didFinish = initializationFinished.wait(timeout: .now() + 20) == .success
+      let initializedValue = valueBox.current?.wrappedValue
+      scenarioResult.withLock {
+        $0.initializationFinished = didFinish
+        $0.initializedValue = initializedValue
+      }
+    }.start()
+
+    #expect(await coordinatorFinished.wait(for: .seconds(30)))
+    let result = scenarioResult.withLock { $0 }
+    #expect(result.initialReadStarted)
+    #expect(result.initializationFinished)
+    #expect(result.initializedValue == .init(rawValue: "during-initialization"))
   }
 
   @Test

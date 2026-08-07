@@ -116,77 +116,152 @@ struct GraphTransactionTests {
   @Test
   func outsideReaderSeesCommittedValueWhileTransactionBodyIsPaused() async {
     let node = Stored(wrappedValue: 0)
-    let transactionStarted = TestSignal()
+    let transactionStarted = DispatchSemaphore(value: 0)
     let resumeTransaction = TestThreadGate()
-    let transactionFinished = TestSignal()
-
-    let thread = Thread {
-      withGraphTransaction {
-        node.wrappedValue = 1
-        transactionStarted.signal()
-        resumeTransaction.wait(until: Date().addingTimeInterval(5))
-      }
-      transactionFinished.signal()
-    }
-    thread.start()
-
-    #expect(await transactionStarted.wait(for: .seconds(5)))
-    #expect(node.wrappedValue == 0)
-
-    resumeTransaction.open()
-    #expect(await transactionFinished.wait(for: .seconds(5)))
-    #expect(node.wrappedValue == 1)
-  }
-
-  @Test
-  func outsideWriterWaitsForTransactionCompletion() async {
-    let node = Stored(wrappedValue: 0)
-    let transactionStarted = TestSignal()
-    let resumeTransaction = TestThreadGate()
-    let transactionFinished = TestSignal()
-    let writerStarted = TestSignal()
-    let writerFinished = TestSignal()
-    let writerDidFinish = LockedBox(false)
+    let transactionFinished = DispatchSemaphore(value: 0)
+    let coordinatorFinished = TestSignal()
+    let scenarioResult = OSAllocatedUnfairLock(
+      initialState: (
+        transactionStarted: false,
+        pausedReadValue: Int?.none,
+        transactionFinished: false,
+        committedValue: Int?.none
+      )
+    )
 
     let transactionThread = Thread {
       withGraphTransaction {
         node.wrappedValue = 1
         transactionStarted.signal()
-        resumeTransaction.wait(until: Date().addingTimeInterval(5))
+        resumeTransaction.wait(until: Date.distantFuture)
       }
       transactionFinished.signal()
     }
     transactionThread.start()
 
-    #expect(await transactionStarted.wait(for: .seconds(5)))
-
+    // Keep the transaction pause and read handoff on OS threads. Returning to the async
+    // test task mid-scenario can deadlock with another parallel test that occupies the
+    // cooperative executor while waiting for this global transaction to finish.
     Thread {
-      writerStarted.signal()
-      node.wrappedValue = 2
-      writerDidFinish.update { $0 = true }
-      writerFinished.signal()
+      defer {
+        resumeTransaction.open()
+        coordinatorFinished.signal()
+      }
+
+      let didStart = transactionStarted.wait(timeout: .now() + .seconds(20)) == .success
+      scenarioResult.withLock { $0.transactionStarted = didStart }
+      guard didStart else { return }
+
+      let pausedReadValue = node.wrappedValue
+      scenarioResult.withLock { $0.pausedReadValue = pausedReadValue }
+
+      resumeTransaction.open()
+      let didFinish = transactionFinished.wait(timeout: .now() + .seconds(20)) == .success
+      let committedValue = node.wrappedValue
+      scenarioResult.withLock {
+        $0.transactionFinished = didFinish
+        $0.committedValue = committedValue
+      }
     }.start()
 
-    #expect(await writerStarted.wait(for: .seconds(5)))
-#if DEBUG
-    let writerBlocked = TestSignal()
-    let didObserveBlockedWriter = LockedBox(false)
-    Thread {
-      let didBlock = GraphTransactionCoordinator.shared.__testing__waitForImmediateWriterToBlock(
-        until: Date().addingTimeInterval(1)
+    #expect(await coordinatorFinished.wait(for: .seconds(30)))
+    let result = scenarioResult.withLock { $0 }
+    #expect(result.transactionStarted)
+    #expect(result.pausedReadValue == 0)
+    #expect(result.transactionFinished)
+    #expect(result.committedValue == 1)
+  }
+
+  @Test
+  func outsideWriterWaitsForTransactionCompletion() async {
+    let node = Stored(wrappedValue: 0)
+    let transactionStarted = DispatchSemaphore(value: 0)
+    let resumeTransaction = TestThreadGate()
+    let transactionFinished = DispatchSemaphore(value: 0)
+    let writerStarted = DispatchSemaphore(value: 0)
+    let writerFinished = DispatchSemaphore(value: 0)
+    let writerDidFinish = LockedBox(false)
+    let coordinatorFinished = TestSignal()
+    let scenarioResult = OSAllocatedUnfairLock(
+      initialState: (
+        transactionStarted: false,
+        writerStarted: false,
+        didObserveBlockedWriter: false,
+        writerRemainedBlockedBeforeRelease: false,
+        transactionFinished: false,
+        writerFinished: false,
+        finalValue: Int?.none
       )
-      didObserveBlockedWriter.update { $0 = didBlock }
-      writerBlocked.signal()
-    }.start()
-    #expect(await writerBlocked.wait(for: .seconds(5)))
-    #expect(didObserveBlockedWriter.value)
-#endif
-    #expect(!writerDidFinish.value)
+    )
 
-    resumeTransaction.open()
-    #expect(await transactionFinished.wait(for: .seconds(5)))
-    #expect(await writerFinished.wait(for: .seconds(5)))
-    #expect(node.wrappedValue == 2)
+    let transactionThread = Thread {
+      withGraphTransaction {
+        node.wrappedValue = 1
+        transactionStarted.signal()
+        resumeTransaction.wait(until: Date.distantFuture)
+      }
+      transactionFinished.signal()
+    }
+    transactionThread.start()
+
+    // The coordinator owns every intermediate handoff, so no global transaction remains
+    // paused while this async test task is waiting for a cooperative-executor worker.
+    Thread {
+      defer {
+        resumeTransaction.open()
+        coordinatorFinished.signal()
+      }
+
+      let transactionDidStart =
+        transactionStarted.wait(timeout: .now() + .seconds(20)) == .success
+      scenarioResult.withLock { $0.transactionStarted = transactionDidStart }
+      guard transactionDidStart else { return }
+
+      Thread {
+        writerStarted.signal()
+        node.wrappedValue = 2
+        writerDidFinish.update { $0 = true }
+        writerFinished.signal()
+      }.start()
+
+      let writerDidStart = writerStarted.wait(timeout: .now() + .seconds(5)) == .success
+      scenarioResult.withLock { $0.writerStarted = writerDidStart }
+      guard writerDidStart else { return }
+
+#if DEBUG
+      let didObserveBlockedWriter =
+        GraphTransactionCoordinator.shared.__testing__waitForImmediateWriterToBlock(
+          until: Date().addingTimeInterval(5)
+        )
+      scenarioResult.withLock { $0.didObserveBlockedWriter = didObserveBlockedWriter }
+#endif
+      scenarioResult.withLock {
+        $0.writerRemainedBlockedBeforeRelease = !writerDidFinish.value
+      }
+
+      resumeTransaction.open()
+      let transactionDidFinish =
+        transactionFinished.wait(timeout: .now() + .seconds(20)) == .success
+      let writerDidComplete = writerFinished.wait(timeout: .now() + .seconds(20)) == .success
+      let finalValue = node.wrappedValue
+      scenarioResult.withLock {
+        $0.transactionFinished = transactionDidFinish
+        $0.writerFinished = writerDidComplete
+        $0.finalValue = finalValue
+      }
+    }.start()
+
+    #expect(await coordinatorFinished.wait(for: .seconds(30)))
+    let result = scenarioResult.withLock { $0 }
+    #expect(result.transactionStarted)
+    #expect(result.writerStarted)
+#if DEBUG
+    #expect(result.didObserveBlockedWriter)
+#endif
+    #expect(result.writerRemainedBlockedBeforeRelease)
+    #expect(result.transactionFinished)
+    #expect(result.writerFinished)
+    #expect(result.finalValue == 2)
   }
 
   @Test
