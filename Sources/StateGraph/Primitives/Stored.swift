@@ -89,12 +89,8 @@ public final class Stored<Value: SendableMetatype>: Node, Observable, CustomDebu
 
   public var wrappedValue: Value {
     get {
-      if ThreadLocal.graphTransaction.value != nil {
-        return transactionValue()
-      }
-
-      return GraphTransactionCoordinator.shared.withReadAccess {
-        committedValue()
+      withBorrowedValue { value in
+        value
       }
     }
     set {
@@ -109,11 +105,39 @@ public final class Stored<Value: SendableMetatype>: Node, Observable, CustomDebu
     }
   }
 
-  /// Returns the transaction-visible value without adding committed graph edges.
+  /// Projects the current value without first copying its complete storage.
+  ///
+  /// The projection observes the same transaction-visible value and records the
+  /// same StateGraph, Observation, and tracking dependencies as ``wrappedValue``.
+  /// It is useful for selecting a small result from a large copy-on-write value
+  /// such as a dictionary-backed entity store.
+  ///
+  /// The closure runs synchronously while this node's lock is held. It must only
+  /// inspect `value` and derive its result. Calling node APIs, acquiring another
+  /// node's lock, or escaping the borrowed value itself is unsupported.
+  ///
+  /// - Parameter projection: A synchronous projection over the borrowed value.
+  /// - Returns: The result produced by `projection`.
+  public borrowing func withBorrowedValue<Result, Failure: Error>(
+    _ projection: (borrowing Value) throws(Failure) -> Result
+  ) throws(Failure) -> Result {
+    if ThreadLocal.graphTransaction.value != nil {
+      return try withBorrowedTransactionValue(projection)
+    }
+
+    return try GraphTransactionCoordinator.shared.withReadAccess {
+      () throws(Failure) -> Result in
+      try withBorrowedCommittedValue(projection)
+    }
+  }
+
+  /// Projects the transaction-visible value without adding committed graph edges.
   ///
   /// Body and comparator reads remain isolated. During synchronous callback delivery,
   /// Observation and graph-tracking passes may register directly with this leaf node.
-  private func transactionValue() -> Value {
+  private func withBorrowedTransactionValue<Result, Failure: Error>(
+    _ projection: (borrowing Value) throws(Failure) -> Result
+  ) throws(Failure) -> Result {
     let recordsDependencies =
       ThreadLocal.graphTransaction.value?.recordsDependencies == true
 
@@ -136,20 +160,22 @@ public final class Stored<Value: SendableMetatype>: Node, Observable, CustomDebu
     }
 
     if transactionBuffer != nil {
-      return transactionBuffer!.value
+      return try projection(transactionBuffer!.value)
     }
 
     // Comparators run before publication. Their thread-local transaction context
     // still reads the complete pending commit while outside readers see `value`.
     if let transactionCommitWork {
-      return transactionCommitWork.newValue
+      return try projection(transactionCommitWork.newValue)
     }
 
-    return value
+    return try projection(value)
   }
 
-  /// Returns the committed value and records ordinary graph and tracking dependencies.
-  private func committedValue() -> Value {
+  /// Projects the committed value and records ordinary graph and tracking dependencies.
+  private func withBorrowedCommittedValue<Result, Failure: Error>(
+    _ projection: (borrowing Value) throws(Failure) -> Result
+  ) throws(Failure) -> Result {
 #if canImport(Observation)
     if #available(macOS 14.0, iOS 17.0, watchOS 10.0, tvOS 17.0, *) {
       observationRegistrar.access(
@@ -172,7 +198,7 @@ public final class Stored<Value: SendableMetatype>: Node, Observable, CustomDebu
       trackingRegistrations.insert(registration)
     }
 
-    return value
+    return try projection(value)
   }
 
   /// Stages one assignment and then runs its assignment observer.
