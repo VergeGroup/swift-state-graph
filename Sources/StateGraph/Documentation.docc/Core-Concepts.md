@@ -153,18 +153,20 @@ notification, and rollback semantics are outside this Stored-level API.
 Likewise, accessing an externally locked store from the body while another
 thread mutates it is outside the transaction's lock-order guarantees.
 
-Keep committed `Computed` descriptors free of graph mutations. Descriptors own
-their node's evaluation lock, so beginning a transaction, or blocking on one
-through a `Stored` assignment, conflicts with writer lock ordering. StateGraph
-fails fast in those cases instead of deadlocking; initiate mutations from the
-descriptor's caller.
+Keep both committed and transaction-local `Computed` descriptor computation and
+equality free of graph mutations. StateGraph marks these closures as read-only and
+diagnoses violations in DEBUG builds. Non-DEBUG builds omit that tracking, so a
+violation remains unsupported rather than carrying runtime diagnostic overhead.
+Dependency cycles, including direct self-read, remain unsupported because the graph
+must be a DAG.
 
-An ordinary immediate assignment evaluates its `Stored` comparator and
-synchronously delivered Observation `willSet` handlers while a node lock is held.
-Do not begin a transaction there or from `Stored.unsafeModify(_:)`; start it from
-`onDidSet(_:)` or another post-mutation callback instead. Transaction commit
-evaluates comparators and delivers its Observation callbacks outside node locks,
-but comparators should remain free of mutation side effects.
+An ordinary immediate assignment evaluates its `Stored` comparator and delivers
+Observation `willSet` outside the physical node lock. A coordinator-owned logical
+reservation keeps another writer from changing the same node before publication,
+while readers can still observe the old value and writers to other nodes can
+proceed. Comparators are read-only graph operations. Do not begin a transaction
+from Observation `willSet` or `Stored.unsafeModify(_:)`; start it from `onDidSet(_:)`
+or another post-mutation callback instead.
 
 ## Computed Value Nodes
 

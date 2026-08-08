@@ -56,5 +56,8 @@ enum ThreadLocal: Sendable {
   static let graphTransaction: ThreadLocalValue<GraphTransactionContext> = .init(key: "org.vergegroup.state-graph.transaction")
   static let graphTransactionReadScope: ThreadLocalValue<GraphTransactionReadScope> = .init(key: "org.vergegroup.state-graph.transaction-read-scope")
   static let graphImmediateWriterScope: ThreadLocalValue<GraphImmediateWriterScope> = .init(key: "org.vergegroup.state-graph.immediate-writer-scope")
+#if DEBUG
+  static let graphMutationProhibition: ThreadLocalValue<GraphMutationProhibition> = .init(key: "org.vergegroup.state-graph.mutation-prohibition")
+#endif
 
 }

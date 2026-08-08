@@ -50,25 +50,6 @@ final class ConcurrencyTests: XCTestCase {
     XCTAssertEqual(conditional.wrappedValue, 30)
   }
 
-  func testReentrancy() async throws {
-    let counter = Stored(name: "counter", wrappedValue: 0)
-    let trigger = Stored(name: "trigger", wrappedValue: false)
-
-    // Node that may cause reentrancy
-    let reentrant = Computed(name: "reentrant") { _ in
-      let value = counter.wrappedValue
-      if trigger.wrappedValue && value < 5 {
-        counter.wrappedValue = value + 1  // Trigger recalculation
-      }
-      return value
-    }
-
-    trigger.wrappedValue = true
-    _ = reentrant.wrappedValue
-
-    XCTAssertLessThanOrEqual(counter.wrappedValue, 5, "Not caught in an infinite loop")
-  }
-
   func testComplexDependencyGraph() async throws {
     let a = Stored(name: "a", wrappedValue: 1)
     let b = Stored(name: "b", wrappedValue: 2)
