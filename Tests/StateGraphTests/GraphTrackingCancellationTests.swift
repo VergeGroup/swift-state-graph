@@ -246,10 +246,13 @@ struct GraphTrackingCancellationTests {
   @Test
   func cancellationReturnsBeforeAdmittedHandlerFinishes() async {
     let invalidationTrigger = Stored(wrappedValue: 0)
-    let handlerStarted = TestSignal()
-    let resumeHandler = DispatchSemaphore(value: 0)
+    let handlerStarted = TestThreadSignal()
+    let resumeHandler = TestThreadGate()
     let handlerFinished = TestSignal()
-    let cancellationReturned = TestSignal()
+    let coordinatorFinished = TestSignal()
+    let handlerDidFinish = OSAllocatedUnfairLock(initialState: false)
+    let didObserveHandlerStart = OSAllocatedUnfairLock(initialState: false)
+    let cancellationReturnedBeforeHandlerFinished = OSAllocatedUnfairLock(initialState: false)
     let rootSubscription = OSAllocatedUnfairLock<AnyCancellable?>(uncheckedState: nil)
 
     let subscription = withGraphTracking {
@@ -258,7 +261,8 @@ struct GraphTrackingCancellationTests {
           guard invalidationTrigger.wrappedValue == 1 else { return }
 
           handlerStarted.signal()
-          resumeHandler.wait()
+          resumeHandler.wait(until: .distantFuture)
+          handlerDidFinish.withLock { $0 = true }
           handlerFinished.signal()
         },
         isolation: nil
@@ -266,20 +270,34 @@ struct GraphTrackingCancellationTests {
     }
     rootSubscription.withLockUnchecked { $0 = subscription }
     defer {
-      resumeHandler.signal()
+      resumeHandler.open()
       subscription.cancel()
     }
 
-    invalidationTrigger.wrappedValue = 1
-    #expect(await handlerStarted.wait(for: .seconds(5)))
+    // Complete the blocking handoff without requiring the test task to resume on the
+    // cooperative executor while the admitted handler occupies one of its workers.
+    Thread {
+      defer {
+        resumeHandler.open()
+        coordinatorFinished.signal()
+      }
 
-    DispatchQueue.global().async {
+      let didStart = handlerStarted.wait(until: Date().addingTimeInterval(5))
+      didObserveHandlerStart.withLock { $0 = didStart }
+      guard didStart else { return }
+
       rootSubscription.withLockUnchecked { $0 }?.cancel()
-      cancellationReturned.signal()
-    }
+      let didFinishBeforeCancellationReturned = handlerDidFinish.withLock { $0 }
+      cancellationReturnedBeforeHandlerFinished.withLock {
+        $0 = !didFinishBeforeCancellationReturned
+      }
+    }.start()
 
-    #expect(await cancellationReturned.wait(for: .seconds(5)))
-    resumeHandler.signal()
+    invalidationTrigger.wrappedValue = 1
+
+    #expect(await coordinatorFinished.wait(for: .seconds(5)))
+    #expect(didObserveHandlerStart.withLock { $0 })
+    #expect(cancellationReturnedBeforeHandlerFinished.withLock { $0 })
     #expect(await handlerFinished.wait(for: .seconds(5)))
   }
 
@@ -330,38 +348,69 @@ struct GraphTrackingCancellationTests {
   @Test
   func invocationContendingForExecutionGateDoesNotStartAfterCancellation() async {
     let trackingHandler = GraphTrackingHandler {}
-    let firstInvocationStarted = TestSignal()
-    let releaseFirstInvocation = DispatchSemaphore(value: 0)
-    let firstInvocationFinished = TestSignal()
-    let secondInvocationIsReady = TestSignal()
-    let secondInvocationReturned = TestSignal()
+    let firstInvocationStarted = TestThreadSignal()
+    let releaseFirstInvocation = TestThreadGate()
+    let firstInvocationFinished = TestThreadSignal()
+    let secondInvocationIsReady = TestThreadSignal()
+    let secondInvocationReturned = TestThreadSignal()
     let secondInvocationCount = Counter()
+    let coordinatorFinished = TestSignal()
+    let scenarioResult = OSAllocatedUnfairLock(
+      initialState: (
+        firstInvocationStarted: false,
+        secondInvocationIsReady: false,
+        firstInvocationFinished: false,
+        secondInvocationReturned: false
+      )
+    )
 
-    DispatchQueue.global().async {
+    Thread {
       trackingHandler.executeIfActive { _ in
         firstInvocationStarted.signal()
-        releaseFirstInvocation.wait()
+        releaseFirstInvocation.wait(until: .distantFuture)
       }
       firstInvocationFinished.signal()
-    }
-    defer { releaseFirstInvocation.signal() }
+    }.start()
 
-    #expect(await firstInvocationStarted.wait(for: .seconds(5)))
-
-    DispatchQueue.global().async {
-      secondInvocationIsReady.signal()
-      trackingHandler.executeIfActive { _ in
-        secondInvocationCount.increment()
+    Thread {
+      defer {
+        releaseFirstInvocation.open()
+        coordinatorFinished.signal()
       }
-      secondInvocationReturned.signal()
-    }
 
-    #expect(await secondInvocationIsReady.wait(for: .seconds(5)))
-    trackingHandler.cancel()
-    releaseFirstInvocation.signal()
+      let firstDidStart = firstInvocationStarted.wait(until: Date().addingTimeInterval(5))
+      scenarioResult.withLock { $0.firstInvocationStarted = firstDidStart }
+      guard firstDidStart else { return }
 
-    #expect(await firstInvocationFinished.wait(for: .seconds(5)))
-    #expect(await secondInvocationReturned.wait(for: .seconds(5)))
+      Thread {
+        secondInvocationIsReady.signal()
+        trackingHandler.executeIfActive { _ in
+          secondInvocationCount.increment()
+        }
+        secondInvocationReturned.signal()
+      }.start()
+
+      let secondIsReady = secondInvocationIsReady.wait(until: Date().addingTimeInterval(5))
+      scenarioResult.withLock { $0.secondInvocationIsReady = secondIsReady }
+      guard secondIsReady else { return }
+
+      trackingHandler.cancel()
+      releaseFirstInvocation.open()
+
+      let firstDidFinish = firstInvocationFinished.wait(until: Date().addingTimeInterval(5))
+      let secondDidReturn = secondInvocationReturned.wait(until: Date().addingTimeInterval(5))
+      scenarioResult.withLock {
+        $0.firstInvocationFinished = firstDidFinish
+        $0.secondInvocationReturned = secondDidReturn
+      }
+    }.start()
+
+    #expect(await coordinatorFinished.wait(for: .seconds(20)))
+    let result = scenarioResult.withLock { $0 }
+    #expect(result.firstInvocationStarted)
+    #expect(result.secondInvocationIsReady)
+    #expect(result.firstInvocationFinished)
+    #expect(result.secondInvocationReturned)
     #expect(secondInvocationCount.current == 0)
   }
 

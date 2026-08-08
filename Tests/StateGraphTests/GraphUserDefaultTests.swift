@@ -58,13 +58,13 @@ struct GraphUserDefaultTests {
     }
 
     func verifyConcurrentOperation(_ operation: @escaping @Sendable () -> Void) {
-      let operationFinished = DispatchSemaphore(value: 0)
-      DispatchQueue.global().async {
+      let operationFinished = TestThreadSignal()
+      Thread {
         operation()
         operationFinished.signal()
-      }
+      }.start()
 
-      let didComplete = operationFinished.wait(timeout: .now() + 1) == .success
+      let didComplete = operationFinished.wait(until: Date().addingTimeInterval(5))
       state.withLock {
         $0.didRun = true
         $0.concurrentOperationCompleted = didComplete
@@ -73,22 +73,31 @@ struct GraphUserDefaultTests {
   }
 
   private final class BlockingReadController: @unchecked Sendable {
-    private let shouldBlock = OSAllocatedUnfairLock(initialState: false)
+    /// One requested read suspension and the async signal that observes its entry, if any.
+    private struct BlockRequest: Sendable {
+      let startedSignal: TestSignal?
+    }
+
+    private let nextRequest = OSAllocatedUnfairLock<BlockRequest?>(initialState: nil)
     let didStart = DispatchSemaphore(value: 0)
     let resume = DispatchSemaphore(value: 0)
 
-    func blockNextRead() {
-      shouldBlock.withLock { $0 = true }
+    func blockNextRead(started: TestSignal? = nil) {
+      nextRequest.withLock { $0 = BlockRequest(startedSignal: started) }
     }
 
     func load(_ value: BlockingValue) -> BlockingValue {
-      let shouldBlock = shouldBlock.withLock { shouldBlock in
-        defer { shouldBlock = false }
-        return shouldBlock
+      let request = nextRequest.withLock { request in
+        defer { request = nil }
+        return request
       }
 
-      if shouldBlock {
-        didStart.signal()
+      if let request {
+        if let started = request.startedSignal {
+          started.signal()
+        } else {
+          didStart.signal()
+        }
         resume.wait()
       }
 
@@ -395,7 +404,7 @@ struct GraphUserDefaultTests {
   }
 
   @Test
-  func refreshesChangeMadeBetweenInitialReadAndObserverInstallation() {
+  func refreshesChangeMadeBetweenInitialReadAndObserverInstallation() async {
     let key = makeTestKey()
     let userDefaults = makeTestUserDefaults()
     let userDefaultsReference = UserDefaultsReference(userDefaults)
@@ -403,11 +412,12 @@ struct GraphUserDefaultTests {
     userDefaults.set(initialValue.rawValue, forKey: key)
 
     let controller = BlockingValue.readController
-    controller.blockNextRead()
+    let initialReadStarted = TestSignal()
+    controller.blockNextRead(started: initialReadStarted)
 
     let valueBox = ValueBox<GraphUserDefault<BlockingValue>>()
-    let initializationFinished = DispatchSemaphore(value: 0)
-    DispatchQueue.global().async {
+    let initializationFinished = TestSignal()
+    Thread {
       valueBox.store(
         GraphUserDefault(
           wrappedValue: initialValue,
@@ -416,13 +426,13 @@ struct GraphUserDefaultTests {
         )
       )
       initializationFinished.signal()
-    }
+    }.start()
 
-    #expect(controller.didStart.wait(timeout: .now() + 1) == .success)
-    userDefaults.set("during-initialization", forKey: key)
+    #expect(await initialReadStarted.wait(for: .seconds(5)))
+    userDefaultsReference.value.set("during-initialization", forKey: key)
     controller.resume.signal()
 
-    #expect(initializationFinished.wait(timeout: .now() + 1) == .success)
+    #expect(await initializationFinished.wait(for: .seconds(5)))
     #expect(valueBox.current?.wrappedValue == .init(rawValue: "during-initialization"))
   }
 
