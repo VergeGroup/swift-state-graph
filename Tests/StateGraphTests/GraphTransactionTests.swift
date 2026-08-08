@@ -34,37 +34,6 @@ struct GraphTransactionTests {
     }
   }
 
-  /// A one-shot gate for deliberately pausing synchronous graph work on an OS thread.
-  ///
-  /// Use this only when a synchronous transaction body, comparator, or callback must
-  /// remain active while another thread reaches a deterministic state. Async test
-  /// control flow must use `TestSignal` or `TestCountdown` so it suspends instead of
-  /// blocking a cooperative-executor thread.
-  private final class TestThreadGate: @unchecked Sendable {
-    private let condition = NSCondition()
-    private var isOpen = false
-
-    /// Releases every current or future waiter.
-    func open() {
-      condition.lock()
-      isOpen = true
-      condition.broadcast()
-      condition.unlock()
-    }
-
-    /// Blocks the current OS thread until the gate opens or the deadline expires.
-    @discardableResult
-    func wait(until deadline: Date) -> Bool {
-      condition.lock()
-      defer { condition.unlock() }
-
-      while !isOpen {
-        guard condition.wait(until: deadline) else { return isOpen }
-      }
-      return true
-    }
-  }
-
   /// Runs a supplied action when a staged reference value is destroyed.
   private final class DeinitAction {
     private let action: () -> Void
@@ -116,9 +85,9 @@ struct GraphTransactionTests {
   @Test
   func outsideReaderSeesCommittedValueWhileTransactionBodyIsPaused() async {
     let node = Stored(wrappedValue: 0)
-    let transactionStarted = DispatchSemaphore(value: 0)
+    let transactionStarted = TestThreadSignal()
     let resumeTransaction = TestThreadGate()
-    let transactionFinished = DispatchSemaphore(value: 0)
+    let transactionFinished = TestThreadSignal()
     let coordinatorFinished = TestSignal()
     let scenarioResult = OSAllocatedUnfairLock(
       initialState: (
@@ -138,17 +107,17 @@ struct GraphTransactionTests {
       transactionFinished.signal()
     }
     transactionThread.start()
+    defer { resumeTransaction.open() }
 
-    // Keep the transaction pause and read handoff on OS threads. Returning to the async
-    // test task mid-scenario can deadlock with another parallel test that occupies the
-    // cooperative executor while waiting for this global transaction to finish.
+    // A dedicated coordinator owns every intermediate synchronous handoff. The async
+    // test task only waits for the final TestSignal and never blocks its executor worker.
     Thread {
       defer {
         resumeTransaction.open()
         coordinatorFinished.signal()
       }
 
-      let didStart = transactionStarted.wait(timeout: .now() + .seconds(20)) == .success
+      let didStart = transactionStarted.wait(until: Date().addingTimeInterval(20))
       scenarioResult.withLock { $0.transactionStarted = didStart }
       guard didStart else { return }
 
@@ -156,7 +125,7 @@ struct GraphTransactionTests {
       scenarioResult.withLock { $0.pausedReadValue = pausedReadValue }
 
       resumeTransaction.open()
-      let didFinish = transactionFinished.wait(timeout: .now() + .seconds(20)) == .success
+      let didFinish = transactionFinished.wait(until: Date().addingTimeInterval(20))
       let committedValue = node.wrappedValue
       scenarioResult.withLock {
         $0.transactionFinished = didFinish
@@ -175,11 +144,11 @@ struct GraphTransactionTests {
   @Test
   func outsideWriterWaitsForTransactionCompletion() async {
     let node = Stored(wrappedValue: 0)
-    let transactionStarted = DispatchSemaphore(value: 0)
+    let transactionStarted = TestThreadSignal()
     let resumeTransaction = TestThreadGate()
-    let transactionFinished = DispatchSemaphore(value: 0)
-    let writerStarted = DispatchSemaphore(value: 0)
-    let writerFinished = DispatchSemaphore(value: 0)
+    let transactionFinished = TestThreadSignal()
+    let writerStarted = TestThreadSignal()
+    let writerFinished = TestThreadSignal()
     let writerDidFinish = LockedBox(false)
     let coordinatorFinished = TestSignal()
     let scenarioResult = OSAllocatedUnfairLock(
@@ -203,17 +172,17 @@ struct GraphTransactionTests {
       transactionFinished.signal()
     }
     transactionThread.start()
+    defer { resumeTransaction.open() }
 
-    // The coordinator owns every intermediate handoff, so no global transaction remains
-    // paused while this async test task is waiting for a cooperative-executor worker.
+    // Keep the transaction pause, contending writer, and completion handoffs independent
+    // of Swift's cooperative executor. Only the final result crosses the async boundary.
     Thread {
       defer {
         resumeTransaction.open()
         coordinatorFinished.signal()
       }
 
-      let transactionDidStart =
-        transactionStarted.wait(timeout: .now() + .seconds(20)) == .success
+      let transactionDidStart = transactionStarted.wait(until: Date().addingTimeInterval(20))
       scenarioResult.withLock { $0.transactionStarted = transactionDidStart }
       guard transactionDidStart else { return }
 
@@ -224,25 +193,24 @@ struct GraphTransactionTests {
         writerFinished.signal()
       }.start()
 
-      let writerDidStart = writerStarted.wait(timeout: .now() + .seconds(5)) == .success
+      let writerDidStart = writerStarted.wait(until: Date().addingTimeInterval(5))
       scenarioResult.withLock { $0.writerStarted = writerDidStart }
       guard writerDidStart else { return }
 
 #if DEBUG
-      let didObserveBlockedWriter =
+      let didBlock =
         GraphTransactionCoordinator.shared.__testing__waitForImmediateWriterToBlock(
           until: Date().addingTimeInterval(5)
         )
-      scenarioResult.withLock { $0.didObserveBlockedWriter = didObserveBlockedWriter }
+      scenarioResult.withLock { $0.didObserveBlockedWriter = didBlock }
 #endif
       scenarioResult.withLock {
         $0.writerRemainedBlockedBeforeRelease = !writerDidFinish.value
       }
 
       resumeTransaction.open()
-      let transactionDidFinish =
-        transactionFinished.wait(timeout: .now() + .seconds(20)) == .success
-      let writerDidComplete = writerFinished.wait(timeout: .now() + .seconds(20)) == .success
+      let transactionDidFinish = transactionFinished.wait(until: Date().addingTimeInterval(20))
+      let writerDidComplete = writerFinished.wait(until: Date().addingTimeInterval(20))
       let finalValue = node.wrappedValue
       scenarioResult.withLock {
         $0.transactionFinished = transactionDidFinish

@@ -246,8 +246,8 @@ struct GraphTrackingCancellationTests {
   @Test
   func cancellationReturnsBeforeAdmittedHandlerFinishes() async {
     let invalidationTrigger = Stored(wrappedValue: 0)
-    let handlerStarted = DispatchSemaphore(value: 0)
-    let resumeHandler = DispatchSemaphore(value: 0)
+    let handlerStarted = TestThreadSignal()
+    let resumeHandler = TestThreadGate()
     let handlerFinished = TestSignal()
     let coordinatorFinished = TestSignal()
     let handlerDidFinish = OSAllocatedUnfairLock(initialState: false)
@@ -261,7 +261,7 @@ struct GraphTrackingCancellationTests {
           guard invalidationTrigger.wrappedValue == 1 else { return }
 
           handlerStarted.signal()
-          resumeHandler.wait()
+          resumeHandler.wait(until: .distantFuture)
           handlerDidFinish.withLock { $0 = true }
           handlerFinished.signal()
         },
@@ -270,7 +270,7 @@ struct GraphTrackingCancellationTests {
     }
     rootSubscription.withLockUnchecked { $0 = subscription }
     defer {
-      resumeHandler.signal()
+      resumeHandler.open()
       subscription.cancel()
     }
 
@@ -278,11 +278,11 @@ struct GraphTrackingCancellationTests {
     // cooperative executor while the admitted handler occupies one of its workers.
     Thread {
       defer {
-        resumeHandler.signal()
+        resumeHandler.open()
         coordinatorFinished.signal()
       }
 
-      let didStart = handlerStarted.wait(timeout: .now() + .seconds(5)) == .success
+      let didStart = handlerStarted.wait(until: Date().addingTimeInterval(5))
       didObserveHandlerStart.withLock { $0 = didStart }
       guard didStart else { return }
 
@@ -348,11 +348,11 @@ struct GraphTrackingCancellationTests {
   @Test
   func invocationContendingForExecutionGateDoesNotStartAfterCancellation() async {
     let trackingHandler = GraphTrackingHandler {}
-    let firstInvocationStarted = DispatchSemaphore(value: 0)
-    let releaseFirstInvocation = DispatchSemaphore(value: 0)
-    let firstInvocationFinished = DispatchSemaphore(value: 0)
-    let secondInvocationIsReady = DispatchSemaphore(value: 0)
-    let secondInvocationReturned = DispatchSemaphore(value: 0)
+    let firstInvocationStarted = TestThreadSignal()
+    let releaseFirstInvocation = TestThreadGate()
+    let firstInvocationFinished = TestThreadSignal()
+    let secondInvocationIsReady = TestThreadSignal()
+    let secondInvocationReturned = TestThreadSignal()
     let secondInvocationCount = Counter()
     let coordinatorFinished = TestSignal()
     let scenarioResult = OSAllocatedUnfairLock(
@@ -367,21 +367,18 @@ struct GraphTrackingCancellationTests {
     Thread {
       trackingHandler.executeIfActive { _ in
         firstInvocationStarted.signal()
-        releaseFirstInvocation.wait()
+        releaseFirstInvocation.wait(until: .distantFuture)
       }
       firstInvocationFinished.signal()
     }.start()
 
-    // Sequence the two blocking invocations on dedicated OS threads. The async test task
-    // only resumes after every synchronous handoff has completed.
     Thread {
       defer {
-        releaseFirstInvocation.signal()
+        releaseFirstInvocation.open()
         coordinatorFinished.signal()
       }
 
-      let firstDidStart =
-        firstInvocationStarted.wait(timeout: .now() + .seconds(5)) == .success
+      let firstDidStart = firstInvocationStarted.wait(until: Date().addingTimeInterval(5))
       scenarioResult.withLock { $0.firstInvocationStarted = firstDidStart }
       guard firstDidStart else { return }
 
@@ -393,18 +390,15 @@ struct GraphTrackingCancellationTests {
         secondInvocationReturned.signal()
       }.start()
 
-      let secondIsReady =
-        secondInvocationIsReady.wait(timeout: .now() + .seconds(5)) == .success
+      let secondIsReady = secondInvocationIsReady.wait(until: Date().addingTimeInterval(5))
       scenarioResult.withLock { $0.secondInvocationIsReady = secondIsReady }
       guard secondIsReady else { return }
 
       trackingHandler.cancel()
-      releaseFirstInvocation.signal()
+      releaseFirstInvocation.open()
 
-      let firstDidFinish =
-        firstInvocationFinished.wait(timeout: .now() + .seconds(5)) == .success
-      let secondDidReturn =
-        secondInvocationReturned.wait(timeout: .now() + .seconds(5)) == .success
+      let firstDidFinish = firstInvocationFinished.wait(until: Date().addingTimeInterval(5))
+      let secondDidReturn = secondInvocationReturned.wait(until: Date().addingTimeInterval(5))
       scenarioResult.withLock {
         $0.firstInvocationFinished = firstDidFinish
         $0.secondInvocationReturned = secondDidReturn

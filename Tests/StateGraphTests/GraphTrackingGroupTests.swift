@@ -741,10 +741,10 @@ struct IssuesTrackingOnHeavyOperation {
   @Test
   func concurrentGroupKeepsTrackingAcrossSerializedRerun() async {
     let value = Stored(wrappedValue: 0)
-    let secondInvocationStarted = DispatchSemaphore(value: 0)
-    let thirdInvocationReadValue = DispatchSemaphore(value: 0)
-    let fourthInvocationReadValue = DispatchSemaphore(value: 0)
-    let resumeSecondInvocation = DispatchSemaphore(value: 0)
+    let secondInvocationStarted = TestThreadSignal()
+    let thirdInvocationReadValue = TestThreadSignal()
+    let fourthInvocationReadValue = TestThreadSignal()
+    let resumeSecondInvocation = TestThreadGate()
     let coordinatorFinished = TestSignal()
     let scenarioResult = OSAllocatedUnfairLock(
       initialState: (
@@ -760,7 +760,7 @@ struct IssuesTrackingOnHeavyOperation {
           switch value.wrappedValue {
           case 1:
             secondInvocationStarted.signal()
-            resumeSecondInvocation.wait()
+            resumeSecondInvocation.wait(until: .distantFuture)
           case 2:
             thirdInvocationReadValue.signal()
           case 3:
@@ -773,7 +773,7 @@ struct IssuesTrackingOnHeavyOperation {
       )
     }
     defer {
-      resumeSecondInvocation.signal()
+      resumeSecondInvocation.open()
       cancellable.cancel()
     }
 
@@ -781,30 +781,29 @@ struct IssuesTrackingOnHeavyOperation {
     // release the blocked handler without depending on either shared executor's available width.
     Thread {
       defer {
-        resumeSecondInvocation.signal()
+        resumeSecondInvocation.open()
         coordinatorFinished.signal()
       }
 
       value.wrappedValue = 1
-      let secondStarted =
-        secondInvocationStarted.wait(timeout: .now() + .seconds(5)) == .success
+      let secondStarted = secondInvocationStarted.wait(until: Date().addingTimeInterval(5))
       scenarioResult.withLock { $0.secondInvocationStarted = secondStarted }
       guard secondStarted else { return }
 
       // Invalidate the pass registration while its handler is still active, then let the enqueued
       // rerun continue. No timing delay is needed: the setter has already requested the callback.
       value.wrappedValue = 2
-      resumeSecondInvocation.signal()
+      resumeSecondInvocation.open()
 
       let didReadValueInThirdInvocation =
-        thirdInvocationReadValue.wait(timeout: .now() + .seconds(5)) == .success
+        thirdInvocationReadValue.wait(until: Date().addingTimeInterval(5))
       scenarioResult.withLock { $0.thirdInvocationReadValue = didReadValueInThirdInvocation }
       guard didReadValueInThirdInvocation else { return }
 
       // The rerun must install a fresh registration for this later update.
       value.wrappedValue = 3
       let didReadValueInFourthInvocation =
-        fourthInvocationReadValue.wait(timeout: .now() + .seconds(5)) == .success
+        fourthInvocationReadValue.wait(until: Date().addingTimeInterval(5))
       scenarioResult.withLock { $0.fourthInvocationReadValue = didReadValueInFourthInvocation }
     }.start()
 
@@ -819,9 +818,9 @@ struct IssuesTrackingOnHeavyOperation {
   func stuck() async {
 
     let model = Model()
-    let handlerStarted = DispatchSemaphore(value: 0)
+    let handlerStarted = TestThreadSignal()
     let handlerFinished = TestSignal()
-    let resumeHandler = DispatchSemaphore(value: 0)
+    let resumeHandler = TestThreadGate()
     let coordinatorFinished = TestSignal()
     let coordinatorObservedHandler = OSAllocatedUnfairLock(initialState: false)
     var cancellable: AnyCancellable?
@@ -838,19 +837,19 @@ struct IssuesTrackingOnHeavyOperation {
 
           if model.count1 == 1, model.count2 != 2 {
             handlerStarted.signal()
-            resumeHandler.wait()
+            resumeHandler.wait(until: .distantFuture)
           }
 
         }
       }
 
       Thread {
-        let didObserveHandler = handlerStarted.wait(timeout: .now() + .seconds(5)) == .success
+        let didObserveHandler = handlerStarted.wait(until: Date().addingTimeInterval(5))
         coordinatorObservedHandler.withLock { $0 = didObserveHandler }
         if didObserveHandler {
           model.count2 = 2
         }
-        resumeHandler.signal()
+        resumeHandler.open()
         coordinatorFinished.signal()
       }.start()
 
@@ -871,9 +870,9 @@ struct IssuesTrackingOnHeavyOperation {
 
     let model = Model()
     let trackingStarted = TestSignal()
-    let handlerStarted = DispatchSemaphore(value: 0)
+    let handlerStarted = TestThreadSignal()
     let handlerFinished = TestSignal()
-    let resumeHandler = DispatchSemaphore(value: 0)
+    let resumeHandler = TestThreadGate()
     let coordinatorFinished = TestSignal()
     let coordinatorObservedHandler = OSAllocatedUnfairLock(initialState: false)
 
@@ -892,10 +891,10 @@ struct IssuesTrackingOnHeavyOperation {
               c.confirm()
               handlerFinished.signal()
             }
-            
+
             if model.count1 == 1, model.count2 != 2 {
               handlerStarted.signal()
-              resumeHandler.wait()
+              resumeHandler.wait(until: .distantFuture)
             }
             
           }
@@ -910,12 +909,12 @@ struct IssuesTrackingOnHeavyOperation {
       #expect(await trackingStarted.wait(for: .seconds(5)))
 
       Thread {
-        let didObserveHandler = handlerStarted.wait(timeout: .now() + .seconds(5)) == .success
+        let didObserveHandler = handlerStarted.wait(until: Date().addingTimeInterval(5))
         coordinatorObservedHandler.withLock { $0 = didObserveHandler }
         if didObserveHandler {
           model.count2 = 2
         }
-        resumeHandler.signal()
+        resumeHandler.open()
         coordinatorFinished.signal()
       }.start()
 

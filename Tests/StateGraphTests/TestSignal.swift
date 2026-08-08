@@ -63,6 +63,60 @@ final class TestSignal: @unchecked Sendable {
   }
 }
 
+/// A one-shot signal for deterministic handoffs between dedicated OS threads.
+///
+/// Waiting on this type blocks the calling thread. Use it only from a `Thread` or from
+/// synchronous code that a dedicated thread is guaranteed to release. Async test tasks
+/// must await ``TestSignal`` instead so they do not occupy a cooperative-executor worker.
+final class TestThreadSignal: @unchecked Sendable {
+
+  private let condition = NSCondition()
+  private var isSignaled = false
+
+  /// Marks the signal as completed and releases every current or future waiter.
+  func signal() {
+    condition.lock()
+    isSignaled = true
+    condition.broadcast()
+    condition.unlock()
+  }
+
+  /// Blocks the current OS thread until the signal is completed or the deadline expires.
+  ///
+  /// - Parameter deadline: The latest date at which the wait may return.
+  /// - Returns: `true` when signaled, or `false` when the deadline expires first.
+  @discardableResult
+  func wait(until deadline: Date) -> Bool {
+    condition.lock()
+    defer { condition.unlock() }
+
+    while !isSignaled {
+      guard condition.wait(until: deadline) else { return isSignaled }
+    }
+    return true
+  }
+}
+
+/// A one-shot gate for deliberately pausing synchronous work on an OS thread.
+///
+/// The gate is the blocking counterpart to ``TestSignal``. Its naming distinguishes an
+/// intentional synchronous pause from an event that an async test task should await.
+final class TestThreadGate: @unchecked Sendable {
+
+  private let opened = TestThreadSignal()
+
+  /// Releases every current or future waiter.
+  func open() {
+    opened.signal()
+  }
+
+  /// Blocks the current OS thread until the gate opens or the deadline expires.
+  @discardableResult
+  func wait(until deadline: Date) -> Bool {
+    opened.wait(until: deadline)
+  }
+}
+
 /// An asynchronous countdown used when a test must observe several completions.
 ///
 /// Producers call ``signal()`` from synchronous callbacks or worker threads. The
