@@ -49,6 +49,21 @@ public final class Stored<Value: SendableMetatype>: Node, Observable, CustomDebu
     var outgoingEdges: ContiguousArray<Edge> = []
   }
 
+  /// Callback work captured by one immediate assignment before its reservation ends.
+  ///
+  /// The value is already published when this work is returned. Delivering it after
+  /// the logical node reservation is released lets a same-node writer proceed while
+  /// post-publication callbacks remain active, matching immediate assignment
+  /// semantics without retaining the physical node lock.
+  private struct ImmediateMutationDelivery {
+    let oldValue: Value
+    let newValue: Value
+    let shouldNotify: Bool
+    let trackingRegistrations: Set<TrackingRegistration>
+    let outgoingEdges: ContiguousArray<Edge>
+    let didSetHandler: ((Value, Value) -> Void)?
+  }
+
   nonisolated(unsafe)
   private var transactionBuffer: TransactionBuffer<Value>?
 
@@ -98,14 +113,23 @@ public final class Stored<Value: SendableMetatype>: Node, Observable, CustomDebu
       }
     }
     set {
+      assertGraphMutationAllowed("Stored.wrappedValue mutation")
+
       if let transaction = ThreadLocal.graphTransaction.value {
         stage(newValue, in: transaction)
         return
       }
 
-      GraphTransactionCoordinator.shared.withImmediateWrite {
-        setImmediately(newValue)
-      }
+      let coordinator = GraphTransactionCoordinator.shared
+      coordinator.withImmediateWrite(
+        to: ObjectIdentifier(self),
+        prepare: {
+          prepareImmediateMutation(newValue)
+        },
+        deliver: { delivery in
+          deliverImmediateMutation(delivery)
+        }
+      )
     }
   }
 
@@ -218,28 +242,26 @@ public final class Stored<Value: SendableMetatype>: Node, Observable, CustomDebu
     _ = consume buffer
   }
 
-  /// Runs the existing immediate assignment pipeline after writer coordination.
-  private func setImmediately(_ newValue: Value) {
-    guard let immediateWriterScope = ThreadLocal.graphImmediateWriterScope.value else {
-      preconditionFailure("Stored immediate mutation requires graph writer coordination.")
-    }
-
-    immediateWriterScope.nodeLockDepth += 1
+  /// Publishes one immediate value while its logical node reservation is held.
+  ///
+  /// The physical lock protects only value and graph bookkeeping snapshots. The
+  /// comparator and Observation `willSet` delivery run between those snapshots,
+  /// while the coordinator reservation keeps competing same-node writers out.
+  private func prepareImmediateMutation(
+    _ newValue: Value
+  ) -> ImmediateMutationDelivery {
     lock.lock()
-
     let oldValue = value
+    lock.unlock()
 
-    guard shouldNotify(oldValue, newValue) else {
-      value = newValue
-      let didSetHandler = self.didSetHandler
-      lock.unlock()
-      immediateWriterScope.nodeLockDepth -= 1
-      didSetHandler?(oldValue, newValue)
-      return
+    let shouldNotify = withGraphMutationProhibited(.storedComparator) {
+      self.shouldNotify(oldValue, newValue)
     }
 
 #if canImport(Observation)
-    if #available(macOS 14.0, iOS 17.0, watchOS 10.0, tvOS 17.0, *) {
+    if shouldNotify,
+      #available(macOS 14.0, iOS 17.0, watchOS 10.0, tvOS 17.0, *)
+    {
       withMainActor { [observationRegistrar] in
         observationRegistrar.willSet(
           NodeObservationRoot<Stored<Value>>(),
@@ -250,25 +272,43 @@ public final class Stored<Value: SendableMetatype>: Node, Observable, CustomDebu
 
 #endif
 
+    lock.lock()
     value = newValue
 
-    let outgoingEdges = self.outgoingEdges
-    let trackingRegistrations = self.trackingRegistrations
+    let outgoingEdges = shouldNotify ? self.outgoingEdges : []
+    let trackingRegistrations = shouldNotify ? self.trackingRegistrations : []
     let didSetHandler = self.didSetHandler
-    self.trackingRegistrations.removeAll()
+    if shouldNotify {
+      self.trackingRegistrations.removeAll()
+    }
 
     lock.unlock()
-    immediateWriterScope.nodeLockDepth -= 1
 
-    Self.publishGraphUpdates(
+    return ImmediateMutationDelivery(
+      oldValue: oldValue,
+      newValue: newValue,
+      shouldNotify: shouldNotify,
       trackingRegistrations: trackingRegistrations,
-      outgoingEdges: outgoingEdges
+      outgoingEdges: outgoingEdges,
+      didSetHandler: didSetHandler
     )
+  }
 
-    didSetHandler?(oldValue, newValue)
+  /// Delivers post-publication callbacks without a node lock or node reservation.
+  private func deliverImmediateMutation(_ delivery: ImmediateMutationDelivery) {
+    if delivery.shouldNotify {
+      Self.publishGraphUpdates(
+        trackingRegistrations: delivery.trackingRegistrations,
+        outgoingEdges: delivery.outgoingEdges
+      )
+    }
+
+    delivery.didSetHandler?(delivery.oldValue, delivery.newValue)
 
 #if canImport(Observation)
-    if #available(macOS 14.0, iOS 17.0, watchOS 10.0, tvOS 17.0, *) {
+    if delivery.shouldNotify,
+      #available(macOS 14.0, iOS 17.0, watchOS 10.0, tvOS 17.0, *)
+    {
       withMainActor { [observationRegistrar] in
         observationRegistrar.didSet(
           NodeObservationRoot<Stored<Value>>(),
@@ -307,10 +347,12 @@ public final class Stored<Value: SendableMetatype>: Node, Observable, CustomDebu
     // Every participant has moved its final value into node-local commit work.
     // Reentrant assignments see that coherent pending graph and stage into the
     // following commit batch.
-    let shouldNotify = shouldNotify(
-      installedWork.oldValue,
-      installedWork.newValue
-    )
+    let shouldNotify = withGraphMutationProhibited(.storedComparator) {
+      self.shouldNotify(
+        installedWork.oldValue,
+        installedWork.newValue
+      )
+    }
 
     lock.lock()
     guard var transactionCommitWork else {
@@ -470,6 +512,15 @@ public final class Stored<Value: SendableMetatype>: Node, Observable, CustomDebu
     }
   }
 
+  /// Returns this node's coordinator key outside generic mutation closure lowering.
+  ///
+  /// Keeping the identity conversion in a non-generic method also avoids a Swift
+  /// 6.3 compiler crash when `ObjectIdentifier(self)` appears directly in the
+  /// typed-throws `unsafeModify` implementation.
+  private func coordinatorNodeIdentifier() -> ObjectIdentifier {
+    ObjectIdentifier(self)
+  }
+
   public var incomingEdges: ContiguousArray<Edge> {
     get {
       fatalError()
@@ -553,25 +604,28 @@ public final class Stored<Value: SendableMetatype>: Node, Observable, CustomDebu
   public borrowing func unsafeModify<Result, E>(
     _ mutation: (inout Value) throws(E) -> Result
   ) throws(E) -> Result where E: Error {
+    assertGraphMutationAllowed("Stored.unsafeModify")
+
     if ThreadLocal.graphTransaction.value != nil {
       lock.lock()
       defer { lock.unlock() }
-      return try mutation(&value)
+      return try withGraphMutationProhibited(.unsafeModification) { () throws(E) -> Result in
+        try mutation(&value)
+      }
     }
 
-    return try GraphTransactionCoordinator.shared.withImmediateWrite {
+    let coordinator = GraphTransactionCoordinator.shared
+    let node = coordinatorNodeIdentifier()
+    return try coordinator.withImmediateWrite {
       () throws(E) -> Result in
-      guard let immediateWriterScope = ThreadLocal.graphImmediateWriterScope.value else {
-        preconditionFailure("Stored unsafe mutation requires graph writer coordination.")
-      }
+      coordinator.beginImmediateNodeWrite(to: node)
+      defer { coordinator.finishImmediateNodeWrite(to: node) }
 
-      immediateWriterScope.nodeLockDepth += 1
       lock.lock()
-      defer {
-        lock.unlock()
-        immediateWriterScope.nodeLockDepth -= 1
+      defer { lock.unlock() }
+      return try withGraphMutationProhibited(.unsafeModification) { () throws(E) -> Result in
+        try mutation(&value)
       }
-      return try mutation(&value)
     }
   }
 

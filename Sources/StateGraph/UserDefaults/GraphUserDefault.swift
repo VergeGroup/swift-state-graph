@@ -105,6 +105,10 @@ public final class GraphUserDefault<
       stored.wrappedValue
     }
     set {
+      // Check before persistence: a prohibited descriptor must not partially mutate
+      // UserDefaults before its graph publication is rejected.
+      assertGraphMutationAllowed("GraphUserDefault.wrappedValue mutation")
+
       UserDefaultsAccessCoordinator.shared.withAccess {
         newValue._setValue(to: userDefaults, forKey: key)
 

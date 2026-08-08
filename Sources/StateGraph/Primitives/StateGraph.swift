@@ -1,4 +1,4 @@
-import Foundation.NSLock
+import os.lock
 
 #if canImport(Observation)
   import Observation
@@ -119,6 +119,11 @@ public enum StateGraphGlobal {
 /// - Value is lazily computed: Calculations only occur when the value is accessed
 /// - Dependencies are tracked: The node automatically tracks which nodes it depends on
 /// - Changes propagate: When this node's value changes, downstream nodes are notified
+///
+/// - Important: Descriptor computation and equality are read-only graph operations.
+///   DEBUG builds diagnose entry into a supported mutation API; non-DEBUG builds omit
+///   that tracking and violations remain unsupported. Dependency cycles, including
+///   direct self-read, are unsupported because the graph must remain a DAG.
 ///
 /// `Value` itself does not need to conform to `Sendable`. `SendableMetatype` allows the
 /// node's isolated closures to use generic conformances safely.
@@ -266,12 +271,16 @@ public final class Computed<Value: SendableMetatype>: Node, Observable, CustomDe
     ThreadLocal.currentNode.withValue(nil) {
       if ThreadLocal.graphTransaction.value?.recordsDependencies == true {
         var context = Context(environment: .init())
-        return descriptor.compute(context: &context)
+        return withGraphMutationProhibited(.computedDescriptor) {
+          descriptor.compute(context: &context)
+        }
       }
 
       return ThreadLocal.registration.withValue(nil) {
         var context = Context(environment: .init())
-        return descriptor.compute(context: &context)
+        return withGraphMutationProhibited(.computedDescriptor) {
+          descriptor.compute(context: &context)
+        }
       }
     }
   }
@@ -464,14 +473,21 @@ public final class Computed<Value: SendableMetatype>: Node, Observable, CustomDe
         Only register the registration to the current node.
         */
         _cachedValue = ThreadLocal.registration.withValue(nil) {
-          return descriptor.compute(context: &context)
+          withGraphMutationProhibited(.computedDescriptor) {
+            descriptor.compute(context: &context)
+          }
         }
 
         // propagate changes to dependent nodes
         do {
 
             if let previousValue = previousValue,
-               descriptor.isEqual(lhs: previousValue, rhs: _cachedValue!) == false
+               withGraphMutationProhibited(
+                 .computedDescriptor,
+                 {
+                   descriptor.isEqual(lhs: previousValue, rhs: _cachedValue!)
+                 }
+               ) == false
             {
               for edge in outgoingEdges {
                 edge.isPending = true
@@ -647,4 +663,9 @@ public final class Edge: CustomDebugStringConvertible {
   
 }
 
-public typealias NodeLock = NSRecursiveLock
+/// The nonrecursive physical lock protecting one node's value and graph metadata.
+///
+/// User callbacks must run outside this lock. Immediate writers that release it for
+/// comparison or Observation delivery retain a coordinator-owned logical
+/// reservation until their value is published.
+public typealias NodeLock = OSAllocatedUnfairLock<Void>

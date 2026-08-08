@@ -1202,6 +1202,127 @@ struct GraphTransactionTests {
   }
 
   @Test
+  func immediateComparatorDoesNotHoldThePhysicalNodeLock() async {
+    let comparatorEntered = TestSignal()
+    let releaseComparator = TestThreadGate()
+    let writerFinished = TestSignal()
+    let readerFinished = TestSignal()
+    let readerValue = LockedBox<Int?>(nil)
+    let source = Stored(
+      wrappedValue: 0,
+      shouldNotify: { oldValue, newValue in
+        if newValue == 1 {
+          comparatorEntered.signal()
+          releaseComparator.wait(until: Date().addingTimeInterval(5))
+        }
+        return oldValue != newValue
+      }
+    )
+
+    Thread {
+      source.wrappedValue = 1
+      writerFinished.signal()
+    }.start()
+
+    #expect(await comparatorEntered.wait(for: .seconds(5)))
+
+    Thread {
+      readerValue.update { $0 = source.wrappedValue }
+      readerFinished.signal()
+    }.start()
+
+    // The logical writer reservation excludes only another writer. A reader can
+    // acquire the physical lock and observe the old value while comparison pauses.
+    #expect(await readerFinished.wait(for: .seconds(1)))
+    #expect(readerValue.value == 0)
+
+    releaseComparator.open()
+    #expect(await writerFinished.wait(for: .seconds(5)))
+    #expect(source.wrappedValue == 1)
+  }
+
+  @Test
+  func sameNodeImmediateWriterWaitsForLogicalReservation() async {
+    let firstComparatorEntered = TestSignal()
+    let secondComparatorEntered = TestSignal()
+    let releaseFirstComparator = TestThreadGate()
+    let writersFinished = TestCountdown(count: 2)
+    let comparisons = LockedBox<[(oldValue: Int, newValue: Int)]>([])
+    let source = Stored(
+      wrappedValue: 0,
+      shouldNotify: { oldValue, newValue in
+        comparisons.update { $0.append((oldValue, newValue)) }
+        if newValue == 1 {
+          firstComparatorEntered.signal()
+          releaseFirstComparator.wait(until: Date().addingTimeInterval(5))
+        } else if newValue == 2 {
+          secondComparatorEntered.signal()
+        }
+        return oldValue != newValue
+      }
+    )
+
+    Thread {
+      source.wrappedValue = 1
+      writersFinished.signal()
+    }.start()
+    #expect(await firstComparatorEntered.wait(for: .seconds(5)))
+
+    Thread {
+      source.wrappedValue = 2
+      writersFinished.signal()
+    }.start()
+
+    #expect(await secondComparatorEntered.wait(for: .milliseconds(100)) == false)
+    releaseFirstComparator.open()
+
+    #expect(await secondComparatorEntered.wait(for: .seconds(5)))
+    #expect(await writersFinished.wait(for: .seconds(5)))
+    let recordedComparisons = comparisons.value
+    #expect(recordedComparisons.count == 2)
+    #expect(recordedComparisons[0].oldValue == 0)
+    #expect(recordedComparisons[0].newValue == 1)
+    #expect(recordedComparisons[1].oldValue == 1)
+    #expect(recordedComparisons[1].newValue == 2)
+    #expect(source.wrappedValue == 2)
+  }
+
+  @Test
+  func differentNodeImmediateWriterProceedsDuringLogicalReservation() async {
+    let firstComparatorEntered = TestSignal()
+    let releaseFirstComparator = TestThreadGate()
+    let firstWriterFinished = TestSignal()
+    let secondWriterFinished = TestSignal()
+    let first = Stored(
+      wrappedValue: 0,
+      shouldNotify: { oldValue, newValue in
+        firstComparatorEntered.signal()
+        releaseFirstComparator.wait(until: Date().addingTimeInterval(5))
+        return oldValue != newValue
+      }
+    )
+    let second = Stored(wrappedValue: 0)
+
+    Thread {
+      first.wrappedValue = 1
+      firstWriterFinished.signal()
+    }.start()
+    #expect(await firstComparatorEntered.wait(for: .seconds(5)))
+
+    Thread {
+      second.wrappedValue = 1
+      secondWriterFinished.signal()
+    }.start()
+
+    #expect(await secondWriterFinished.wait(for: .seconds(1)))
+    #expect(second.wrappedValue == 1)
+
+    releaseFirstComparator.open()
+    #expect(await firstWriterFinished.wait(for: .seconds(5)))
+    #expect(first.wrappedValue == 1)
+  }
+
+  @Test
   func ordinaryOnDidSetCanRunATransactionWithoutDeadlocking() async {
     let source = Stored(wrappedValue: 0)
     let nested = Stored(wrappedValue: 0)
