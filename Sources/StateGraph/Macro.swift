@@ -4,6 +4,10 @@
 @attached(peer, names: prefixed(`$`))
 public macro GraphComputed() = #externalMacro(module: "StateGraphMacro", type: "ComputedMacro")
 
+@attached(peer, names: prefixed(`$`), prefixed(_graphComputedBacking_), prefixed(__graphCompute_))
+@attached(body)
+public macro GraphComputedBody() = #externalMacro(module: "StateGraphMacro", type: "ComputedMacro")
+
 
 
 @attached(peer)
