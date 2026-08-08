@@ -741,10 +741,10 @@ struct IssuesTrackingOnHeavyOperation {
   @Test
   func concurrentGroupKeepsTrackingAcrossSerializedRerun() async {
     let value = Stored(wrappedValue: 0)
-    let secondInvocationStarted = DispatchSemaphore(value: 0)
-    let thirdInvocationReadValue = DispatchSemaphore(value: 0)
-    let fourthInvocationReadValue = DispatchSemaphore(value: 0)
-    let resumeSecondInvocation = DispatchSemaphore(value: 0)
+    let secondInvocationStarted = TestThreadSignal()
+    let thirdInvocationReadValue = TestThreadSignal()
+    let fourthInvocationReadValue = TestThreadSignal()
+    let resumeSecondInvocation = TestThreadGate()
     let coordinatorFinished = TestSignal()
     let scenarioResult = OSAllocatedUnfairLock(
       initialState: (
@@ -760,7 +760,7 @@ struct IssuesTrackingOnHeavyOperation {
           switch value.wrappedValue {
           case 1:
             secondInvocationStarted.signal()
-            resumeSecondInvocation.wait()
+            resumeSecondInvocation.wait(until: .distantFuture)
           case 2:
             thirdInvocationReadValue.signal()
           case 3:
@@ -773,40 +773,39 @@ struct IssuesTrackingOnHeavyOperation {
       )
     }
     defer {
-      resumeSecondInvocation.signal()
+      resumeSecondInvocation.open()
       cancellable.cancel()
     }
 
-    // Keep every write on one nonisolated synchronous producer. The coordinator uses a Dispatch
-    // queue so it can release the blocked handler even when Swift's cooperative pool has one worker.
-    DispatchQueue.global().async {
+    // Keep every write on one nonisolated synchronous producer. A dedicated OS thread can
+    // release the blocked handler without depending on either shared executor's available width.
+    Thread {
       defer {
-        resumeSecondInvocation.signal()
+        resumeSecondInvocation.open()
         coordinatorFinished.signal()
       }
 
       value.wrappedValue = 1
-      let secondStarted =
-        secondInvocationStarted.wait(timeout: .now() + .seconds(5)) == .success
+      let secondStarted = secondInvocationStarted.wait(until: Date().addingTimeInterval(5))
       scenarioResult.withLock { $0.secondInvocationStarted = secondStarted }
       guard secondStarted else { return }
 
       // Invalidate the pass registration while its handler is still active, then let the enqueued
       // rerun continue. No timing delay is needed: the setter has already requested the callback.
       value.wrappedValue = 2
-      resumeSecondInvocation.signal()
+      resumeSecondInvocation.open()
 
       let didReadValueInThirdInvocation =
-        thirdInvocationReadValue.wait(timeout: .now() + .seconds(5)) == .success
+        thirdInvocationReadValue.wait(until: Date().addingTimeInterval(5))
       scenarioResult.withLock { $0.thirdInvocationReadValue = didReadValueInThirdInvocation }
       guard didReadValueInThirdInvocation else { return }
 
       // The rerun must install a fresh registration for this later update.
       value.wrappedValue = 3
       let didReadValueInFourthInvocation =
-        fourthInvocationReadValue.wait(timeout: .now() + .seconds(5)) == .success
+        fourthInvocationReadValue.wait(until: Date().addingTimeInterval(5))
       scenarioResult.withLock { $0.fourthInvocationReadValue = didReadValueInFourthInvocation }
-    }
+    }.start()
 
     #expect(await coordinatorFinished.wait(for: .seconds(20)))
     let result = scenarioResult.withLock { $0 }
@@ -819,9 +818,9 @@ struct IssuesTrackingOnHeavyOperation {
   func stuck() async {
 
     let model = Model()
-    let handlerStarted = DispatchSemaphore(value: 0)
+    let handlerStarted = TestThreadSignal()
     let handlerFinished = TestSignal()
-    let resumeHandler = DispatchSemaphore(value: 0)
+    let resumeHandler = TestThreadGate()
     let coordinatorFinished = TestSignal()
     let coordinatorObservedHandler = OSAllocatedUnfairLock(initialState: false)
     var cancellable: AnyCancellable?
@@ -838,21 +837,21 @@ struct IssuesTrackingOnHeavyOperation {
 
           if model.count1 == 1, model.count2 != 2 {
             handlerStarted.signal()
-            resumeHandler.wait()
+            resumeHandler.wait(until: .distantFuture)
           }
 
         }
       }
 
-      DispatchQueue.global().async {
-        let didObserveHandler = handlerStarted.wait(timeout: .now() + .seconds(5)) == .success
+      Thread {
+        let didObserveHandler = handlerStarted.wait(until: Date().addingTimeInterval(5))
         coordinatorObservedHandler.withLock { $0 = didObserveHandler }
         if didObserveHandler {
           model.count2 = 2
         }
-        resumeHandler.signal()
+        resumeHandler.open()
         coordinatorFinished.signal()
-      }
+      }.start()
 
       model.count1 = 1
 
@@ -871,9 +870,9 @@ struct IssuesTrackingOnHeavyOperation {
 
     let model = Model()
     let trackingStarted = TestSignal()
-    let handlerStarted = DispatchSemaphore(value: 0)
+    let handlerStarted = TestThreadSignal()
     let handlerFinished = TestSignal()
-    let resumeHandler = DispatchSemaphore(value: 0)
+    let resumeHandler = TestThreadGate()
     let coordinatorFinished = TestSignal()
     let coordinatorObservedHandler = OSAllocatedUnfairLock(initialState: false)
 
@@ -892,10 +891,10 @@ struct IssuesTrackingOnHeavyOperation {
               c.confirm()
               handlerFinished.signal()
             }
-            
+
             if model.count1 == 1, model.count2 != 2 {
               handlerStarted.signal()
-              resumeHandler.wait()
+              resumeHandler.wait(until: .distantFuture)
             }
             
           }
@@ -909,15 +908,15 @@ struct IssuesTrackingOnHeavyOperation {
 
       #expect(await trackingStarted.wait(for: .seconds(5)))
 
-      DispatchQueue.global().async {
-        let didObserveHandler = handlerStarted.wait(timeout: .now() + .seconds(5)) == .success
+      Thread {
+        let didObserveHandler = handlerStarted.wait(until: Date().addingTimeInterval(5))
         coordinatorObservedHandler.withLock { $0 = didObserveHandler }
         if didObserveHandler {
           model.count2 = 2
         }
-        resumeHandler.signal()
+        resumeHandler.open()
         coordinatorFinished.signal()
-      }
+      }.start()
 
       model.count1 = 1
       #expect(await handlerFinished.wait(for: .seconds(5)))
@@ -1036,36 +1035,39 @@ struct IssuesObservationsObservableObject {
   @MainActor
   func observation() async {
     let model = ObservableModel()
-    await confirmation { c in
-      Task {
-        let s = Observations<Void, Never>.untilFinished {
-          print("Up")
+    await confirmation { confirmation in
+      let initialObservation = TestSignal()
+      let count1Observation = TestSignal()
+      let observationFinished = TestSignal()
+      let observationTask = Task {
+        let observations = Observations<Void, Never>.untilFinished {
+          initialObservation.signal()
+
           if model.count2 == 2 {
             return .finish
           }
+
           if model.count1 == 1 {
-            Thread.sleep(forTimeInterval: 2)
-            return .next(())
+            count1Observation.signal()
           }
+
           return .next(())
         }
-        var eventCount: Int = 0
-        for await e in s {
-          eventCount += 1
-        }
-        c.confirm()
-      }
 
-      Task {
-        print("Update count1")
-        model.count1 = 1
-        Task {
-          try? await Task.sleep(for: .milliseconds(100))
-          print("Update count2")
-          model.count2 = 2
-        }
+        for await _ in observations {}
+        confirmation.confirm()
+        observationFinished.signal()
       }
-      try? await Task.sleep(for: .seconds(5))
+      defer { observationTask.cancel() }
+
+      #expect(await initialObservation.wait(for: .seconds(5)))
+
+      model.count1 = 1
+      #expect(await count1Observation.wait(for: .seconds(5)))
+
+      model.count2 = 2
+      #expect(await observationFinished.wait(for: .seconds(5)))
+      await observationTask.value
     }
 
   }
