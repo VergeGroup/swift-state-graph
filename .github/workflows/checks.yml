@@ -30,6 +30,8 @@ jobs:
 
   build-development:
     runs-on: macos-26
+    env:
+      DERIVED_DATA_PATH: ${{ runner.temp }}/StateGraphDerivedData
 
     steps:
       - uses: maxim-lobanov/setup-xcode@v1.1
@@ -49,4 +51,15 @@ jobs:
             -project Development.xcodeproj \
             -scheme Development \
             -destination 'generic/platform=iOS Simulator' \
+            -derivedDataPath "$DERIVED_DATA_PATH" \
             CODE_SIGNING_ALLOWED=NO build
+      - name: Verify dynamic package products
+        run: |
+          APP_PATH="$DERIVED_DATA_PATH/Build/Products/Debug-iphonesimulator/Development.app"
+          STATE_GRAPH_BINARY="$APP_PATH/Frameworks/StateGraph.framework/StateGraph"
+          NORMALIZATION_BINARY="$APP_PATH/Frameworks/StateGraphNormalization.framework/StateGraphNormalization"
+
+          otool -hv "$STATE_GRAPH_BINARY" | grep DYLIB
+          otool -hv "$NORMALIZATION_BINARY" | grep DYLIB
+          test "$(find "$APP_PATH" -type d -name 'StateGraph.framework' | wc -l | tr -d '[:space:]')" = "1"
+          test "$(find "$APP_PATH" -type d -name 'StateGraphNormalization.framework' | wc -l | tr -d '[:space:]')" = "1"

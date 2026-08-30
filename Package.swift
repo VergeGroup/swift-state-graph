@@ -15,13 +15,18 @@ let package = Package(
     .watchOS(.v10),
   ],
   products: [
-    // Products define the executables and libraries a package produces, making them visible to other packages.
+    // StateGraph owns process-wide runtime state, so separate framework consumers
+    // must resolve one shared binary instead of embedding independent copies.
     .library(
       name: "StateGraph",
+      type: .dynamic,
       targets: ["StateGraph"]
     ),
+    // Normalization is an independent module. Keeping it dynamic preserves its
+    // public Swift type identity when several frameworks consume it.
     .library(
       name: "StateGraphNormalization",
+      type: .dynamic,
       targets: ["StateGraphNormalization"]
     )
   ],
@@ -54,7 +59,6 @@ let package = Package(
     .target(
       name: "StateGraphNormalization",
       dependencies: [
-        "StateGraph",
         "StateGraphNormalizationMacro",
         .product(name: "TypedIdentifier", package: "swift-typed-identifier")
       ]
