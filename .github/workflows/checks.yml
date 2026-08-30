@@ -49,4 +49,15 @@ jobs:
             -project Development.xcodeproj \
             -scheme Development \
             -destination 'generic/platform=iOS Simulator' \
+            -derivedDataPath "$RUNNER_TEMP/StateGraphDerivedData" \
             CODE_SIGNING_ALLOWED=NO build
+      - name: Verify dynamic package products
+        run: |
+          APP_PATH="$RUNNER_TEMP/StateGraphDerivedData/Build/Products/Debug-iphonesimulator/Development.app"
+          STATE_GRAPH_BINARY="$APP_PATH/Frameworks/StateGraph.framework/StateGraph"
+          NORMALIZATION_BINARY="$APP_PATH/Frameworks/StateGraphNormalization.framework/StateGraphNormalization"
+
+          otool -hv "$STATE_GRAPH_BINARY" | grep DYLIB
+          otool -hv "$NORMALIZATION_BINARY" | grep DYLIB
+          test "$(find "$APP_PATH" -type d -name 'StateGraph.framework' | wc -l | tr -d '[:space:]')" = "1"
+          test "$(find "$APP_PATH" -type d -name 'StateGraphNormalization.framework' | wc -l | tr -d '[:space:]')" = "1"

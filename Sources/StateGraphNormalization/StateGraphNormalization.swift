@@ -1,4 +1,3 @@
-@_exported import StateGraph
 @_exported import TypedIdentifier
 
 import TypedIdentifier
@@ -7,7 +6,7 @@ import TypedIdentifier
 ///
 /// `EntityStore` deliberately contains only entity storage. It does not
 /// coordinate concurrent access or publish graph updates by itself. Store it in
-/// a ``Stored`` node, usually through ``GraphStored``, when reads and
+/// a `Stored` node, usually through `GraphStored`, when reads and
 /// mutations should participate in a state graph.
 ///
 /// Like other Swift value types, copying an entity store creates an independent

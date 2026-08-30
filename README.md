@@ -122,6 +122,39 @@ dependencies: [
 )
 ```
 
+### Dynamic Linking
+
+`StateGraph` and `StateGraphNormalization` are distributed as dynamic library
+products. StateGraph owns process-wide tracking and transaction context, so one
+process must load one shared StateGraph runtime. Dynamic products ensure that
+multiple frameworks link to shared binaries instead of embedding independent
+static copies.
+
+The application target should embed the produced frameworks. Dependent dynamic
+frameworks should link them without embedding additional copies.
+
+With Tuist's native Swift Package integration, use the default `.runtime`
+dependency from each feature framework and `.runtimeEmbedded` once from the
+final application target:
+
+```swift
+// Feature framework
+.package(product: "StateGraph")
+
+// Application
+.package(product: "StateGraph", type: .runtimeEmbedded)
+.package(product: "StateGraphNormalization", type: .runtimeEmbedded)
+```
+
+`StateGraphNormalization` does not re-export `StateGraph`. Targets using graph
+nodes together with normalization must depend on and import both products
+explicitly:
+
+```swift
+import StateGraph
+import StateGraphNormalization
+```
+
 ## Core Concepts
 
 ### Stored Nodes (`@GraphStored`)

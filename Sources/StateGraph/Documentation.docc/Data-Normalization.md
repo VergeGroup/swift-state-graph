@@ -23,6 +23,7 @@ Data normalization involves storing entities in separate collections while maint
 `EntityStore` is a generic container for managing collections of entities with unique identifiers:
 
 ```swift
+import StateGraph
 import StateGraphNormalization
 
 // Creating entity stores for different types
