@@ -122,10 +122,48 @@ Each `Stored` value uses its existing comparator and graph notification pipeline
 once at commit, comparing the committed old value with the final staged value.
 
 The API is synchronous and thread-local; it does not cross `await`, task
-creation, or executor hops. Nested calls join the outer transaction rather than
-creating savepoints. An inner error that the outer body catches leaves its staged
-assignments in place; only an error that escapes the outermost call rolls all
-staged `Stored` assignments back.
+creation, or executor hops. Each nested call creates a savepoint. A successful
+inner call merges its staged assignments into its parent. A throwing inner call
+restores the values visible before that call began, so its parent can catch the
+error and continue. Only the outermost call publishes values; an error escaping
+that call also discards changes from successful inner calls.
+
+```swift
+enum UpdateError: Error {
+  case rejected
+}
+
+let count = Stored(wrappedValue: 0)
+
+withGraphTransaction {
+  count.wrappedValue = 1
+
+  do {
+    try withGraphTransaction {
+      count.wrappedValue = 2
+      throw UpdateError.rejected
+    }
+  } catch {
+    // The inner savepoint has restored the parent's staged value.
+    assert(count.wrappedValue == 1)
+  }
+}
+
+assert(count.wrappedValue == 1)
+```
+
+This changes the behavior of code that catches an inner transaction's error.
+Previously, the failed inner call's assignments remained staged, and the example
+above committed `2`. The savepoint now discards those assignments and commits `1`.
+The public API signature is unchanged. Nested calls no longer emit a diagnostic;
+`StateGraphDiagnostics.isNestedTransactionWarningEnabled` is deprecated and has
+no effect.
+
+When a savepoint finishes, every affected node is merged or restored before
+replaced values are destroyed outside node locks. The parent transaction is
+active during that destruction, so synchronous `Stored` assignments made by a
+value's `deinit` join the parent transaction. Other threads' graph writes remain
+suspended; this cleanup must not wait synchronously for such a write.
 
 Transaction-time `Computed` reads are evaluated from the staged `Stored` values
 without updating the committed cache or dependency edges. A mutation made by a
