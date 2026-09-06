@@ -24,10 +24,17 @@ import Foundation
 /// the batch is published before this function returns. Every batch uses each
 /// `Stored` node's ordinary comparator and graph notification pipeline.
 ///
-/// Nested calls join the active transaction. They do not create a savepoint or an
-/// independent commit or rollback boundary: if an inner error is caught by `body`,
-/// its staged assignments remain part of the outer transaction. Only an error that
-/// leaves the outermost call rolls all staged assignments back.
+/// Each nested call creates a savepoint. A successful nested call merges its staged
+/// assignments into its parent without publishing them. A throwing nested call
+/// restores the values visible when it began, even if its parent catches the error.
+/// An error that leaves the outermost call rolls all staged assignments back,
+/// including changes from successful nested calls.
+///
+/// Savepoint completion restores the parent scope and finishes merging or restoring
+/// every affected node before releasing discarded values outside node locks. A
+/// synchronous `Stored` assignment from their `deinit` joins the parent scope. As
+/// with other synchronous callbacks, that cleanup must not wait for another thread
+/// to finish a graph write while the outer transaction still owns writer admission.
 ///
 /// This API is synchronous and nonescaping. Its dynamic context is thread-local;
 /// do not assume it is preserved across `await`, task creation, or executor hops.
@@ -70,8 +77,8 @@ import Foundation
 /// - Returns: The value returned by `body`. The outermost call returns after every
 ///   staged Observation-handler batch commits. A nested call returns to the active
 ///   outer body without committing.
-/// - Throws: The error thrown by `body`. An error escaping the outermost call
-///   discards every staged assignment before it is rethrown.
+/// - Throws: The error thrown by `body`, after rolling back this call's assignments
+///   and those of its nested calls. The parent may catch the error and continue.
 @discardableResult
 public func withGraphTransaction<Result, Failure: Error>(
   _ file: StaticString = #fileID,
@@ -81,9 +88,26 @@ public func withGraphTransaction<Result, Failure: Error>(
 ) throws(Failure) -> Result {
   assertGraphMutationAllowed("withGraphTransaction")
 
-  if ThreadLocal.graphTransaction.value != nil {
-    Log.logNestedGraphTransaction(file, line, column)
-    return try body()
+  if let parent = ThreadLocal.graphTransaction.value {
+    let context = GraphTransactionContext(parent: parent)
+    ThreadLocal.graphTransaction.replaceValue(context)
+    var didMerge = false
+
+    defer {
+      // Restore every node before arbitrary value destruction can reenter the graph.
+      // Writer admission continues to belong to the outermost transaction.
+      ThreadLocal.graphTransaction.replaceValue(parent)
+      if !didMerge {
+        context.prepareRollback()
+      }
+      context.finishCleanup()
+    }
+
+    let result = try body()
+    ThreadLocal.graphTransaction.replaceValue(parent)
+    context.prepareMerge(into: parent)
+    didMerge = true
+    return result
   }
 
   precondition(
@@ -109,7 +133,7 @@ public func withGraphTransaction<Result, Failure: Error>(
       ThreadLocal.graphTransaction.replaceValue(previousContext)
       context.prepareRollback()
       coordinator.finishTransaction(context)
-      context.finishRollback()
+      context.finishCleanup()
     }
   }
 
@@ -202,6 +226,13 @@ private func commitTransactionBatches(
 /// remain in the concrete `Stored` node that owns their static type.
 protocol GraphTransactionParticipant: AnyObject {
 
+  /// Transfers a successful savepoint's staged value and undo state to its parent.
+  /// Discarded parent values remain node-local until every participant has merged.
+  func prepareTransactionMerge(
+    _ transaction: GraphTransactionContext,
+    into parent: GraphTransactionContext
+  )
+
   /// Moves the staged value into node-local commit work.
   func prepareTransactionCommit()
 
@@ -228,16 +259,26 @@ protocol GraphTransactionParticipant: AnyObject {
   /// Detaches the staged value while the transaction still excludes other writers.
   func prepareTransactionRollback(_ transaction: GraphTransactionContext)
 
-  /// Destroys the detached value after releasing the transaction writer slot.
-  func finishTransactionRollback(_ transaction: GraphTransactionContext)
+  /// Destroys values detached by rollback or merge, outside node locks.
+  func finishTransactionCleanup(_ transaction: GraphTransactionContext)
 }
 
-/// The thread-local command list for one graph transaction commit batch.
+/// The thread-local command list for one commit batch or nested savepoint.
 ///
 /// This context intentionally retains only weak, type-erased participants. Each
 /// `Stored` node owns its typed staged value directly, which keeps transaction
 /// values out of a shared `[ObjectIdentifier: Any]` container.
-final class GraphTransactionContext {
+///
+/// Equality represents scope identity, not the contents of the participant list.
+/// Node-local staging retains this concrete context until merge, commit, or rollback
+/// removes it. The temporary strong participant snapshot is cleared after delivery
+/// or cleanup, breaking the corresponding node-to-context ownership cycle.
+final class GraphTransactionContext: Equatable {
+
+  /// Returns whether both references identify the same transaction scope.
+  static func == (lhs: GraphTransactionContext, rhs: GraphTransactionContext) -> Bool {
+    lhs === rhs
+  }
 
   private struct WeakParticipant {
     weak var value: (any GraphTransactionParticipant)?
@@ -247,8 +288,28 @@ final class GraphTransactionContext {
   private var frozenParticipants: [any GraphTransactionParticipant] = []
   private(set) var recordsDependencies = false
 
+  /// The enclosing savepoint or commit batch. Only nested calls have a parent;
+  /// Observation-generated batches are separate roots under the same writer owner.
+  let parent: GraphTransactionContext?
+
+  init(parent: GraphTransactionContext? = nil) {
+    self.parent = parent
+    recordsDependencies = parent?.recordsDependencies ?? false
+  }
+
   func register(_ participant: any GraphTransactionParticipant) {
     participants.append(.init(value: participant))
+  }
+
+  /// Merges every surviving participant before releasing superseded parent values.
+  /// Nodes retain their typed undo history and register with the parent only if
+  /// that scope had not already staged them.
+  func prepareMerge(into parent: GraphTransactionContext) {
+    precondition(self.parent == parent)
+    frozenParticipants = participants.compactMap(\.value)
+    for participant in frozenParticipants {
+      participant.prepareTransactionMerge(self, into: parent)
+    }
   }
 
   /// Freezes one strong participant snapshot for every phase of this batch.
@@ -312,10 +373,11 @@ final class GraphTransactionContext {
     recordsDependencies = true
   }
 
-  /// Detaches every staged value while this transaction still owns the writer slot.
+  /// Detaches this scope's staged values while the outer call owns writer admission.
   ///
   /// The strong snapshot prevents a participant from disappearing between detach
-  /// and destruction. Values remain in their concrete nodes throughout both phases.
+  /// and destruction. Savepoints restore their preceding staging during this phase;
+  /// detached values remain in their concrete nodes until cleanup.
   func prepareRollback() {
     frozenParticipants = participants.compactMap(\.value)
     for participant in frozenParticipants {
@@ -323,16 +385,17 @@ final class GraphTransactionContext {
     }
   }
 
-  /// Destroys detached staged values after another writer can safely reenter.
+  /// Destroys detached values after the whole scope has merged or rolled back.
   ///
   /// Releasing an arbitrary `Value` may synchronously run user-defined `deinit`
-  /// work. Keeping that destruction outside node locks and the coordinator's writer
-  /// slot prevents reentrant graph mutations from waiting on their own rollback.
-  func finishRollback() {
+  /// work. An outer rollback releases writer admission first. A savepoint instead
+  /// restores its parent context first, so reentrant assignments join the parent
+  /// while the outer transaction continues excluding competing writers.
+  func finishCleanup() {
     defer { frozenParticipants.removeAll() }
 
     for participant in frozenParticipants {
-      participant.finishTransactionRollback(self)
+      participant.finishTransactionCleanup(self)
     }
   }
 }

@@ -7,7 +7,7 @@ import Testing
 @Suite("Graph transactions", .serialized)
 struct GraphTransactionTests {
 
-  /// The typed failure used to verify outer transaction rollback.
+  /// The typed failure used to verify transaction and savepoint rollback.
   private enum TransactionError: Error {
     case rollback
   }
@@ -47,6 +47,21 @@ struct GraphTransactionTests {
     }
   }
 
+  /// Observes a transaction context's lifetime without extending it beyond its scope.
+  private final class WeakTransactionContext {
+    weak var value: GraphTransactionContext?
+  }
+
+  @Test
+  func transactionContextEqualityUsesIdentity() {
+    let context = GraphTransactionContext()
+    let alias = context
+    let otherContext = GraphTransactionContext()
+
+    #expect(context == alias)
+    #expect(context != otherContext)
+  }
+
   @Test
   func commitsMultipleStoredValuesAndReadsStagedMutations() {
     let first = Stored(wrappedValue: 0)
@@ -83,7 +98,7 @@ struct GraphTransactionTests {
   }
 
   @Test
-  func outsideReaderSeesCommittedValueWhileTransactionBodyIsPaused() async {
+  func outsideReaderSeesCommittedValueAfterNestedTransactionReturns() async {
     let node = Stored(wrappedValue: 0)
     let transactionStarted = TestThreadSignal()
     let resumeTransaction = TestThreadGate()
@@ -101,6 +116,9 @@ struct GraphTransactionTests {
     let transactionThread = Thread {
       withGraphTransaction {
         node.wrappedValue = 1
+        withGraphTransaction {
+          node.wrappedValue = 2
+        }
         transactionStarted.signal()
         resumeTransaction.wait(until: Date.distantFuture)
       }
@@ -138,11 +156,11 @@ struct GraphTransactionTests {
     #expect(result.transactionStarted)
     #expect(result.pausedReadValue == 0)
     #expect(result.transactionFinished)
-    #expect(result.committedValue == 1)
+    #expect(result.committedValue == 2)
   }
 
   @Test
-  func outsideWriterWaitsForTransactionCompletion() async {
+  func outsideWriterWaitsForOuterTransactionAfterNestedTransactionReturns() async {
     let node = Stored(wrappedValue: 0)
     let transactionStarted = TestThreadSignal()
     let resumeTransaction = TestThreadGate()
@@ -166,6 +184,9 @@ struct GraphTransactionTests {
     let transactionThread = Thread {
       withGraphTransaction {
         node.wrappedValue = 1
+        withGraphTransaction {
+          node.wrappedValue = 2
+        }
         transactionStarted.signal()
         resumeTransaction.wait(until: Date.distantFuture)
       }
@@ -188,7 +209,7 @@ struct GraphTransactionTests {
 
       Thread {
         writerStarted.signal()
-        node.wrappedValue = 2
+        node.wrappedValue = 3
         writerDidFinish.update { $0 = true }
         writerFinished.signal()
       }.start()
@@ -229,7 +250,7 @@ struct GraphTransactionTests {
     #expect(result.writerRemainedBlockedBeforeRelease)
     #expect(result.transactionFinished)
     #expect(result.writerFinished)
-    #expect(result.finalValue == 2)
+    #expect(result.finalValue == 3)
   }
 
   @Test
@@ -311,6 +332,89 @@ struct GraphTransactionTests {
 
     #expect(source.wrappedValue === committedValue)
     #expect(sideEffect.wrappedValue == 1)
+  }
+
+  @Test
+  func nestedRollbackRestoresEveryParentValueBeforeDestroyingStagedReferences() {
+    let committedValue = DeinitAction()
+    let parentValue = DeinitAction()
+    let source = Stored(wrappedValue: committedValue)
+    let second = Stored(wrappedValue: 0)
+    let sideEffect = Stored(wrappedValue: 0)
+    let cleanupObservedParentSnapshot = LockedBox(false)
+
+    #expect(throws: TransactionError.self) {
+      try withGraphTransaction { () throws(TransactionError) -> Void in
+        source.wrappedValue = parentValue
+        second.wrappedValue = 1
+
+        var didRollBackNestedTransaction = false
+        do {
+          try withGraphTransaction { () throws(TransactionError) -> Void in
+            source.wrappedValue = DeinitAction {
+              cleanupObservedParentSnapshot.update {
+                $0 = source.wrappedValue === parentValue && second.wrappedValue == 1
+              }
+              // Cleanup runs after the child scope is detached and joins its parent.
+              sideEffect.wrappedValue = 3
+            }
+            second.wrappedValue = 2
+            throw .rollback
+          }
+        } catch {
+          didRollBackNestedTransaction = true
+        }
+
+        #expect(didRollBackNestedTransaction)
+        #expect(cleanupObservedParentSnapshot.value)
+        #expect(source.wrappedValue === parentValue)
+        #expect(second.wrappedValue == 1)
+        #expect(sideEffect.wrappedValue == 3)
+        throw .rollback
+      }
+    }
+
+    #expect(source.wrappedValue === committedValue)
+    #expect(second.wrappedValue == 0)
+    #expect(sideEffect.wrappedValue == 0)
+  }
+
+  @Test
+  func nestedMergeTransfersEveryValueBeforeDestroyingReplacedParentValues() {
+    let committedValue = DeinitAction()
+    let childValue = DeinitAction()
+    let source = Stored(wrappedValue: committedValue)
+    let second = Stored(wrappedValue: 0)
+    let sideEffect = Stored(wrappedValue: 0)
+    let cleanupObservedMergedSnapshot = LockedBox(false)
+
+    #expect(throws: TransactionError.self) {
+      try withGraphTransaction { () throws(TransactionError) -> Void in
+        source.wrappedValue = DeinitAction {
+          cleanupObservedMergedSnapshot.update {
+            $0 = source.wrappedValue === childValue && second.wrappedValue == 2
+          }
+          sideEffect.wrappedValue = 3
+        }
+        second.wrappedValue = 1
+
+        withGraphTransaction {
+          source.wrappedValue = childValue
+          second.wrappedValue = 2
+          #expect(!cleanupObservedMergedSnapshot.value)
+        }
+
+        #expect(cleanupObservedMergedSnapshot.value)
+        #expect(source.wrappedValue === childValue)
+        #expect(second.wrappedValue == 2)
+        #expect(sideEffect.wrappedValue == 3)
+        throw .rollback
+      }
+    }
+
+    #expect(source.wrappedValue === committedValue)
+    #expect(second.wrappedValue == 0)
+    #expect(sideEffect.wrappedValue == 0)
   }
 
   @Test
@@ -664,7 +768,7 @@ struct GraphTransactionTests {
   }
 
   @Test
-  func nestedTransactionHasNoSavepointAndCaughtErrorKeepsItsStagedValue() {
+  func caughtNestedTransactionErrorRestoresTheParentStagedValue() {
     let node = Stored(wrappedValue: 0)
 
     withGraphTransaction {
@@ -680,10 +784,369 @@ struct GraphTransactionTests {
         Issue.record("Unexpected nested transaction error: \(error)")
       }
 
-      #expect(node.wrappedValue == 2)
+      #expect(node.wrappedValue == 1)
     }
 
-    #expect(node.wrappedValue == 2)
+    #expect(node.wrappedValue == 1)
+  }
+
+  @Test
+  @MainActor
+  func successfulNestedTransactionDefersPublicationUntilTheOuterCommit() {
+    let comparisons = LockedBox<[(Int, Int)]>([])
+    let first = Stored(
+      wrappedValue: 0,
+      shouldNotify: { oldValue, newValue in
+        comparisons.update { $0.append((oldValue, newValue)) }
+        return oldValue != newValue
+      }
+    )
+    let second = Stored(wrappedValue: 0)
+    let notificationCount = LockedBox(0)
+
+    withObservationTracking {
+      _ = first.wrappedValue
+      _ = second.wrappedValue
+    } onChange: {
+      notificationCount.update { $0 += 1 }
+    }
+
+    withGraphTransaction {
+      first.wrappedValue = 1
+
+      let result = withGraphTransaction {
+        #expect(first.wrappedValue == 1)
+        first.wrappedValue = 2
+        second.wrappedValue = 3
+        return "merged"
+      }
+
+      #expect(result == "merged")
+      #expect(first.wrappedValue == 2)
+      #expect(second.wrappedValue == 3)
+      #expect(comparisons.value.isEmpty)
+      #expect(notificationCount.value == 0)
+    }
+
+    #expect(first.wrappedValue == 2)
+    #expect(second.wrappedValue == 3)
+    #expect(notificationCount.value == 1)
+    #expect(comparisons.value.count == 1)
+    #expect(comparisons.value.first?.0 == 0)
+    #expect(comparisons.value.first?.1 == 2)
+  }
+
+  @Test
+  func successfulNestedTransactionRollsBackWhenTheOuterBodyThrows() {
+    let first = Stored(wrappedValue: 0)
+    let second = Stored(wrappedValue: 0)
+
+    #expect(throws: TransactionError.self) {
+      try withGraphTransaction { () throws(TransactionError) -> Void in
+        first.wrappedValue = 1
+
+        withGraphTransaction {
+          first.wrappedValue = 2
+          second.wrappedValue = 3
+        }
+
+        #expect(first.wrappedValue == 2)
+        #expect(second.wrappedValue == 3)
+        throw .rollback
+      }
+    }
+
+    #expect(first.wrappedValue == 0)
+    #expect(second.wrappedValue == 0)
+  }
+
+  @Test
+  @MainActor
+  func nestedRollbackRestoresOptionalNilAndRemovesItsNewParticipants() {
+    let optional = Stored<Int?>(wrappedValue: 1)
+    let comparisonCount = LockedBox(0)
+    let innerOnly = Stored(
+      wrappedValue: 0,
+      shouldNotify: { oldValue, newValue in
+        comparisonCount.update { $0 += 1 }
+        return oldValue != newValue
+      }
+    )
+    let notificationCount = LockedBox(0)
+
+    withObservationTracking {
+      _ = innerOnly.wrappedValue
+    } onChange: {
+      notificationCount.update { $0 += 1 }
+    }
+
+    withGraphTransaction {
+      optional.wrappedValue = nil
+
+      #expect(throws: TransactionError.self) {
+        try withGraphTransaction { () throws(TransactionError) -> Void in
+          #expect(optional.wrappedValue == nil)
+          optional.wrappedValue = 2
+          innerOnly.wrappedValue = 3
+          throw .rollback
+        }
+      }
+
+      #expect(optional.wrappedValue == nil)
+      #expect(innerOnly.wrappedValue == 0)
+    }
+
+    #expect(optional.wrappedValue == nil)
+    #expect(innerOnly.wrappedValue == 0)
+    #expect(comparisonCount.value == 0)
+    #expect(notificationCount.value == 0)
+
+    // A rolled-back participant must retain its existing observation registration.
+    innerOnly.wrappedValue = 4
+    #expect(comparisonCount.value == 1)
+    #expect(notificationCount.value == 1)
+  }
+
+  @Test
+  func nestedRollbackDiscardsSuccessfulGrandchildrenAndAllowsAnotherSavepoint() {
+    let first = Stored(wrappedValue: 0)
+    let second = Stored(wrappedValue: 0)
+
+    withGraphTransaction {
+      first.wrappedValue = 1
+      second.wrappedValue = 10
+
+      #expect(throws: TransactionError.self) {
+        try withGraphTransaction { () throws(TransactionError) -> Void in
+          first.wrappedValue = 2
+
+          withGraphTransaction {
+            #expect(first.wrappedValue == 2)
+            // The middle scope has not staged this node; reads reach the grandparent.
+            #expect(second.wrappedValue == 10)
+            first.wrappedValue = 3
+            second.wrappedValue = 4
+          }
+
+          #expect(first.wrappedValue == 3)
+          #expect(second.wrappedValue == 4)
+          throw .rollback
+        }
+      }
+
+      #expect(first.wrappedValue == 1)
+      #expect(second.wrappedValue == 10)
+
+      withGraphTransaction {
+        first.wrappedValue = 5
+
+        #expect(throws: TransactionError.self) {
+          try withGraphTransaction { () throws(TransactionError) -> Void in
+            #expect(second.wrappedValue == 10)
+            second.wrappedValue = 6
+            throw .rollback
+          }
+        }
+
+        #expect(second.wrappedValue == 10)
+      }
+    }
+
+    #expect(first.wrappedValue == 5)
+    #expect(second.wrappedValue == 10)
+  }
+
+  /// Rollback decisions ordered from the outermost scope to the innermost scope.
+  ///
+  /// Two and three scopes cover every outcome combination. Eight scopes cover
+  /// all-success, each individual rollback boundary, and all-rollback without
+  /// multiplying the same deep traversal into every possible combination.
+  private static let nestedTransactionRollbackPatterns: [[Bool]] = {
+    var patterns: [[Bool]] = []
+    for scopeCount in [2, 3] {
+      for mask in 0..<(1 << scopeCount) {
+        patterns.append((0..<scopeCount).map { mask & (1 << $0) != 0 })
+      }
+    }
+
+    let deepScopeCount = 8
+    patterns.append(Array(repeating: false, count: deepScopeCount))
+    for rollbackIndex in 0..<deepScopeCount {
+      var pattern = Array(repeating: false, count: deepScopeCount)
+      pattern[rollbackIndex] = true
+      patterns.append(pattern)
+    }
+    patterns.append(Array(repeating: true, count: deepScopeCount))
+    return patterns
+  }()
+
+  @Test(arguments: nestedTransactionRollbackPatterns)
+  @MainActor
+  func nestedTransactionOutcomesMatchSnapshotsAtEveryScope(rollsBack: [Bool]) {
+    let scopeCount = rollsBack.count
+    let contexts = (0..<scopeCount).map { _ in WeakTransactionContext() }
+    let initialValues = Array(repeating: 0, count: scopeCount + 1)
+    let comparisonCounts = LockedBox(initialValues)
+    let notificationCounts = LockedBox(initialValues)
+    let computedNotificationCount = LockedBox(0)
+    let nodes = initialValues.indices.map { index in
+      Stored(
+        wrappedValue: 0,
+        shouldNotify: { oldValue, newValue in
+          comparisonCounts.update { $0[index] += 1 }
+          return oldValue != newValue
+        }
+      )
+    }
+    let computed = Computed { _ in
+      nodes.map { $0.wrappedValue }
+    }
+
+    for (index, node) in nodes.enumerated() {
+      withObservationTracking {
+        _ = node.wrappedValue
+      } onChange: {
+        notificationCounts.update { $0[index] += 1 }
+      }
+    }
+    withObservationTracking {
+      _ = computed.wrappedValue
+    } onChange: {
+      computedNotificationCount.update { $0 += 1 }
+    }
+
+    // A plain value-semantic snapshot is an independent reference for savepoints;
+    // it does not inspect the graph's participant lists or node-local undo history.
+    var expectedValues = initialValues
+
+    func expectSnapshot() {
+      #expect(nodes.map { $0.wrappedValue } == expectedValues)
+      #expect(computed.wrappedValue == expectedValues)
+    }
+
+    func enterScope(_ level: Int) throws(TransactionError) {
+      let precedingValues = expectedValues
+      do {
+        try withGraphTransaction { () throws(TransactionError) -> Void in
+          contexts[level - 1].value = ThreadLocal.graphTransaction.value
+          #expect(contexts[level - 1].value != nil)
+          expectSnapshot()
+
+          // Every scope overwrites the shared node and introduces its own node.
+          // Successful children therefore exercise both replacement and transfer
+          // into parents that have never written the scope-specific nodes.
+          nodes[0].wrappedValue = level
+          nodes[level].wrappedValue = level
+          expectedValues[0] = level
+          expectedValues[level] = level
+          expectSnapshot()
+
+          if level < scopeCount {
+            do {
+              try enterScope(level + 1)
+            } catch {
+              #expect(rollsBack[level])
+            }
+            // Check immediately on return so a parent's later write cannot hide
+            // an incorrect merge or a rollback to the wrong ancestor.
+            expectSnapshot()
+          }
+
+          #expect(comparisonCounts.value == initialValues)
+          #expect(notificationCounts.value == initialValues)
+          #expect(computedNotificationCount.value == 0)
+          if rollsBack[level - 1] {
+            throw .rollback
+          }
+        }
+      } catch {
+        expectedValues = precedingValues
+        expectSnapshot()
+        throw error
+      }
+    }
+
+    var didRollBackOutermostScope = false
+    do {
+      try enterScope(1)
+    } catch {
+      didRollBackOutermostScope = true
+    }
+
+    #expect(didRollBackOutermostScope == rollsBack[0])
+    expectSnapshot()
+    for (index, value) in expectedValues.enumerated() {
+      if value == 0 {
+        #expect(comparisonCounts.value[index] == 0)
+        #expect(notificationCounts.value[index] == 0)
+      } else {
+        #expect(comparisonCounts.value[index] == 1)
+        #expect(notificationCounts.value[index] == 1)
+      }
+    }
+    if rollsBack[0] {
+      #expect(computedNotificationCount.value == 0)
+    } else {
+      #expect(computedNotificationCount.value == 1)
+    }
+
+    // Live nodes must release the strong contexts in their staging and cleanup storage.
+    withExtendedLifetime(nodes) {
+      for context in contexts {
+        #expect(context.value == nil)
+      }
+    }
+  }
+
+  @Test
+  @MainActor
+  func uncaughtInnermostErrorRollsBackAllEightScopesWithoutPublication() {
+    let scopeCount = 8
+    let contexts = (0..<scopeCount).map { _ in WeakTransactionContext() }
+    let comparisonCount = LockedBox(0)
+    let notificationCount = LockedBox(0)
+    let nodes = (0..<scopeCount).map { _ in
+      Stored(
+        wrappedValue: 0,
+        shouldNotify: { oldValue, newValue in
+          comparisonCount.update { $0 += 1 }
+          return oldValue != newValue
+        }
+      )
+    }
+    for node in nodes {
+      withObservationTracking {
+        _ = node.wrappedValue
+      } onChange: {
+        notificationCount.update { $0 += 1 }
+      }
+    }
+
+    func enterScope(_ index: Int) throws(TransactionError) {
+      try withGraphTransaction { () throws(TransactionError) -> Void in
+        contexts[index].value = ThreadLocal.graphTransaction.value
+        #expect(contexts[index].value != nil)
+        nodes[index].wrappedValue = index + 1
+        if index + 1 < scopeCount {
+          try enterScope(index + 1)
+        } else {
+          throw .rollback
+        }
+      }
+    }
+
+    #expect(throws: TransactionError.self) {
+      try enterScope(0)
+    }
+    #expect(nodes.map { $0.wrappedValue } == Array(repeating: 0, count: scopeCount))
+    #expect(comparisonCount.value == 0)
+    #expect(notificationCount.value == 0)
+
+    withExtendedLifetime(nodes) {
+      for context in contexts {
+        #expect(context.value == nil)
+      }
+    }
   }
 
   @Test
@@ -714,30 +1177,33 @@ struct GraphTransactionTests {
   }
 
 #if DEBUG
-  @Test
-  func nestedTransactionDiagnosticCanBeDisabled() {
+  @Test(arguments: [true, false])
+  func legacyNestedTransactionDiagnosticSettingDoesNotChangeSavepointBehavior(
+    isEnabled: Bool
+  ) {
     let previousValue = StateGraphDiagnostics.isNestedTransactionWarningEnabled
     defer {
       StateGraphDiagnostics.isNestedTransactionWarningEnabled = previousValue
     }
 
-    let warningCount = LockedBox(0)
+    StateGraphDiagnostics.isNestedTransactionWarningEnabled = isEnabled
+    #expect(StateGraphDiagnostics.isNestedTransactionWarningEnabled == isEnabled)
+    let node = Stored(wrappedValue: 0)
 
-    Log.$nestedTransactionWarningObserver.withValue({
-      warningCount.update { $0 += 1 }
-    }) {
-      StateGraphDiagnostics.isNestedTransactionWarningEnabled = true
-      withGraphTransaction {
-        withGraphTransaction {}
+    withGraphTransaction {
+      node.wrappedValue = 1
+
+      #expect(throws: TransactionError.self) {
+        try withGraphTransaction { () throws(TransactionError) -> Void in
+          node.wrappedValue = 2
+          throw .rollback
+        }
       }
 
-      StateGraphDiagnostics.isNestedTransactionWarningEnabled = false
-      withGraphTransaction {
-        withGraphTransaction {}
-      }
+      #expect(node.wrappedValue == 1)
     }
 
-    #expect(warningCount.value == 1)
+    #expect(node.wrappedValue == 1)
   }
 #endif
 
@@ -830,6 +1296,121 @@ struct GraphTransactionTests {
     #expect(second.wrappedValue == 2)
     #expect(third.wrappedValue == 3)
     #expect(firstChangeCount.value == 1)
+    #expect(secondChangeCount.value == 1)
+  }
+
+  @Test
+  @MainActor
+  func observationCallbackSavepointRestoresThePendingCommitAndFollowingBatch() {
+    let first = Stored(wrappedValue: 0)
+    let second = Stored(wrappedValue: 0)
+    let third = Stored(wrappedValue: 0)
+    let fourth = Stored(wrappedValue: 0)
+    let secondChangeCount = LockedBox(0)
+    let thirdChangeCount = LockedBox(0)
+    let contexts = LockedBox(
+      (
+        parent: WeakTransactionContext(),
+        failedChild: WeakTransactionContext(),
+        successfulChild: WeakTransactionContext()
+      )
+    )
+
+    withObservationTracking {
+      _ = third.wrappedValue
+    } onChange: {
+      thirdChangeCount.update { $0 += 1 }
+    }
+
+    withObservationTracking {
+      _ = second.wrappedValue
+    } onChange: {
+      secondChangeCount.update { $0 += 1 }
+      #expect(second.wrappedValue == 12)
+      fourth.wrappedValue = 4
+    }
+
+    withObservationTracking {
+      _ = first.wrappedValue
+    } onChange: {
+      contexts.update { $0.parent.value = ThreadLocal.graphTransaction.value }
+      #expect(contexts.value.parent.value != nil)
+      second.wrappedValue = 10
+
+      #expect(throws: TransactionError.self) {
+        try withGraphTransaction { () throws(TransactionError) -> Void in
+          contexts.update { $0.failedChild.value = ThreadLocal.graphTransaction.value }
+          #expect(contexts.value.failedChild.value != nil)
+          first.wrappedValue = 9
+          second.wrappedValue = 20
+          third.wrappedValue = 30
+          throw .rollback
+        }
+      }
+
+      // Reads fall back to the pending first commit and the parent callback batch.
+      #expect(first.wrappedValue == 1)
+      #expect(second.wrappedValue == 10)
+      #expect(third.wrappedValue == 0)
+
+      withGraphTransaction {
+        contexts.update { $0.successfulChild.value = ThreadLocal.graphTransaction.value }
+        #expect(contexts.value.successfulChild.value != nil)
+        second.wrappedValue = 12
+      }
+
+      #expect(second.wrappedValue == 12)
+      #expect(secondChangeCount.value == 0)
+    }
+
+    withGraphTransaction {
+      first.wrappedValue = 1
+    }
+
+    #expect(first.wrappedValue == 1)
+    #expect(second.wrappedValue == 12)
+    #expect(third.wrappedValue == 0)
+    #expect(fourth.wrappedValue == 4)
+    #expect(secondChangeCount.value == 1)
+    #expect(thirdChangeCount.value == 0)
+
+    withExtendedLifetime((first, second, third, fourth)) {
+      let capturedContexts = contexts.value
+      #expect(capturedContexts.parent.value == nil)
+      #expect(capturedContexts.failedChild.value == nil)
+      #expect(capturedContexts.successfulChild.value == nil)
+    }
+
+    third.wrappedValue = 3
+    #expect(thirdChangeCount.value == 1)
+  }
+
+  @Test
+  @MainActor
+  func observationCallbackSavepointPreservesDependencyRegistration() {
+    let source = Stored(wrappedValue: 0)
+    let second = Stored(wrappedValue: 0)
+    let secondChangeCount = LockedBox(0)
+
+    withObservationTracking {
+      _ = source.wrappedValue
+    } onChange: {
+      withGraphTransaction {
+        // A child scope must preserve its callback parent's ability to track reads.
+        withObservationTracking {
+          _ = second.wrappedValue
+        } onChange: {
+          secondChangeCount.update { $0 += 1 }
+        }
+      }
+    }
+
+    withGraphTransaction {
+      source.wrappedValue = 1
+    }
+
+    #expect(secondChangeCount.value == 0)
+    second.wrappedValue = 2
     #expect(secondChangeCount.value == 1)
   }
 
@@ -1087,14 +1668,66 @@ struct GraphTransactionTests {
   }
 
   @Test
-  func deallocatedParticipantIsSkippedAtCommit() {
+  func computedReadsReturnToParentDependenciesAfterNestedRollback() {
+    let toggle = Stored(wrappedValue: false)
+    let first = Stored(wrappedValue: 1)
+    let second = Stored(wrappedValue: 2)
+    let computeCount = LockedBox(0)
+    let selected = Computed { _ in
+      computeCount.update { $0 += 1 }
+      if toggle.wrappedValue {
+        return second.wrappedValue
+      }
+      return first.wrappedValue
+    }
+
+    #expect(selected.wrappedValue == 1)
+
+    withGraphTransaction {
+      first.wrappedValue = 10
+      #expect(selected.wrappedValue == 10)
+
+      #expect(throws: TransactionError.self) {
+        try withGraphTransaction { () throws(TransactionError) -> Void in
+          toggle.wrappedValue = true
+          second.wrappedValue = 3
+          #expect(selected.wrappedValue == 3)
+          throw .rollback
+        }
+      }
+
+      #expect(selected.wrappedValue == 10)
+      #expect(second.wrappedValue == 2)
+      first.wrappedValue = 11
+    }
+
+    #expect(selected.wrappedValue == 11)
+    let countAfterCommit = computeCount.value
+
+    // The failed child must not leave a dependency on the alternate branch.
+    second.wrappedValue = 4
+    #expect(selected.wrappedValue == 11)
+    #expect(computeCount.value == countAfterCommit)
+
+    first.wrappedValue = 12
+    #expect(selected.wrappedValue == 12)
+    #expect(computeCount.value == countAfterCommit + 1)
+  }
+
+  @Test
+  func deallocatedNestedParticipantIsSkippedAtMergeAndCommit() {
     weak var weakNode: Stored<Int>?
 
     withGraphTransaction {
-      var node: Stored<Int>? = Stored(wrappedValue: 0)
-      weakNode = node
-      node?.wrappedValue = 1
-      node = nil
+      withGraphTransaction {
+        var node: Stored<Int>? = Stored(wrappedValue: 0)
+        weakNode = node
+        node?.wrappedValue = 1
+        node = nil
+        #expect(weakNode == nil)
+      }
+
+      #expect(weakNode == nil)
     }
 
     #expect(weakNode == nil)

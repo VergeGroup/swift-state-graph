@@ -95,6 +95,24 @@ transaction prevents competing writers from losing updates, but it still uses
 the current getter/writeback materialization and therefore does not solve the
 copy optimization described above.
 
+Each nested `withGraphTransaction` call creates a savepoint. Successful inner
+work merges into the parent's staged values; a throwing inner call restores the
+values visible at its entry, even when its parent catches the error. Publication
+occurs only when the outermost call succeeds. An error escaping the outermost
+call also rolls back successful inner work. Assignment observers such as
+`onDidSet` still run immediately, and their external side effects cannot be
+rolled back.
+
+Savepoint storage preserves each `Stored` node's concrete value type. Transaction
+scopes coordinate weak participants rather than collecting values in a shared
+type-erased container. A savepoint merges or restores every affected node before
+releasing displaced values outside node locks, with the parent context active.
+Synchronous `Stored` assignments from those values' `deinit` therefore join the
+parent. The outer transaction retains writer ownership throughout inner
+finalization, so this cleanup must not synchronously wait for another thread to
+complete a graph write. Outermost rollback continues to detach staged values
+before releasing writer ownership and then destroys those values afterward.
+
 This issue concerns in-memory `Stored` mutation. It does not require
 `EntityStore` to have reference semantics, and it is not a database transaction
 or rollback mechanism for external side effects.

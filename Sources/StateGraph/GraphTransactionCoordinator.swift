@@ -188,7 +188,7 @@ final class GraphTransactionCoordinator: @unchecked Sendable {
     condition.lock()
     defer { condition.unlock() }
 
-    precondition(activeTransaction === transaction)
+    precondition(activeTransaction == transaction)
     precondition(!isPublishing)
 
     // Close admission before draining. Existing readers can now only finish, so the
@@ -220,7 +220,7 @@ final class GraphTransactionCoordinator: @unchecked Sendable {
     condition.lock()
     defer { condition.unlock() }
 
-    precondition(activeTransaction === transaction)
+    precondition(activeTransaction == transaction)
     precondition(!isPublishing)
 
     activeTransaction = nil
@@ -236,7 +236,7 @@ final class GraphTransactionCoordinator: @unchecked Sendable {
     condition.lock()
     defer { condition.unlock() }
 
-    precondition(activeTransaction === transaction)
+    precondition(activeTransaction == transaction)
     precondition(isPublishing)
     isPublishing = false
 

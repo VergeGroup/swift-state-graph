@@ -19,15 +19,17 @@ public final class Stored<Value: SendableMetatype>: Node, Observable, CustomDebu
   nonisolated(unsafe)
   private var value: Value
 
-  /// A typed staged value owned directly by this node during an outer graph transaction.
+  /// The latest typed value staged by one transaction scope, owned by this node.
   ///
   /// The wrapper is deliberately not a reference box. `Stored` values are copyable today,
   /// but keeping the wrapper noncopyable makes its single owner explicit and lets commit
   /// consume the staged storage before publishing.
   private struct TransactionBuffer<Element>: ~Copyable {
+    var context: GraphTransactionContext
     var value: Element
 
-    init(_ value: consuming Element) {
+    init(_ value: consuming Element, context: GraphTransactionContext) {
+      self.context = context
       self.value = value
     }
 
@@ -67,19 +69,43 @@ public final class Stored<Value: SendableMetatype>: Node, Observable, CustomDebu
   nonisolated(unsafe)
   private var transactionBuffer: TransactionBuffer<Value>?
 
-  /// A typed value detached from a particular transaction during rollback.
+  /// The staging state preceding a savepoint's first assignment to this node.
+  ///
+  /// `unstaged` is distinct from a staged optional `nil`. A saved value may belong
+  /// to any ancestor because intermediate scopes need not have touched this node.
+  private enum TransactionStagingState {
+    case unstaged
+    case staged(context: GraphTransactionContext, value: Value)
+  }
+
+  /// Typed undo state for a savepoint that has written this node.
+  ///
+  /// Read-only scopes allocate no node history. Successful scopes transfer their
+  /// undo state to a previously untouched parent; rollback restores it directly,
+  /// without invoking assignment observers or graph notifications.
+  private struct TransactionSavepoint {
+    let context: GraphTransactionContext
+    let precedingState: TransactionStagingState
+  }
+
+  nonisolated(unsafe)
+  private var transactionSavepoints: [TransactionSavepoint] = []
+
+  /// A typed value detached by rollback or superseded by a savepoint merge.
   ///
   /// Multiple cleanup operations may overlap after their writer slots are released,
-  /// so context identity keeps their node-local values distinct without moving them
-  /// into the type-erased transaction context.
-  private struct TransactionRollbackValue {
-    let context: ObjectIdentifier
+  /// so retaining each context keeps its node-local values distinct without moving
+  /// them into the type-erased transaction context. Cleanup removes this reference
+  /// before the scope releases its temporary strong participant snapshot.
+  private struct TransactionDiscardedValue {
+    let context: GraphTransactionContext
     let value: Value
   }
 
-  /// Rolled-back values waiting to be destroyed outside writer coordination.
+  /// Values waiting for the entire scope to finish restoring or merging its nodes.
+  /// Outer rollback also releases writer admission before destroying these values.
   nonisolated(unsafe)
-  private var transactionRollbackValues: [TransactionRollbackValue] = []
+  private var transactionDiscardedValues: [TransactionDiscardedValue] = []
 
   nonisolated(unsafe)
   private var transactionCommitWork: TransactionCommitWork?
@@ -221,9 +247,26 @@ public final class Stored<Value: SendableMetatype>: Node, Observable, CustomDebu
       oldValue = value
     }
 
-    let needsRegistration = transactionBuffer == nil
-    let discardedBuffer = transactionBuffer.take()
-    transactionBuffer = .init(newValue)
+    let needsRegistration = transactionBuffer == nil || transactionBuffer!.context != transaction
+    var discardedBuffer = transactionBuffer.take()
+
+    if needsRegistration, transaction.parent != nil {
+      let precedingState: TransactionStagingState
+      if let precedingBuffer = discardedBuffer.take() {
+        let precedingContext = precedingBuffer.context
+        precedingState = .staged(
+          context: precedingContext,
+          value: precedingBuffer.takeValue()
+        )
+      } else {
+        precedingState = .unstaged
+      }
+      transactionSavepoints.append(
+        .init(context: transaction, precedingState: precedingState)
+      )
+    }
+
+    transactionBuffer = .init(newValue, context: transaction)
     let didSetHandler = self.didSetHandler
     lock.unlock()
 
@@ -319,8 +362,57 @@ public final class Stored<Value: SendableMetatype>: Node, Observable, CustomDebu
 #endif
   }
 
+  func prepareTransactionMerge(
+    _ transaction: GraphTransactionContext,
+    into parent: GraphTransactionContext
+  ) {
+    lock.lock()
+    precondition(transactionBuffer != nil && transactionBuffer!.context == transaction)
+    let savepoint = transactionSavepoints.removeLast()
+    precondition(savepoint.context == transaction)
+
+    // Keep the child's final value as the parent's staged value. Merging is not an
+    // assignment and must not repeat onDidSet or publish a graph notification.
+    transactionBuffer!.context = parent
+
+    let needsParentRegistration: Bool
+    switch savepoint.precedingState {
+    case .unstaged:
+      needsParentRegistration = true
+    case .staged(let precedingContext, let precedingValue):
+      if precedingContext == parent {
+        needsParentRegistration = false
+        // Retain the superseded parent value until every node has merged. Its deinit
+        // must see the whole parent snapshot and must never execute under this lock.
+        transactionDiscardedValues.append(.init(context: transaction, value: precedingValue))
+      } else {
+        needsParentRegistration = true
+      }
+    }
+
+    if needsParentRegistration {
+      if parent.parent != nil {
+        // The parent had not written this node. It inherits the child's undo state,
+        // including a value staged by an ancestor beyond the immediate parent.
+        transactionSavepoints.append(
+          .init(context: parent, precedingState: savepoint.precedingState)
+        )
+      } else {
+        guard case .unstaged = savepoint.precedingState else {
+          preconditionFailure("A root transaction cannot inherit another scope's staged value.")
+        }
+      }
+    }
+    lock.unlock()
+
+    if needsParentRegistration {
+      parent.register(self)
+    }
+  }
+
   func prepareTransactionCommit() {
     lock.lock()
+    precondition(transactionSavepoints.isEmpty)
     guard let transactionBuffer = self.transactionBuffer.take() else {
       lock.unlock()
       return
@@ -462,34 +554,46 @@ public final class Stored<Value: SendableMetatype>: Node, Observable, CustomDebu
       lock.unlock()
       return
     }
-    transactionRollbackValues.append(
+    precondition(transactionBuffer.context == transaction)
+    transactionDiscardedValues.append(
       .init(
-        context: ObjectIdentifier(transaction),
+        context: transaction,
         value: transactionBuffer.takeValue()
       )
     )
+
+    if transaction.parent != nil {
+      let savepoint = transactionSavepoints.removeLast()
+      precondition(savepoint.context == transaction)
+      switch savepoint.precedingState {
+      case .unstaged:
+        break
+      case .staged(let precedingContext, let precedingValue):
+        self.transactionBuffer = .init(precedingValue, context: precedingContext)
+      }
+    } else {
+      precondition(transactionSavepoints.isEmpty)
+    }
     lock.unlock()
   }
 
-  func finishTransactionRollback(_ transaction: GraphTransactionContext) {
-    let context = ObjectIdentifier(transaction)
-
+  func finishTransactionCleanup(_ transaction: GraphTransactionContext) {
     lock.lock()
     guard
-      let index = transactionRollbackValues.lastIndex(
-        where: { $0.context == context }
+      let index = transactionDiscardedValues.lastIndex(
+        where: { $0.context == transaction }
       )
     else {
       lock.unlock()
       return
     }
-    let rollbackValue = transactionRollbackValues.remove(at: index)
+    let discardedValue = transactionDiscardedValues.remove(at: index)
     lock.unlock()
 
-    Self.discardTransactionValue(rollbackValue.value)
+    Self.discardTransactionValue(discardedValue.value)
   }
 
-  /// Ends a rolled-back value's lifetime outside node and coordinator locks.
+  /// Ends a discarded value's lifetime after the whole scope is coherent, outside locks.
   private static func discardTransactionValue(_ value: consuming Value) {
     _ = consume value
   }

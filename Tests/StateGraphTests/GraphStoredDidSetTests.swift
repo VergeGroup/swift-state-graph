@@ -118,6 +118,68 @@ struct GraphStoredDidSetTests {
     #expect(nodeObserverEvents == model.propertyObserverEvents)
   }
 
+  @Test func nested_rollback_restores_observer_mutations_without_replaying_observers() {
+    /// A source and derived value whose assignment history is an external side effect.
+    final class Model {
+      @GraphStored
+      var source: Int = 0 {
+        didSet {
+          derived += source - oldValue
+          propertyObserverEvents.append("\(oldValue)->\(source)")
+        }
+      }
+
+      @GraphStored
+      var derived: Int = 0
+
+      @GraphStored
+      var nodeDerived: Int = 0
+
+      var propertyObserverEvents: [String] = []
+    }
+
+    /// Requests rollback of the inner assignment while allowing its parent to continue.
+    enum TestError: Error {
+      case rollback
+    }
+
+    let model = Model()
+    var nodeObserverEvents: [String] = []
+    model.$source.onDidSet { [weak model] oldValue, newValue in
+      nodeObserverEvents.append("\(oldValue)->\(newValue)")
+      if let model {
+        model.nodeDerived += newValue - oldValue
+      }
+    }
+
+    withGraphTransaction {
+      model.source = 1
+
+      #expect(throws: TestError.self) {
+        try withGraphTransaction { () throws(TestError) -> Void in
+          model.source = 2
+          #expect(model.derived == 2)
+          #expect(model.nodeDerived == 2)
+          throw .rollback
+        }
+      }
+
+      #expect(model.source == 1)
+      #expect(model.derived == 1)
+      #expect(model.nodeDerived == 1)
+      #expect(model.propertyObserverEvents == ["0->1", "1->2"])
+      #expect(nodeObserverEvents == model.propertyObserverEvents)
+
+      model.source = 3
+    }
+
+    #expect(model.source == 3)
+    #expect(model.derived == 3)
+    #expect(model.nodeDerived == 3)
+    #expect(model.propertyObserverEvents == ["0->1", "1->2", "1->3"])
+    #expect(nodeObserverEvents == model.propertyObserverEvents)
+  }
+
   @Test func didSet_runs_with_graphUserDefault() {
     let key = "GraphStoredDidSetTests.username"
     UserDefaults.standard.removeObject(forKey: key)
