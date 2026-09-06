@@ -268,7 +268,17 @@ protocol GraphTransactionParticipant: AnyObject {
 /// This context intentionally retains only weak, type-erased participants. Each
 /// `Stored` node owns its typed staged value directly, which keeps transaction
 /// values out of a shared `[ObjectIdentifier: Any]` container.
-final class GraphTransactionContext {
+///
+/// Equality represents scope identity, not the contents of the participant list.
+/// Node-local staging retains this concrete context until merge, commit, or rollback
+/// removes it. The temporary strong participant snapshot is cleared after delivery
+/// or cleanup, breaking the corresponding node-to-context ownership cycle.
+final class GraphTransactionContext: Equatable {
+
+  /// Returns whether both references identify the same transaction scope.
+  static func == (lhs: GraphTransactionContext, rhs: GraphTransactionContext) -> Bool {
+    lhs === rhs
+  }
 
   private struct WeakParticipant {
     weak var value: (any GraphTransactionParticipant)?
@@ -295,7 +305,7 @@ final class GraphTransactionContext {
   /// Nodes retain their typed undo history and register with the parent only if
   /// that scope had not already staged them.
   func prepareMerge(into parent: GraphTransactionContext) {
-    precondition(self.parent === parent)
+    precondition(self.parent == parent)
     frozenParticipants = participants.compactMap(\.value)
     for participant in frozenParticipants {
       participant.prepareTransactionMerge(self, into: parent)

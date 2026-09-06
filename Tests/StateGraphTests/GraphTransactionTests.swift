@@ -47,6 +47,21 @@ struct GraphTransactionTests {
     }
   }
 
+  /// Observes a transaction context's lifetime without extending it beyond its scope.
+  private final class WeakTransactionContext {
+    weak var value: GraphTransactionContext?
+  }
+
+  @Test
+  func transactionContextEqualityUsesIdentity() {
+    let context = GraphTransactionContext()
+    let alias = context
+    let otherContext = GraphTransactionContext()
+
+    #expect(context == alias)
+    #expect(context != otherContext)
+  }
+
   @Test
   func commitsMultipleStoredValuesAndReadsStagedMutations() {
     let first = Stored(wrappedValue: 0)
@@ -969,6 +984,7 @@ struct GraphTransactionTests {
   @MainActor
   func nestedTransactionOutcomesMatchSnapshotsAtEveryScope(rollsBack: [Bool]) {
     let scopeCount = rollsBack.count
+    let contexts = (0..<scopeCount).map { _ in WeakTransactionContext() }
     let initialValues = Array(repeating: 0, count: scopeCount + 1)
     let comparisonCounts = LockedBox(initialValues)
     let notificationCounts = LockedBox(initialValues)
@@ -1012,6 +1028,8 @@ struct GraphTransactionTests {
       let precedingValues = expectedValues
       do {
         try withGraphTransaction { () throws(TransactionError) -> Void in
+          contexts[level - 1].value = ThreadLocal.graphTransaction.value
+          #expect(contexts[level - 1].value != nil)
           expectSnapshot()
 
           // Every scope overwrites the shared node and introduces its own node.
@@ -1071,12 +1089,20 @@ struct GraphTransactionTests {
     } else {
       #expect(computedNotificationCount.value == 1)
     }
+
+    // Live nodes must release the strong contexts in their staging and cleanup storage.
+    withExtendedLifetime(nodes) {
+      for context in contexts {
+        #expect(context.value == nil)
+      }
+    }
   }
 
   @Test
   @MainActor
   func uncaughtInnermostErrorRollsBackAllEightScopesWithoutPublication() {
     let scopeCount = 8
+    let contexts = (0..<scopeCount).map { _ in WeakTransactionContext() }
     let comparisonCount = LockedBox(0)
     let notificationCount = LockedBox(0)
     let nodes = (0..<scopeCount).map { _ in
@@ -1098,6 +1124,8 @@ struct GraphTransactionTests {
 
     func enterScope(_ index: Int) throws(TransactionError) {
       try withGraphTransaction { () throws(TransactionError) -> Void in
+        contexts[index].value = ThreadLocal.graphTransaction.value
+        #expect(contexts[index].value != nil)
         nodes[index].wrappedValue = index + 1
         if index + 1 < scopeCount {
           try enterScope(index + 1)
@@ -1113,6 +1141,12 @@ struct GraphTransactionTests {
     #expect(nodes.map { $0.wrappedValue } == Array(repeating: 0, count: scopeCount))
     #expect(comparisonCount.value == 0)
     #expect(notificationCount.value == 0)
+
+    withExtendedLifetime(nodes) {
+      for context in contexts {
+        #expect(context.value == nil)
+      }
+    }
   }
 
   @Test
@@ -1274,6 +1308,13 @@ struct GraphTransactionTests {
     let fourth = Stored(wrappedValue: 0)
     let secondChangeCount = LockedBox(0)
     let thirdChangeCount = LockedBox(0)
+    let contexts = LockedBox(
+      (
+        parent: WeakTransactionContext(),
+        failedChild: WeakTransactionContext(),
+        successfulChild: WeakTransactionContext()
+      )
+    )
 
     withObservationTracking {
       _ = third.wrappedValue
@@ -1292,10 +1333,14 @@ struct GraphTransactionTests {
     withObservationTracking {
       _ = first.wrappedValue
     } onChange: {
+      contexts.update { $0.parent.value = ThreadLocal.graphTransaction.value }
+      #expect(contexts.value.parent.value != nil)
       second.wrappedValue = 10
 
       #expect(throws: TransactionError.self) {
         try withGraphTransaction { () throws(TransactionError) -> Void in
+          contexts.update { $0.failedChild.value = ThreadLocal.graphTransaction.value }
+          #expect(contexts.value.failedChild.value != nil)
           first.wrappedValue = 9
           second.wrappedValue = 20
           third.wrappedValue = 30
@@ -1309,6 +1354,8 @@ struct GraphTransactionTests {
       #expect(third.wrappedValue == 0)
 
       withGraphTransaction {
+        contexts.update { $0.successfulChild.value = ThreadLocal.graphTransaction.value }
+        #expect(contexts.value.successfulChild.value != nil)
         second.wrappedValue = 12
       }
 
@@ -1326,6 +1373,13 @@ struct GraphTransactionTests {
     #expect(fourth.wrappedValue == 4)
     #expect(secondChangeCount.value == 1)
     #expect(thirdChangeCount.value == 0)
+
+    withExtendedLifetime((first, second, third, fourth)) {
+      let capturedContexts = contexts.value
+      #expect(capturedContexts.parent.value == nil)
+      #expect(capturedContexts.failedChild.value == nil)
+      #expect(capturedContexts.successfulChild.value == nil)
+    }
 
     third.wrappedValue = 3
     #expect(thirdChangeCount.value == 1)

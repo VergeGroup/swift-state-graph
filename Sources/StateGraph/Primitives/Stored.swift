@@ -25,10 +25,10 @@ public final class Stored<Value: SendableMetatype>: Node, Observable, CustomDebu
   /// but keeping the wrapper noncopyable makes its single owner explicit and lets commit
   /// consume the staged storage before publishing.
   private struct TransactionBuffer<Element>: ~Copyable {
-    var context: ObjectIdentifier
+    var context: GraphTransactionContext
     var value: Element
 
-    init(_ value: consuming Element, context: ObjectIdentifier) {
+    init(_ value: consuming Element, context: GraphTransactionContext) {
       self.context = context
       self.value = value
     }
@@ -75,7 +75,7 @@ public final class Stored<Value: SendableMetatype>: Node, Observable, CustomDebu
   /// to any ancestor because intermediate scopes need not have touched this node.
   private enum TransactionStagingState {
     case unstaged
-    case staged(context: ObjectIdentifier, value: Value)
+    case staged(context: GraphTransactionContext, value: Value)
   }
 
   /// Typed undo state for a savepoint that has written this node.
@@ -84,7 +84,7 @@ public final class Stored<Value: SendableMetatype>: Node, Observable, CustomDebu
   /// undo state to a previously untouched parent; rollback restores it directly,
   /// without invoking assignment observers or graph notifications.
   private struct TransactionSavepoint {
-    let context: ObjectIdentifier
+    let context: GraphTransactionContext
     let precedingState: TransactionStagingState
   }
 
@@ -94,10 +94,11 @@ public final class Stored<Value: SendableMetatype>: Node, Observable, CustomDebu
   /// A typed value detached by rollback or superseded by a savepoint merge.
   ///
   /// Multiple cleanup operations may overlap after their writer slots are released,
-  /// so context identity keeps their node-local values distinct without moving them
-  /// into the type-erased transaction context.
+  /// so retaining each context keeps its node-local values distinct without moving
+  /// them into the type-erased transaction context. Cleanup removes this reference
+  /// before the scope releases its temporary strong participant snapshot.
   private struct TransactionDiscardedValue {
-    let context: ObjectIdentifier
+    let context: GraphTransactionContext
     let value: Value
   }
 
@@ -246,8 +247,7 @@ public final class Stored<Value: SendableMetatype>: Node, Observable, CustomDebu
       oldValue = value
     }
 
-    let context = ObjectIdentifier(transaction)
-    let needsRegistration = transactionBuffer == nil || transactionBuffer!.context != context
+    let needsRegistration = transactionBuffer == nil || transactionBuffer!.context != transaction
     var discardedBuffer = transactionBuffer.take()
 
     if needsRegistration, transaction.parent != nil {
@@ -262,11 +262,11 @@ public final class Stored<Value: SendableMetatype>: Node, Observable, CustomDebu
         precedingState = .unstaged
       }
       transactionSavepoints.append(
-        .init(context: context, precedingState: precedingState)
+        .init(context: transaction, precedingState: precedingState)
       )
     }
 
-    transactionBuffer = .init(newValue, context: context)
+    transactionBuffer = .init(newValue, context: transaction)
     let didSetHandler = self.didSetHandler
     lock.unlock()
 
@@ -366,28 +366,25 @@ public final class Stored<Value: SendableMetatype>: Node, Observable, CustomDebu
     _ transaction: GraphTransactionContext,
     into parent: GraphTransactionContext
   ) {
-    let context = ObjectIdentifier(transaction)
-    let parentContext = ObjectIdentifier(parent)
-
     lock.lock()
-    precondition(transactionBuffer != nil && transactionBuffer!.context == context)
+    precondition(transactionBuffer != nil && transactionBuffer!.context == transaction)
     let savepoint = transactionSavepoints.removeLast()
-    precondition(savepoint.context == context)
+    precondition(savepoint.context == transaction)
 
     // Keep the child's final value as the parent's staged value. Merging is not an
     // assignment and must not repeat onDidSet or publish a graph notification.
-    transactionBuffer!.context = parentContext
+    transactionBuffer!.context = parent
 
     let needsParentRegistration: Bool
     switch savepoint.precedingState {
     case .unstaged:
       needsParentRegistration = true
     case .staged(let precedingContext, let precedingValue):
-      if precedingContext == parentContext {
+      if precedingContext == parent {
         needsParentRegistration = false
         // Retain the superseded parent value until every node has merged. Its deinit
         // must see the whole parent snapshot and must never execute under this lock.
-        transactionDiscardedValues.append(.init(context: context, value: precedingValue))
+        transactionDiscardedValues.append(.init(context: transaction, value: precedingValue))
       } else {
         needsParentRegistration = true
       }
@@ -398,7 +395,7 @@ public final class Stored<Value: SendableMetatype>: Node, Observable, CustomDebu
         // The parent had not written this node. It inherits the child's undo state,
         // including a value staged by an ancestor beyond the immediate parent.
         transactionSavepoints.append(
-          .init(context: parentContext, precedingState: savepoint.precedingState)
+          .init(context: parent, precedingState: savepoint.precedingState)
         )
       } else {
         guard case .unstaged = savepoint.precedingState else {
@@ -557,18 +554,17 @@ public final class Stored<Value: SendableMetatype>: Node, Observable, CustomDebu
       lock.unlock()
       return
     }
-    let context = ObjectIdentifier(transaction)
-    precondition(transactionBuffer.context == context)
+    precondition(transactionBuffer.context == transaction)
     transactionDiscardedValues.append(
       .init(
-        context: context,
+        context: transaction,
         value: transactionBuffer.takeValue()
       )
     )
 
     if transaction.parent != nil {
       let savepoint = transactionSavepoints.removeLast()
-      precondition(savepoint.context == context)
+      precondition(savepoint.context == transaction)
       switch savepoint.precedingState {
       case .unstaged:
         break
@@ -582,12 +578,10 @@ public final class Stored<Value: SendableMetatype>: Node, Observable, CustomDebu
   }
 
   func finishTransactionCleanup(_ transaction: GraphTransactionContext) {
-    let context = ObjectIdentifier(transaction)
-
     lock.lock()
     guard
       let index = transactionDiscardedValues.lastIndex(
-        where: { $0.context == context }
+        where: { $0.context == transaction }
       )
     else {
       lock.unlock()
