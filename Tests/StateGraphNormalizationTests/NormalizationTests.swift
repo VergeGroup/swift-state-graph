@@ -28,7 +28,7 @@ final class User: TypedIdentifiable, Sendable {
   @GraphStored
   var age: Int
   
-  @GraphComputed
+  @GraphComputedNode
   var posts: [Post]
   
   init(
@@ -71,10 +71,10 @@ final class Post: TypedIdentifiable, Hashable, Sendable {
   
   let createdAt: Date = .init()
   
-  @GraphComputed
+  @GraphComputedNode
   var allComments: [Comment]
   
-  @GraphComputed
+  @GraphComputedNode
   var activeComments: [Comment]
   
   init(

@@ -63,7 +63,8 @@ Swift State Graph is a reactive state management library that uses a Directed Ac
 
 2. **Macro System** - Swift macros for cleaner syntax:
    - `@GraphStored`: Property wrapper for stored values
-   - `@GraphComputed`: Property wrapper for computed values
+   - `@GraphComputed`: Macro for cached computed property bodies (Swift 6.4)
+   - `@GraphComputedNode`: Macro for explicitly initialized computed nodes
    - `@GraphIgnored`: Marks properties to be ignored by observation
    - `@GraphView`: Generates view logic for state management
 

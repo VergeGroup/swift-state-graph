@@ -161,7 +161,7 @@ final class Author: TypedIdentifiable, Sendable {
   @GraphStored var name: String
   
   // Computed property for posts by this author
-  @GraphComputed var posts: [Post]
+  @GraphComputedNode var posts: [Post]
   
   init(id: String, name: String, store: NormalizedStore) {
     let typedID = TypedID(id)
@@ -205,7 +205,7 @@ final class Post: TypedIdentifiable, Sendable {
   @GraphStored var tagIds: Set<Tag.TypedID>
   
   // Computed property for related tags
-  @GraphComputed var tags: [Tag]
+  @GraphComputedNode var tags: [Tag]
   
   init(id: String, title: String, store: NormalizedStore) {
     self.typedID = .init(id)
@@ -227,7 +227,7 @@ final class Tag: TypedIdentifiable, Sendable {
   @GraphStored var name: String
   
   // Computed property for posts with this tag
-  @GraphComputed var posts: [Post]
+  @GraphComputedNode var posts: [Post]
   
   init(id: String, name: String, store: NormalizedStore) {
     let typedID = TypedID(id)
@@ -257,9 +257,9 @@ final class User: TypedIdentifiable, Sendable {
   @GraphStored var email: String
   @GraphStored var followerIds: Set<User.TypedID>
   
-  @GraphComputed var posts: [Post]
-  @GraphComputed var followers: [User]
-  @GraphComputed var followerCount: Int
+  @GraphComputedNode var posts: [Post]
+  @GraphComputedNode var followers: [User]
+  @GraphComputedNode var followerCount: Int
   
   init(id: String, name: String, email: String, store: NormalizedStore) {
     let typedID = TypedID(id)
@@ -294,9 +294,9 @@ final class Post: TypedIdentifiable, Sendable {
   
   let authorId: User.TypedID
   
-  @GraphComputed var author: User?
-  @GraphComputed var comments: [Comment]
-  @GraphComputed var commentCount: Int
+  @GraphComputedNode var author: User?
+  @GraphComputedNode var comments: [Comment]
+  @GraphComputedNode var commentCount: Int
   
   init(id: String, title: String, content: String, authorId: User.TypedID, store: NormalizedStore) {
     let typedID = TypedID(id)
@@ -330,8 +330,8 @@ final class Comment: TypedIdentifiable, Sendable {
   let postId: Post.TypedID
   let authorId: User.TypedID
   
-  @GraphComputed var author: User?
-  @GraphComputed var post: Post?
+  @GraphComputedNode var author: User?
+  @GraphComputedNode var post: Post?
   
   init(id: String, text: String, postId: Post.TypedID, authorId: User.TypedID, store: NormalizedStore) {
     self.typedID = .init(id)
@@ -398,8 +398,8 @@ final class FeedViewModel {
   let store: NormalizedStore
   let currentUserId: User.TypedID
   
-  @GraphComputed var feedPosts: [Post]
-  @GraphComputed var trendingPosts: [Post]
+  @GraphComputedNode var feedPosts: [Post]
+  @GraphComputedNode var trendingPosts: [Post]
   
   init(store: NormalizedStore, currentUserId: User.TypedID) {
     self.store = store
@@ -434,8 +434,8 @@ Keep UI state synchronized with normalized data:
 final class PostDetailViewModel {
   @GraphStored var selectedPostId: Post.TypedID?
   
-  @GraphComputed var selectedPost: Post?
-  @GraphComputed var relatedPosts: [Post]
+  @GraphComputedNode var selectedPost: Post?
+  @GraphComputedNode var relatedPosts: [Post]
   
   init(store: NormalizedStore) {
     self.$selectedPost = .init { [$selectedPostId] _ in

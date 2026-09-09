@@ -19,6 +19,8 @@ Unlike traditional state management approaches, Swift State Graph automatically 
 
 ### Quick Example
 
+Use Swift 6.4 to write graph computations as property bodies:
+
 ```swift
 import StateGraph
 
@@ -27,12 +29,8 @@ final class CounterViewModel {
   var count: Int = 0
 
   @GraphComputed
-  var isEven: Bool
-
-  init() {
-    self.$isEven = .init { [$count] _ in
-      $count.wrappedValue % 2 == 0
-    }
+  var isEven: Bool {
+    count % 2 == 0
   }
 
   func increment() {
@@ -56,6 +54,7 @@ final class CounterViewModel {
 - ``Node``
 - ``GraphStored``
 - ``GraphComputed``
+- ``GraphComputedNode``
 - ``withGraphTransaction(_:_:_:_:)``
 
 ### Persistence and Storage

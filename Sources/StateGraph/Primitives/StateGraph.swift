@@ -615,10 +615,10 @@ extension Computed {
   
 }
 
-/// Lazily stores the computed node synthesized for an instance `@GraphComputedBody` property.
+/// Lazily stores the computed node synthesized for an instance `@GraphComputed` property.
 ///
 /// This type is public so macro expansions in client modules can reference it. Create graph
-/// computed properties with `@GraphComputedBody` instead of using this type directly.
+/// computed properties with `@GraphComputed` instead of using this type directly.
 public struct GraphComputedBacking<
   Owner: AnyObject,
   Value: SendableMetatype
@@ -658,6 +658,7 @@ public struct GraphComputedBacking<
   }
 }
 
+/// Captures an instance without making its generated node retain the owner.
 private struct GraphComputedWeakOwner<Owner: AnyObject>: ~Copyable, @unchecked Sendable {
 
   weak var value: Owner?
@@ -667,10 +668,10 @@ private struct GraphComputedWeakOwner<Owner: AnyObject>: ~Copyable, @unchecked S
   }
 }
 
-/// Lazily stores the computed node synthesized for a global or static `@GraphComputedBody` property.
+/// Lazily stores the computed node synthesized for a global or static `@GraphComputed` property.
 ///
 /// This type is public so macro expansions in client modules can reference it. Create graph
-/// computed properties with `@GraphComputedBody` instead of using this type directly.
+/// computed properties with `@GraphComputed` instead of using this type directly.
 public struct GraphComputedGlobalBacking<Value: SendableMetatype>: ~Copyable, @unchecked Sendable {
 
   private let name: StaticString

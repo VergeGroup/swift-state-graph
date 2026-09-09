@@ -4,22 +4,20 @@ A graph-based reactive state management library for Swift.
 For managing external(escaping) state, inspired by the concepts of React, Jotai and Recoil.
 
 [![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/vergegroup/swift-state-graph)
-![Swift 6.0+](https://img.shields.io/badge/Swift-6.0+-orange.svg)
+![Swift 6.3+](https://img.shields.io/badge/Swift-6.3+-orange.svg)
 ![iOS 17+](https://img.shields.io/badge/iOS-17+-blue.svg)
 
 ## Quick Start
+
+The computed-property syntax below requires Swift 6.4.
 
 ```swift
 import StateGraph
 
 final class Counter {
   @GraphStored var count: Int = 0
-  @GraphComputed var isEven: Bool
-
-  init() {
-    $isEven = .init { [$count] _ in
-      $count.wrappedValue % 2 == 0
-    }
+  @GraphComputed var isEven: Bool {
+    count % 2 == 0
   }
 }
 
@@ -38,12 +36,8 @@ Computed properties automatically track their dependencies and update when sourc
 ```swift
 @GraphStored var firstName: String = "John"
 @GraphStored var lastName: String = "Doe"
-@GraphComputed var fullName: String
-
-init() {
-  $fullName = .init { [$firstName, $lastName] _ in
-    "\($firstName.wrappedValue) \($lastName.wrappedValue)"
-  }
+@GraphComputed var fullName: String {
+  "\(firstName) \(lastName)"
 }
 // Change firstName → fullName updates automatically
 ```
@@ -85,9 +79,8 @@ Migrate from `@Observable` and gain automatic computed property updates:
 // After: Automatic reactivity
 final class UserViewModel {
   @GraphStored var name: String = ""
-  @GraphComputed var isValid: Bool
-  init() {
-    $isValid = .init { [$name] _ in !$name.wrappedValue.isEmpty }
+  @GraphComputed var isValid: Bool {
+    !name.isEmpty
   }
 }
 ```
@@ -141,9 +134,34 @@ Read-only values derived from other nodes. They:
 - Cache results until invalidated
 
 ```swift
-@GraphComputed var doubled: Int
-$doubled = .init { [$count] _ in $count.wrappedValue * 2 }
+@GraphComputed var doubled: Int {
+  count * 2
+}
 ```
+
+`$doubled` exposes the cached `Computed<Int>` node. Class instance, global,
+`nonisolated` global, and static properties are supported. An instance node uses
+its owner's property body, so keep that owner alive while using the projected node.
+
+### Explicit Nodes (`@GraphComputedNode`)
+
+Use `@GraphComputedNode` when you initialize the node yourself, for example to
+choose a capture list or use `Computed.Context`. This form also works with Swift 6.3.
+
+```swift
+final class Counter {
+  @GraphStored var count: Int = 0
+  @GraphComputedNode var doubled: Int
+
+  init() {
+    $doubled = .init { [count = $count] _ in count.wrappedValue * 2 }
+  }
+}
+```
+
+**Migration:** Existing body-less `@GraphComputed` declarations become
+`@GraphComputedNode`; their `$value` initialization remains the same. Alternatively,
+move the calculation into a property body and use the new `@GraphComputed` syntax.
 
 ### Reactive Tracking
 
@@ -209,10 +227,8 @@ Use `GraphObject` protocol for environment propagation:
 ```swift
 final class AppState: GraphObject {
   @GraphStored var user: User?
-  @GraphComputed var isLoggedIn: Bool
-
-  init() {
-    $isLoggedIn = .init { [$user] _ in $user.wrappedValue != nil }
+  @GraphComputed var isLoggedIn: Bool {
+    user != nil
   }
 }
 

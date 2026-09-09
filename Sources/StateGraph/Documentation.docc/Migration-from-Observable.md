@@ -52,7 +52,7 @@ final class UserViewModel {
   @GraphStored
   var email: String = ""
   
-  @GraphComputed
+  @GraphComputedNode
   var isValid: Bool
   
   init() {
@@ -199,13 +199,13 @@ final class ShoppingCartViewModel {
   @GraphStored
   var taxRate: Double = 0.08
   
-  @GraphComputed
+  @GraphComputedNode
   var subtotal: Double
   
-  @GraphComputed
+  @GraphComputedNode
   var tax: Double
   
-  @GraphComputed
+  @GraphComputedNode
   var total: Double
   
   init() {
@@ -337,7 +337,7 @@ final class ViewModel {
   @GraphStored
   var count: Int = 0
   
-  @GraphComputed
+  @GraphComputedNode
   var isEven: Bool
   
   init() {
@@ -391,7 +391,7 @@ TextField("Text", text: viewModel.$property.binding)
 Use this checklist to ensure complete migration:
 
 - [ ] **Replace @Observable**: Convert classes to use `@GraphStored` properties
-- [ ] **Convert computed properties**: Replace computed properties with `@GraphComputed`
+- [ ] **Convert computed properties**: Replace computed properties with `@GraphComputedNode`
 - [ ] **Remove manual updates**: Delete manual calculation and update methods
 - [ ] **Update observation logic**: Replace `withObservationTracking` with `withGraphTracking`
 - [ ] **Simplify SwiftUI bindings**: Use `.binding` property for form controls
@@ -464,8 +464,8 @@ class ViewModel {
   @GraphStored var b: Int = 0
   @GraphStored var c: Int = 0
   
-  @GraphComputed var sumAB: Int
-  @GraphComputed var sumBC: Int
+  @GraphComputedNode var sumAB: Int
+  @GraphComputedNode var sumBC: Int
   
   init() {
     self.$sumAB = .init { [$a, $b] _ in $a.wrappedValue + $b.wrappedValue }

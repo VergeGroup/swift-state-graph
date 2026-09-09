@@ -8,7 +8,7 @@ Swift State Graph integrates naturally with SwiftUI, providing automatic UI upda
 
 ## Basic Integration
 
-The simplest way to use Swift State Graph with SwiftUI is to create a view model with `@GraphStored` and `@GraphComputed` properties:
+The simplest way to use Swift State Graph with SwiftUI is to create a view model with `@GraphStored` and `@GraphComputedNode` properties:
 
 ```swift
 import SwiftUI
@@ -18,10 +18,10 @@ final class CounterViewModel {
   @GraphStored
   var count: Int = 0
 
-  @GraphComputed
+  @GraphComputedNode
   var isEven: Bool
 
-  @GraphComputed
+  @GraphComputedNode
   var displayText: String
 
   init() {
@@ -74,7 +74,7 @@ final class FormViewModel {
   @GraphStored
   var age: Double = 18
 
-  @GraphComputed
+  @GraphComputedNode
   var isValid: Bool
 
   init() {
@@ -193,10 +193,10 @@ final class BookLibraryViewModel {
   @GraphStored
   var searchText: String = ""
 
-  @GraphComputed
+  @GraphComputedNode
   var filteredBooks: [Book]
 
-  @GraphComputed
+  @GraphComputedNode
   var selectedBook: Book?
 
   init() {
@@ -255,13 +255,13 @@ final class TodoListViewModel {
   @GraphStored
   var filter: TodoFilter = .all
 
-  @GraphComputed
+  @GraphComputedNode
   var filteredTodos: [Todo]
 
-  @GraphComputed
+  @GraphComputedNode
   var completedCount: Int
 
-  @GraphComputed
+  @GraphComputedNode
   var remainingCount: Int
 
   init() {
@@ -441,10 +441,10 @@ final class ShoppingCartViewModel {
   @GraphStored
   var items: [CartItem] = []
 
-  @GraphComputed
+  @GraphComputedNode
   var canCheckout: Bool
 
-  @GraphComputed
+  @GraphComputedNode
   var checkoutButtonTitle: String
 
   init() {
@@ -524,7 +524,7 @@ final class DataViewModel {
   @GraphStored
   var error: Error? = nil
 
-  @GraphComputed
+  @GraphComputedNode
   var viewState: ViewState
 
   init() {

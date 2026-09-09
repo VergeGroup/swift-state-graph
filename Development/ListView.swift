@@ -51,7 +51,7 @@
 //  @GraphStored
 //  var author: AuthorEntity
 //  
-//  @GraphComputed
+//  @GraphComputedNode
 //  var tags: [TagEntity] = []
 //
 //  init(

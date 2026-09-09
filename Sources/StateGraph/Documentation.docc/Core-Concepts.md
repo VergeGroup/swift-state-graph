@@ -60,7 +60,7 @@ final class AppSettings {
   @GraphUserDefault("userName")
   var userName: String = ""
 
-  @GraphComputed
+  @GraphComputedNode
   var welcomeMessage: String
 
   init() {
@@ -190,7 +190,7 @@ print(fullName.wrappedValue) // "Jane Doe"
 
 ### Using the @GraphComputed Macro
 
-For properties in classes, use the `@GraphComputed` macro:
+With Swift 6.4, use `@GraphComputed` on a synchronous, read-only property body:
 
 ```swift
 final class PersonViewModel {
@@ -201,26 +201,44 @@ final class PersonViewModel {
   var lastName: String = ""
   
   @GraphComputed
-  var fullName: String
+  var fullName: String {
+    "\(firstName) \(lastName)"
+  }
   
   @GraphComputed
-  var initials: String
-  
+  var initials: String {
+    let first = firstName.first?.uppercased() ?? ""
+    let last = lastName.first?.uppercased() ?? ""
+    return "\(first)\(last)"
+  }
+}
+```
+
+The macro creates a node on first access and exposes it through `$fullName` or
+`$initials`. It supports class instance, global, and static properties. Instance
+nodes refer weakly to their owner; the owner must remain alive when you evaluate them.
+
+### Initializing a Node Explicitly
+
+Use `@GraphComputedNode` when you need an explicit capture list, computation context,
+or a projected node that can outlive its owner. This form also works with Swift 6.3:
+
+```swift
+final class PersonViewModel {
+  @GraphStored var firstName: String = ""
+  @GraphStored var lastName: String = ""
+  @GraphComputedNode var fullName: String
+
   init() {
-    // Define how fullName is computed
-    self.$fullName = .init { [$firstName, $lastName] _ in
-      "\($firstName.wrappedValue) \($lastName.wrappedValue)"
-    }
-    
-    // Define how initials is computed
-    self.$initials = .init { [$firstName, $lastName] _ in
-      let first = $firstName.wrappedValue.first?.uppercased() ?? ""
-      let last = $lastName.wrappedValue.first?.uppercased() ?? ""
-      return "\(first)\(last)"
+    $fullName = .init { [firstName = $firstName, lastName = $lastName] _ in
+      "\(firstName.wrappedValue) \(lastName.wrappedValue)"
     }
   }
 }
 ```
+
+Existing body-less `@GraphComputed` declarations must be renamed to
+`@GraphComputedNode`, or migrated to the property-body form.
 
 ### Characteristics of Computed Nodes
 
@@ -242,17 +260,14 @@ The power of Swift State Graph lies in its automatic dependency tracking system:
 
 ### Dependency Declaration
 
-In computed properties, you should capture dependencies in the closure's capture list:
+Dependencies are registered when a computation reads graph values, including globals.
+The `@GraphComputed` body can read properties directly. When initializing an explicit
+node, capturing nodes instead of `self` allows the computation to outlive its owner:
 
 ```swift
-// ✅ Correct: Dependencies explicitly captured
+// The computation retains the dependency nodes.
 self.$computed = .init { [$dependency1, $dependency2] _ in
   $dependency1.wrappedValue + $dependency2.wrappedValue
-}
-
-// ❌ Incorrect: Dependencies not captured (may not be tracked)
-self.$computed = .init { _ in
-  dependency1 + dependency2  // Global access - not tracked
 }
 ```
 
@@ -268,13 +283,13 @@ final class ShoppingCartViewModel {
   @GraphStored
   var taxRate: Double = 0.08
   
-  @GraphComputed
+  @GraphComputedNode
   var subtotal: Double
   
-  @GraphComputed
+  @GraphComputedNode
   var tax: Double
   
-  @GraphComputed
+  @GraphComputedNode
   var total: Double
   
   init() {

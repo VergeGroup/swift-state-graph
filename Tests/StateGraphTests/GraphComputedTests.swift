@@ -1,14 +1,16 @@
-#if compiler(>=6.4) && SSG_ENABLE_COMPUTED_BODY_TESTS
+#if compiler(>=6.4)
 import Testing
 import StateGraph
 
 @Suite
-struct ComputedBodyMacroTests {
+struct GraphComputedTests {
 
   @Test
   func computedBodyReadsThroughComputedNode() {
     let model = ComputedBodyModel()
 
+    #expect(model.doubledComputeCount == 0)
+    #expect(model.$doubled === model.$doubled)
     #expect(model.doubledComputeCount == 0)
 
     #expect(model.doubled == 2)
@@ -95,6 +97,17 @@ struct ComputedBodyMacroTests {
     #expect(StaticComputedBodyModel.doubled == 6)
     #expect(StaticComputedBodyModel.doubledComputeCount.withLock { $0 } == 2)
   }
+
+  @Test
+  func nestedModelUsesItsOwnTypeAndBothMacroForms() {
+    let model = ComputedNamespace.Model()
+
+    #expect(model.total == 3)
+    #expect(model.$total === model.$total)
+    model.count = 4
+    #expect(model.doubled == 8)
+    #expect(model.total == 12)
+  }
 }
 
 private let topLevelComputedBodyComputeCount = OSAllocatedUnfairLock<Int>(initialState: 0)
@@ -102,7 +115,7 @@ private let topLevelComputedBodyComputeCount = OSAllocatedUnfairLock<Int>(initia
 @GraphStored
 private var topLevelComputedBodyCount: Int = 1
 
-@GraphComputedBody
+@GraphComputed
 private var topLevelComputedBodyDoubled: Int {
   topLevelComputedBodyComputeCount.withLock { $0 += 1 }
   return topLevelComputedBodyCount * 2
@@ -117,7 +130,7 @@ private let nonisolatedTopLevelComputedBodyComputeCount = OSAllocatedUnfairLock<
 @GraphStored
 nonisolated private var nonisolatedTopLevelComputedBodyCount: Int = 1
 
-@GraphComputedBody
+@GraphComputed
 nonisolated private var nonisolatedTopLevelComputedBodyDoubled: Int {
   nonisolatedTopLevelComputedBodyComputeCount.withLock { $0 += 1 }
   return nonisolatedTopLevelComputedBodyCount * 2
@@ -127,6 +140,7 @@ private var nonisolatedTopLevelComputedBodyDoubledComputeCount: Int {
   nonisolatedTopLevelComputedBodyComputeCount.withLock { $0 }
 }
 
+/// Counts evaluations independently of the tracked source value.
 private final class ComputedBodyModel {
 
   var doubledComputeCount: Int = 0
@@ -134,13 +148,14 @@ private final class ComputedBodyModel {
   @GraphStored
   var count: Int = 1
 
-  @GraphComputedBody
+  @GraphComputed
   var doubled: Int {
     doubledComputeCount += 1
     return count * 2
   }
 }
 
+/// Exercises lazy node storage on a namespace without an instance owner.
 private enum StaticComputedBodyModel {
 
   static let doubledComputeCount = OSAllocatedUnfairLock<Int>(initialState: 0)
@@ -148,10 +163,26 @@ private enum StaticComputedBodyModel {
   @GraphStored
   static var count: Int = 1
 
-  @GraphComputedBody
+  @GraphComputed
   static var doubled: Int {
     doubledComputeCount.withLock { $0 += 1 }
     return count * 2
+  }
+}
+
+/// Ensures macro expansion resolves the nearest owner when types are nested.
+private enum ComputedNamespace {
+  final class Model {
+    @GraphStored var count: Int = 1
+    @GraphComputedNode var doubled: Int
+
+    @GraphComputed var total: Int {
+      count + doubled
+    }
+
+    init() {
+      $doubled = .init { [count = $count] _ in count.wrappedValue * 2 }
+    }
   }
 }
 #endif

@@ -54,7 +54,7 @@ final class Settings {
   @GraphUserDefault("theme")
   var theme: String = "light"
 
-  @GraphComputed
+  @GraphComputedNode
   var isDarkMode: Bool
 
   init() {

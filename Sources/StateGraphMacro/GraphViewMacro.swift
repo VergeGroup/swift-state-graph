@@ -35,6 +35,7 @@ extension GraphViewMacro: MemberAttributeMacro {
       [
         "@GraphStored",
         "@GraphComputed",
+        "@GraphComputedNode",
         "@GraphIgnored",
       ]
     )

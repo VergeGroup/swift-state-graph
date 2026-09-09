@@ -18,10 +18,10 @@ final class CounterViewModel {
   @GraphStored
   var count: Int = 0
 
-  @GraphComputed
+  @GraphComputedNode
   var isEven: Bool
 
-  @GraphComputed
+  @GraphComputedNode
   var displayText: String
 
   init() {
@@ -105,13 +105,13 @@ final class TodoListViewModel {
   @GraphStored
   var filter: TodoFilter = .all
 
-  @GraphComputed
+  @GraphComputedNode
   var filteredTodos: [Todo]
 
-  @GraphComputed
+  @GraphComputedNode
   var completedCount: Int
 
-  @GraphComputed
+  @GraphComputedNode
   var remainingCount: Int
 
   init() {
@@ -260,10 +260,10 @@ final class PhotoGalleryViewModel {
   @GraphStored
   var selectedCategory: PhotoCategory = .all
 
-  @GraphComputed
+  @GraphComputedNode
   var filteredPhotos: [Photo]
 
-  @GraphComputed
+  @GraphComputedNode
   var categoryCount: Int
 
   init() {
@@ -399,12 +399,12 @@ final class RegistrationFormViewModel {
   @GraphStored var password: String = ""
   @GraphStored var confirmPassword: String = ""
 
-  @GraphComputed var isFirstNameValid: Bool
-  @GraphComputed var isLastNameValid: Bool
-  @GraphComputed var isEmailValid: Bool
-  @GraphComputed var isPasswordValid: Bool
-  @GraphComputed var isConfirmPasswordValid: Bool
-  @GraphComputed var isFormValid: Bool
+  @GraphComputedNode var isFirstNameValid: Bool
+  @GraphComputedNode var isLastNameValid: Bool
+  @GraphComputedNode var isEmailValid: Bool
+  @GraphComputedNode var isPasswordValid: Bool
+  @GraphComputedNode var isConfirmPasswordValid: Bool
+  @GraphComputedNode var isFormValid: Bool
 
   init() {
     self.$isFirstNameValid = .init { [$firstName] _ in
@@ -536,7 +536,7 @@ final class DataViewModel {
   @GraphStored var data: [Item]? = nil
   @GraphStored var error: Error? = nil
 
-  @GraphComputed var viewState: ViewState
+  @GraphComputedNode var viewState: ViewState
 
   init() {
     self.$viewState = .init { [$isLoading, $data, $error] _ in

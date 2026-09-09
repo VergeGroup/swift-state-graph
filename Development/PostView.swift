@@ -29,7 +29,7 @@ final class User: TypedIdentifiable, Sendable {
   @GraphStored
   var age: Int
   
-  @GraphComputed
+  @GraphComputedNode
   var posts: [Post]
   
   init(
@@ -72,10 +72,10 @@ final class Post: TypedIdentifiable, Hashable, Sendable {
   
   let createdAt: Date = .init()
   
-  @GraphComputed
+  @GraphComputedNode
   var allComments: [Comment]
   
-  @GraphComputed
+  @GraphComputedNode
   var activeComments: [Comment]
   
   init(
@@ -258,10 +258,10 @@ final class PostListViewModel: ObservableObject {
 
   let store: NormalizedStore
   
-  @GraphComputed
+  @GraphComputedNode
   var posts: [Post]     
   
-  @GraphComputed
+  @GraphComputedNode
   var postsCount: Int
   
   let mockServer: MockServerService

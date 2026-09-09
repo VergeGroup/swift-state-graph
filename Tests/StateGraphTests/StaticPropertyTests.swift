@@ -58,7 +58,7 @@ struct StaticPropertyTests {
     }
   }
   
-  // TODO: @GraphComputed doesn't support static properties yet
+  // TODO: @GraphComputedNode doesn't support static properties yet
   // This test is commented out until that functionality is added
   /*
   @Test func static_property_computed_dependency() {
@@ -66,7 +66,7 @@ struct StaticPropertyTests {
       @GraphStored
       static var baseValue: Int = 10
       
-      @GraphComputed
+      @GraphComputedNode
       static var doubledValue: Int
       
       static func initialize() {

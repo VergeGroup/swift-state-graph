@@ -29,6 +29,9 @@ Then add the dependency to your target:
 
 Let's create a simple counter that automatically tracks whether the count is even or odd:
 
+`@GraphComputed` requires Swift 6.4. For explicit node initialization on Swift 6.3,
+use `@GraphComputedNode` as described in <doc:Core-Concepts>.
+
 ```swift
 import StateGraph
 
@@ -37,23 +40,14 @@ final class CounterViewModel {
   var count: Int = 0
 
   @GraphComputed
-  var isEven: Bool
+  var isEven: Bool {
+    count % 2 == 0
+  }
 
   @GraphComputed
-  var displayText: String
-
-  init() {
-    // Define how isEven is computed
-    self.$isEven = .init { [$count] _ in
-      $count.wrappedValue % 2 == 0
-    }
-
-    // Define how displayText is computed
-    self.$displayText = .init { [$count, $isEven] _ in
-      let number = $count.wrappedValue
-      let parity = $isEven.wrappedValue ? "even" : "odd"
-      return "Count: \(number) (\(parity))"
-    }
+  var displayText: String {
+    let parity = if isEven { "even" } else { "odd" }
+    return "Count: \(count) (\(parity))"
   }
 
   func increment() {
@@ -125,12 +119,8 @@ final class SettingsViewModel {
   var theme: String = "light"
 
   @GraphComputed
-  var isDarkMode: Bool
-
-  init() {
-    $isDarkMode = .init { [$theme] _ in
-      $theme.wrappedValue == "dark"
-    }
+  var isDarkMode: Bool {
+    theme == "dark"
   }
 }
 ```
