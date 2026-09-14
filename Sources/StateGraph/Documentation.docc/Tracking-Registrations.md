@@ -5,7 +5,7 @@ Understand how one tracking pass records node reads and turns them into a one-sh
 ## Overview
 
 Public APIs such as ``withGraphTrackingGroup(_:isolation:)`` and
-``withGraphTrackingMap(_:filter:onChange:isolation:)`` continuously re-run work when the
+``withGraphTrackingMap(_:filter:initial:onChange:isolation:)`` continuously re-run work when the
 State Graph nodes read by that work change. A ``TrackingRegistration`` is the internal record
 that connects one execution of that work to the nodes it read.
 
@@ -23,6 +23,16 @@ let subscription = withGraphTracking {
 In this example, the registration belongs to one execution of the group handler. The returned
 subscription owns the overall observation lifetime; the registration only describes the node
 reads made by that particular execution.
+
+## Initial Map Delivery
+
+`withGraphTrackingMap` forwards its initial filter output to `onChange` by default. Pass
+`initial: false` when setup owns the current value and the handler should react only to later
+changes. The map still evaluates its projection and filter on that first pass, so it records the
+same dependencies and gives stateful filters their initial baseline.
+
+A map recreated by a parent tracking handler is a new subscription, so its first pass is initial
+again.
 
 ## Responsibilities
 
@@ -124,5 +134,5 @@ This preserves the following implementation invariant:
 
 - ``withGraphTracking(_:)``
 - ``withGraphTrackingGroup(_:isolation:)``
-- ``withGraphTrackingMap(_:filter:onChange:isolation:)``
+- ``withGraphTrackingMap(_:filter:initial:onChange:isolation:)``
 - ``StateGraphDiagnostics/isSelfInvalidationWarningEnabled``

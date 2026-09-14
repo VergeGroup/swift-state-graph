@@ -305,4 +305,131 @@ struct GraphTrackingMapTests {
     #expect(receivedValues == [10, 20])
   }
 
+  @Test
+  @MainActor
+  func skipsInitialCallback() async {
+    let value = Stored(wrappedValue: 0)
+    let didObserveChange = TestSignal()
+    var receivedValues: [Int] = []
+
+    let cancellable = withGraphTracking {
+      withGraphTrackingMap(
+        { value.wrappedValue },
+        initial: false
+      ) { value in
+        receivedValues.append(value)
+        didObserveChange.signal()
+      }
+    }
+    defer { cancellable.cancel() }
+
+    #expect(receivedValues.isEmpty)
+
+    value.wrappedValue = 1
+
+    #expect(await didObserveChange.wait(for: .seconds(5)))
+    #expect(receivedValues == [1])
+  }
+
+  @Test
+  @MainActor
+  func skippingInitialCallbackSeedsCustomFilter() async {
+    struct ThresholdFilter: Filter {
+      let didProcessSmallChange: TestSignal
+      private var lastValue: Int?
+
+      mutating func send(value: Int) -> Int? {
+        if value == 3 {
+          didProcessSmallChange.signal()
+        }
+
+        guard let lastValue else {
+          self.lastValue = value
+          return value
+        }
+
+        guard abs(value - lastValue) >= 5 else {
+          return nil
+        }
+
+        self.lastValue = value
+        return value
+      }
+    }
+
+    let value = Stored(wrappedValue: 0)
+    let didProcessSmallChange = TestSignal()
+    let didReceiveSignificantChange = TestSignal()
+    var receivedValues: [Int] = []
+
+    let cancellable = withGraphTracking {
+      withGraphTrackingMap(
+        { value.wrappedValue },
+        filter: ThresholdFilter(didProcessSmallChange: didProcessSmallChange),
+        initial: false
+      ) { value in
+        receivedValues.append(value)
+
+        if value == 6 {
+          didReceiveSignificantChange.signal()
+        }
+      }
+    }
+    defer { cancellable.cancel() }
+
+    value.wrappedValue = 3
+
+    #expect(await didProcessSmallChange.wait(for: .seconds(5)))
+    #expect(receivedValues.isEmpty)
+
+    value.wrappedValue = 6
+
+    #expect(await didReceiveSignificantChange.wait(for: .seconds(5)))
+    #expect(receivedValues == [6])
+  }
+
+  @Test
+  @MainActor
+  func dependencyMapsCanSkipInitialCallback() async {
+    final class ViewModel {
+      let value = Stored(wrappedValue: 0)
+    }
+
+    let viewModel = ViewModel()
+    let didObserveChanges = TestCountdown(count: 2)
+    var automaticallyFilteredValues: [Int] = []
+    var customFilteredValues: [Int] = []
+
+    let cancellable = withGraphTracking {
+      withGraphTrackingMap(
+        from: viewModel,
+        map: { $0.value.wrappedValue },
+        initial: false
+      ) { value in
+        automaticallyFilteredValues.append(value)
+        didObserveChanges.signal()
+      }
+
+      withGraphTrackingMap(
+        from: viewModel,
+        map: { $0.value.wrappedValue },
+        filter: PassthroughFilter(),
+        initial: false
+      ) { value in
+        customFilteredValues.append(value)
+        didObserveChanges.signal()
+      }
+    }
+    defer { cancellable.cancel() }
+
+    #expect(automaticallyFilteredValues.isEmpty)
+    #expect(customFilteredValues.isEmpty)
+
+    viewModel.value.wrappedValue = 1
+
+    #expect(await didObserveChanges.wait(for: .seconds(5)))
+    #expect(automaticallyFilteredValues == [1])
+    #expect(customFilteredValues == [1])
+  }
+
 }

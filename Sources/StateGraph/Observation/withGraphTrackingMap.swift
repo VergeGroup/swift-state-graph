@@ -12,6 +12,8 @@
  - Only nodes accessed during `applier` execution are tracked
  - The projected value is passed through a `DistinctFilter` (for `Equatable` types)
  - `onChange` is only called when the filtered value passes through (i.e., when it's different)
+ - The initial filter output is delivered by default; set `initial` to `false` to establish
+   tracking and filter state without delivering it
 
  - Important: A synchronous mutation that invalidates an accessed node does not
    re-execute this map for its own mutation. Peer registrations are notified, but its
@@ -47,6 +49,8 @@
  - Conditional dependencies: Dynamically track different nodes based on conditions
 
  - Parameter applier: Closure that computes the projected value by accessing nodes
+ - Parameter initial: Whether to forward the initial filter output to `onChange`. When `false`,
+   `applier` and the filter still run to establish tracked dependencies and filter state.
  - Parameter onChange: Handler called with the filtered projected value
  - Parameter isolation: Actor isolation context for execution
 
@@ -54,10 +58,17 @@
  */
 public func withGraphTrackingMap<Projection>(
   _ applier: @escaping () -> Projection,
+  initial: Bool = true,
   onChange: @escaping (Projection) -> Void,
   isolation: isolated (any Actor)? = #isolation
 ) where Projection : Equatable {
-  withGraphTrackingMap(applier, filter: DistinctFilter(), onChange: onChange)
+  withGraphTrackingMap(
+    applier,
+    filter: DistinctFilter(),
+    initial: initial,
+    onChange: onChange,
+    isolation: isolation
+  )
 }
 
 /**
@@ -122,12 +133,15 @@ public func withGraphTrackingMap<Projection>(
 
  - Parameter applier: Closure that computes the projected value by accessing nodes
  - Parameter filter: Custom filter to control when onChange is triggered
+ - Parameter initial: Whether to forward the initial filter output to `onChange`. When `false`,
+   `applier` and `filter` still run to establish tracked dependencies and filter state.
  - Parameter onChange: Handler called with the filtered projected value
  - Parameter isolation: Actor isolation context for execution
  */
 public func withGraphTrackingMap<Projection>(
   _ applier: @escaping () -> Projection,
   filter: consuming some Filter<Projection>,
+  initial: Bool = true,
   onChange: @escaping (Projection) -> Void,
   isolation: isolated (any Actor)? = #isolation
 ) {
@@ -142,10 +156,21 @@ public func withGraphTrackingMap<Projection>(
   }
 
   var filter = filter
+  var isFirstPass = true
 
   let trackingHandler = GraphTrackingHandler {
+    let isInitialPass = isFirstPass
+    isFirstPass = false
+
     let result = applier()
     let filtered = filter.send(value: result)
+
+    // The initial projection establishes dependencies and a stateful filter's
+    // baseline even when initial delivery is disabled.
+    if isInitialPass && initial == false {
+      return
+    }
+
     if let filtered {
       onChange(filtered)
     }
@@ -211,6 +236,8 @@ public func withGraphTrackingMap<Projection>(
 
  - Parameter from: The dependency object to observe (held weakly)
  - Parameter map: Closure that projects a value from the dependency
+ - Parameter initial: Whether to forward the initial filter output to `onChange`. When `false`,
+   `map` and the filter still run to establish tracked dependencies and filter state.
  - Parameter onChange: Handler called when the projected value changes
  - Parameter isolation: Actor isolation context for execution
 
@@ -219,6 +246,7 @@ public func withGraphTrackingMap<Projection>(
 public func withGraphTrackingMap<Dependency: AnyObject, Projection>(
   from: Dependency,
   map: @escaping (Dependency) -> Projection,
+  initial: Bool = true,
   onChange: @escaping (Projection) -> Void,
   isolation: isolated (any Actor)? = #isolation
 ) where Projection: Equatable {
@@ -226,6 +254,7 @@ public func withGraphTrackingMap<Dependency: AnyObject, Projection>(
     from: from,
     map: map,
     filter: DistinctFilter(),
+    initial: initial,
     onChange: onChange,
     isolation: isolation
   )
@@ -291,6 +320,8 @@ public func withGraphTrackingMap<Dependency: AnyObject, Projection>(
  - Parameter from: The dependency object to observe (held weakly)
  - Parameter map: Closure that projects a value from the dependency
  - Parameter filter: Custom filter to control when onChange is triggered
+ - Parameter initial: Whether to forward the initial filter output to `onChange`. When `false`,
+   `map` and `filter` still run to establish tracked dependencies and filter state.
  - Parameter onChange: Handler called with the filtered projected value
  - Parameter isolation: Actor isolation context for execution
 
@@ -300,6 +331,7 @@ public func withGraphTrackingMap<Dependency: AnyObject, Projection>(
   from: Dependency,
   map: @escaping (Dependency) -> Projection,
   filter: consuming some Filter<Projection>,
+  initial: Bool = true,
   onChange: @escaping (Projection) -> Void,
   isolation: isolated (any Actor)? = #isolation
 ) {
@@ -316,13 +348,25 @@ public func withGraphTrackingMap<Dependency: AnyObject, Projection>(
   weak let weakDependency = from
 
   var filter = filter
+  var isFirstPass = true
 
   let trackingHandler = GraphTrackingHandler {
     guard let dependency = weakDependency else {
       return
     }
+
+    let isInitialPass = isFirstPass
+    isFirstPass = false
+
     let result = map(dependency)
     let filtered = filter.send(value: result)
+
+    // The initial projection establishes dependencies and a stateful filter's
+    // baseline even when initial delivery is disabled.
+    if isInitialPass && initial == false {
+      return
+    }
+
     if let filtered {
       onChange(filtered)
     }

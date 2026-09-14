@@ -12,7 +12,7 @@ extension View {
   /// external UI. The tracking scope starts when the view appears and is cancelled when the
   /// view disappears.
   ///
-  /// The closure can call ``withGraphTrackingGroup(_:)`` and ``withGraphTrackingMap(_:onChange:isolation:)``
+  /// The closure can call ``withGraphTrackingGroup(_:)`` and ``withGraphTrackingMap(_:initial:onChange:isolation:)``
   /// just like a manually retained ``withGraphTracking(_:)`` subscription.
   ///
   /// ```swift
