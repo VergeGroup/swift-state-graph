@@ -135,7 +135,7 @@ public final class Stored<Value: SendableMetatype>: Node, Observable, CustomDebu
 
   /// Obtained once so Observation calls do not instantiate a key path on every read.
   @available(macOS 14.0, iOS 17.0, watchOS 10.0, tvOS 17.0, *)
-  private let observationKeyPath: KeyPath<NodeObservationRoot<Stored<Value>>, Void> & Sendable =
+  let observationKeyPath: KeyPath<NodeObservationRoot<Stored<Value>>, Void> & Sendable =
     NodeObservationKeyPaths.stored(Value.self)
 #endif
 

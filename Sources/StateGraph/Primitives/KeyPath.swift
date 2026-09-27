@@ -17,15 +17,17 @@ struct NodeObservationRoot<Owner: AnyObject>: Observable, Sendable {
 /// Nodes obtain the key path once when they are created and pass the stored value to
 /// every Observation call, because those calls sit on the node read path. That code is
 /// not specialized for client value types, and the runtime instantiates a key path
-/// literal with generic arguments on every evaluation: about 600 ns, far more than the
+/// literal with generic arguments on every evaluation, which costs far more than the
 /// registrar call itself.
 ///
-/// Evaluating the literal in each node initializer instead would nearly triple node
-/// creation (about 360 ns to 1,000 ns for `Stored<Int>`), and models create many nodes
-/// at once. A process-wide dictionary behind a lock costs about 10 ns per node on one
-/// thread, but threads creating nodes concurrently contend on it: with eight threads the
-/// wall time per node grew about fivefold. Each thread therefore keeps its own table,
-/// which needs no lock and costs one construction per node type on each thread.
+/// Evaluating the literal in each node initializer instead would nearly triple the cost
+/// of creating a node, and models create many nodes at once. A process-wide dictionary
+/// behind a lock is cheap on one thread, but threads creating nodes concurrently contend
+/// on it and each node became several times slower. Each thread therefore keeps its own
+/// table, which needs no lock. The price is one literal evaluation per node type on each
+/// thread plus the table itself, paid again by a thread that replaces an exited one.
+/// Threads creating nodes at the same time still slow down more than a single thread
+/// does, though far less than with the shared lock.
 ///
 /// Every instance compares equal and hashes identically, and Observation matches key
 /// paths by equality, so a node may keep whichever thread's instance it was given.
@@ -38,39 +40,31 @@ enum NodeObservationKeyPaths {
   static func stored<Value>(
     _: Value.Type
   ) -> KeyPath<NodeObservationRoot<Stored<Value>>, Void> & Sendable {
-    let key = NodeObservationKeyPathTable.Key(value: Value.self, owner: .stored)
-
-    if let cached = NodeObservationKeyPathTable.current.pointee.keyPaths[key] {
-      // A key is only ever stored with the key path of its own node type.
-      return unsafeDowncast(
-        cached,
-        to: (KeyPath<NodeObservationRoot<Stored<Value>>, Void> & Sendable).self
-      )
-    }
-
-    let keyPath: KeyPath<NodeObservationRoot<Stored<Value>>, Void> & Sendable =
+    let keyPath = NodeObservationKeyPathTable.keyPath(
+      for: .init(value: Value.self, kind: .stored)
+    ) {
       \NodeObservationRoot<Stored<Value>>.wrappedValue
-    NodeObservationKeyPathTable.current.pointee.keyPaths[key] = keyPath
-    return keyPath
+    }
+    // A key is only ever stored with the key path of its own node type.
+    return unsafeDowncast(
+      keyPath,
+      to: (KeyPath<NodeObservationRoot<Stored<Value>>, Void> & Sendable).self
+    )
   }
 
   static func computed<Value>(
     _: Value.Type
   ) -> KeyPath<NodeObservationRoot<Computed<Value>>, Void> & Sendable {
-    let key = NodeObservationKeyPathTable.Key(value: Value.self, owner: .computed)
-
-    if let cached = NodeObservationKeyPathTable.current.pointee.keyPaths[key] {
-      // A key is only ever stored with the key path of its own node type.
-      return unsafeDowncast(
-        cached,
-        to: (KeyPath<NodeObservationRoot<Computed<Value>>, Void> & Sendable).self
-      )
-    }
-
-    let keyPath: KeyPath<NodeObservationRoot<Computed<Value>>, Void> & Sendable =
+    let keyPath = NodeObservationKeyPathTable.keyPath(
+      for: .init(value: Value.self, kind: .computed)
+    ) {
       \NodeObservationRoot<Computed<Value>>.wrappedValue
-    NodeObservationKeyPathTable.current.pointee.keyPaths[key] = keyPath
-    return keyPath
+    }
+    // A key is only ever stored with the key path of its own node type.
+    return unsafeDowncast(
+      keyPath,
+      to: (KeyPath<NodeObservationRoot<Computed<Value>>, Void> & Sendable).self
+    )
   }
 }
 
@@ -80,34 +74,57 @@ enum NodeObservationKeyPaths {
 /// in raw thread-specific storage rather than an object so that a lookup performs no
 /// reference counting. It is destroyed when its thread exits; nodes keep their own
 /// references to the key paths they were given.
+///
+/// It does not use `ThreadLocalValue`, which models values that graph operations install
+/// and restore around a scope; this table instead lives as long as its thread.
 private struct NodeObservationKeyPathTable {
 
-  enum Owner {
+  enum NodeKind {
     case stored
     case computed
   }
 
-  /// Value type metadata is never deallocated, so an identifier is never reused.
+  /// Metadata for `Value` is never deallocated, so its identifier is never reused.
   struct Key: Hashable {
     let value: ObjectIdentifier
-    let owner: Owner
+    let kind: NodeKind
 
-    init(value: Any.Type, owner: Owner) {
+    init(value: Any.Type, kind: NodeKind) {
       self.value = ObjectIdentifier(value)
-      self.owner = owner
+      self.kind = kind
     }
   }
 
   var keyPaths: [Key: AnyKeyPath] = [:]
 
-  static var current: UnsafeMutablePointer<NodeObservationKeyPathTable> {
+  /// Returns this thread's key path for `key`, evaluating `makeKeyPath` on first use.
+  ///
+  /// The lookup is not generic, so callers pay for node type metadata only on a miss.
+  static func keyPath(
+    for key: Key,
+    _ makeKeyPath: () -> AnyKeyPath
+  ) -> AnyKeyPath {
+    let table = current
+
+    if let cached = table.pointee.keyPaths[key] {
+      return cached
+    }
+
+    let keyPath = makeKeyPath()
+    table.pointee.keyPaths[key] = keyPath
+    return keyPath
+  }
+
+  private static var current: UnsafeMutablePointer<NodeObservationKeyPathTable> {
     if let pointer = pthread_getspecific(threadSpecificKey) {
       return pointer.assumingMemoryBound(to: NodeObservationKeyPathTable.self)
     }
 
     let table = UnsafeMutablePointer<NodeObservationKeyPathTable>.allocate(capacity: 1)
     table.initialize(to: NodeObservationKeyPathTable())
-    pthread_setspecific(threadSpecificKey, table)
+    // An unregistered table would be leaked and replaced on every lookup.
+    let status = pthread_setspecific(threadSpecificKey, table)
+    precondition(status == 0, "Failed to store the node key path table")
     return table
   }
 

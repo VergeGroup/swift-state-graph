@@ -183,7 +183,7 @@ public final class Computed<Value: SendableMetatype>: Node, Observable, CustomDe
 
     /// Obtained once so Observation calls do not instantiate a key path on every read.
     @available(macOS 14.0, iOS 17.0, watchOS 10.0, tvOS 17.0, *)
-    private let observationKeyPath: KeyPath<NodeObservationRoot<Computed<Value>>, Void> & Sendable =
+    let observationKeyPath: KeyPath<NodeObservationRoot<Computed<Value>>, Void> & Sendable =
       NodeObservationKeyPaths.computed(Value.self)
   #endif
 
