@@ -12,12 +12,29 @@ import Foundation
 ///
 /// Persistence and external data sources should compose a `Stored` node rather
 /// than replacing its value storage.
+///
+/// A node created inside a `Computed` computation may receive initial assignments
+/// during that same invocation, until its value is read or `onDidSet` is registered.
+/// These assignments install the initial value without comparison, notifications,
+/// or transaction staging. Later assignments use the normal mutation pipeline.
 public final class Stored<Value: SendableMetatype>: Node, Observable, CustomDebugStringConvertible {
 
   public let lock: NodeLock
 
   nonisolated(unsafe)
   private var value: Value
+
+  /// The descriptor invocation that created this node, if any. Assigned only by
+  /// `init`; ARC clears the weak reference when the invocation ends. Keeping a weak
+  /// identity prevents later evaluations from reusing permission without retaining
+  /// finished scopes or taking an extra read lock after initialization has ended.
+  nonisolated(unsafe)
+  private weak var initializationScope: StoredInitializationScope?
+
+  /// Protected by `lock`. A value read or observer registration permanently closes
+  /// initialization, including reads that do not record committed graph edges.
+  nonisolated(unsafe)
+  private var isInitializationOpen = true
 
   /// The latest typed value staged by one transaction scope, owned by this node.
   ///
@@ -115,6 +132,11 @@ public final class Stored<Value: SendableMetatype>: Node, Observable, CustomDebu
 #if canImport(Observation)
   @available(macOS 14.0, iOS 17.0, watchOS 10.0, tvOS 17.0, *)
   private let observationRegistrar = ObservationRegistrar()
+
+  /// Obtained once so Observation calls do not instantiate a key path on every read.
+  @available(macOS 14.0, iOS 17.0, watchOS 10.0, tvOS 17.0, *)
+  let observationKeyPath: KeyPath<NodeObservationRoot<Stored<Value>>, Void> & Sendable =
+    NodeObservationKeyPaths.stored(Value.self)
 #endif
 
   public var potentiallyDirty: Bool {
@@ -130,6 +152,14 @@ public final class Stored<Value: SendableMetatype>: Node, Observable, CustomDebu
 
   public var wrappedValue: Value {
     get {
+      // Close before Observation records the access: a concurrent initialization
+      // must not silently replace a value after a reader has subscribed to it.
+      if initializationScope != nil {
+        lock.lock()
+        isInitializationOpen = false
+        lock.unlock()
+      }
+
       if ThreadLocal.graphTransaction.value != nil {
         return transactionValue()
       }
@@ -139,6 +169,30 @@ public final class Stored<Value: SendableMetatype>: Node, Observable, CustomDebu
       }
     }
     set {
+      // Swift may use either an init accessor or a setter inside an initializer.
+      // Only this invocation's newly created, unread nodes accept initial values.
+      if let initializationScope,
+        initializationScope === ThreadLocal.storedInitializationScope.value
+      {
+        lock.lock()
+        if isInitializationOpen {
+          let oldValue = value
+          value = newValue
+          lock.unlock()
+
+          // An initial default may own an object with reentrant destruction behavior.
+          withExtendedLifetime(oldValue) {}
+          return
+        }
+        lock.unlock()
+      }
+
+      if initializationScope != nil {
+        lock.lock()
+        isInitializationOpen = false
+        lock.unlock()
+      }
+
       assertGraphMutationAllowed("Stored.wrappedValue mutation")
 
       if let transaction = ThreadLocal.graphTransaction.value {
@@ -159,6 +213,28 @@ public final class Stored<Value: SendableMetatype>: Node, Observable, CustomDebu
     }
   }
 
+  /// Captures the implicit `oldValue` used by a generated `@GraphStored` setter.
+  ///
+  /// This accessor supports macro expansion in client modules. During initialization,
+  /// the generated capture is part of the assignment and does not expose a dependency.
+  /// Explicit reads in `willSet` or `didSet` still use `wrappedValue` and end permission.
+  /// Outside initialization this retains the ordinary tracked-read behavior.
+  public var _valueForGraphStoredAssignment: Value {
+    if let initializationScope,
+      initializationScope === ThreadLocal.storedInitializationScope.value
+    {
+      lock.lock()
+      if isInitializationOpen {
+        let oldValue = value
+        lock.unlock()
+        return oldValue
+      }
+      lock.unlock()
+    }
+
+    return wrappedValue
+  }
+
   /// Returns the transaction-visible value without adding committed graph edges.
   ///
   /// Body and comparator reads remain isolated. During synchronous callback delivery,
@@ -173,7 +249,7 @@ public final class Stored<Value: SendableMetatype>: Node, Observable, CustomDebu
     {
       observationRegistrar.access(
         NodeObservationRoot<Stored<Value>>(),
-        keyPath: \NodeObservationRoot<Stored<Value>>.wrappedValue
+        keyPath: observationKeyPath
       )
     }
 #endif
@@ -204,7 +280,7 @@ public final class Stored<Value: SendableMetatype>: Node, Observable, CustomDebu
     if #available(macOS 14.0, iOS 17.0, watchOS 10.0, tvOS 17.0, *) {
       observationRegistrar.access(
         NodeObservationRoot<Stored<Value>>(),
-        keyPath: \NodeObservationRoot<Stored<Value>>.wrappedValue
+        keyPath: observationKeyPath
       )
     }
 #endif
@@ -305,10 +381,10 @@ public final class Stored<Value: SendableMetatype>: Node, Observable, CustomDebu
     if shouldNotify,
       #available(macOS 14.0, iOS 17.0, watchOS 10.0, tvOS 17.0, *)
     {
-      withMainActor { [observationRegistrar] in
+      withMainActor { [observationRegistrar, observationKeyPath] in
         observationRegistrar.willSet(
           NodeObservationRoot<Stored<Value>>(),
-          keyPath: \NodeObservationRoot<Stored<Value>>.wrappedValue
+          keyPath: observationKeyPath
         )
       }
     }
@@ -352,10 +428,10 @@ public final class Stored<Value: SendableMetatype>: Node, Observable, CustomDebu
     if delivery.shouldNotify,
       #available(macOS 14.0, iOS 17.0, watchOS 10.0, tvOS 17.0, *)
     {
-      withMainActor { [observationRegistrar] in
+      withMainActor { [observationRegistrar, observationKeyPath] in
         observationRegistrar.didSet(
           NodeObservationRoot<Stored<Value>>(),
-          keyPath: \NodeObservationRoot<Stored<Value>>.wrappedValue
+          keyPath: observationKeyPath
         )
       }
     }
@@ -469,11 +545,11 @@ public final class Stored<Value: SendableMetatype>: Node, Observable, CustomDebu
 
 #if canImport(Observation)
     if #available(macOS 14.0, iOS 17.0, watchOS 10.0, tvOS 17.0, *) {
-      observationWillSetDelivery.appendWillSetOperation { [observationRegistrar] in
+      observationWillSetDelivery.appendWillSetOperation { [observationRegistrar, observationKeyPath] in
         withMainActor {
           observationRegistrar.willSet(
             NodeObservationRoot<Stored<Value>>(),
-            keyPath: \NodeObservationRoot<Stored<Value>>.wrappedValue
+            keyPath: observationKeyPath
           )
         }
       }
@@ -538,10 +614,10 @@ public final class Stored<Value: SendableMetatype>: Node, Observable, CustomDebu
     if transactionCommitWork.shouldNotify,
       #available(macOS 14.0, iOS 17.0, watchOS 10.0, tvOS 17.0, *)
     {
-      withMainActor { [observationRegistrar] in
+      withMainActor { [observationRegistrar, observationKeyPath] in
         observationRegistrar.didSet(
           NodeObservationRoot<Stored<Value>>(),
-          keyPath: \NodeObservationRoot<Stored<Value>>.wrappedValue
+          keyPath: observationKeyPath
         )
       }
     }
@@ -656,6 +732,7 @@ public final class Stored<Value: SendableMetatype>: Node, Observable, CustomDebu
       sourceLocation: .init(file: file, line: line, column: column)
     )
     self.lock = .init()
+    self.initializationScope = ThreadLocal.storedInitializationScope.value
     self.value = wrappedValue
     self.shouldNotify = shouldNotify
 
@@ -688,6 +765,7 @@ public final class Stored<Value: SendableMetatype>: Node, Observable, CustomDebu
     let value = GraphTransactionCoordinator.shared.withReadAccess {
       lock.lock()
       defer { lock.unlock() }
+      isInitializationOpen = false
       return self.value
     }
 
@@ -714,6 +792,12 @@ public final class Stored<Value: SendableMetatype>: Node, Observable, CustomDebu
     _ mutation: (inout Value) throws(E) -> Result
   ) throws(E) -> Result where E: Error {
     assertGraphMutationAllowed("Stored.unsafeModify")
+
+    if initializationScope != nil {
+      lock.lock()
+      isInitializationOpen = false
+      lock.unlock()
+    }
 
     if ThreadLocal.graphTransaction.value != nil {
       lock.lock()
@@ -742,6 +826,7 @@ public final class Stored<Value: SendableMetatype>: Node, Observable, CustomDebu
   public func onDidSet(_ handler: @escaping (Value, Value) -> Void) {
     lock.lock()
     defer { lock.unlock() }
+    isInitializationOpen = false
     didSetHandler = handler
   }
 }

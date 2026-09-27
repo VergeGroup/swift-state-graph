@@ -121,9 +121,13 @@ public enum StateGraphGlobal {
 /// - Changes propagate: When this node's value changes, downstream nodes are notified
 ///
 /// - Important: Descriptor computation and equality are read-only graph operations.
-///   DEBUG builds diagnose entry into a supported mutation API; non-DEBUG builds omit
-///   that tracking and violations remain unsupported. Dependency cycles, including
-///   direct self-read, are unsupported because the graph must remain a DAG.
+///   A computation may initialize `Stored` nodes created during that invocation until
+///   their first value read or assignment-observer registration. Such initialization
+///   preserves node identity and does not publish changes or stage transaction writes.
+///   Equality does not receive this initialization permission.
+///   DEBUG builds diagnose prohibited mutations; violations remain unsupported in
+///   non-DEBUG builds. Dependency cycles, including direct self-read, are unsupported
+///   because the graph must remain a DAG.
 ///
 /// `Value` itself does not need to conform to `Sendable`. `SendableMetatype` allows the
 /// node's isolated closures to use generic conformances safely.
@@ -176,6 +180,11 @@ public final class Computed<Value: SendableMetatype>: Node, Observable, CustomDe
   #if canImport(Observation)
     @available(macOS 14.0, iOS 17.0, watchOS 10.0, tvOS 17.0, *)
     private let observationRegistrar = ObservationRegistrar()
+
+    /// Obtained once so Observation calls do not instantiate a key path on every read.
+    @available(macOS 14.0, iOS 17.0, watchOS 10.0, tvOS 17.0, *)
+    let observationKeyPath: KeyPath<NodeObservationRoot<Computed<Value>>, Void> & Sendable =
+      NodeObservationKeyPaths.computed(Value.self)
   #endif
 
   /// Single-use graph work captured when this node first becomes potentially dirty.
@@ -215,10 +224,10 @@ public final class Computed<Value: SendableMetatype>: Node, Observable, CustomDe
     // is checked during recomputation to avoid unnecessary downstream propagation.
 #if canImport(Observation)
     if #available(macOS 14.0, iOS 17.0, watchOS 10.0, tvOS 17.0, *) {
-      withMainActor { [observationRegistrar] in
+      withMainActor { [observationRegistrar, observationKeyPath] in
         observationRegistrar.willSet(
           NodeObservationRoot<Computed<Value>>(),
-          keyPath: \NodeObservationRoot<Computed<Value>>.wrappedValue
+          keyPath: observationKeyPath
         )
       }
     }
@@ -281,14 +290,14 @@ public final class Computed<Value: SendableMetatype>: Node, Observable, CustomDe
     ThreadLocal.currentNode.withValue(nil) {
       if ThreadLocal.graphTransaction.value?.recordsDependencies == true {
         var context = Context(environment: .init())
-        return withGraphMutationProhibited(.computedDescriptor) {
+        return withGraphMutationProhibited(.computedDescriptor, allowingStoredInitialization: true) {
           descriptor.compute(context: &context)
         }
       }
 
       return ThreadLocal.registration.withValue(nil) {
         var context = Context(environment: .init())
-        return withGraphMutationProhibited(.computedDescriptor) {
+        return withGraphMutationProhibited(.computedDescriptor, allowingStoredInitialization: true) {
           descriptor.compute(context: &context)
         }
       }
@@ -300,7 +309,7 @@ public final class Computed<Value: SendableMetatype>: Node, Observable, CustomDe
     if #available(macOS 14.0, iOS 17.0, watchOS 10.0, tvOS 17.0, *) {
       observationRegistrar.access(
         NodeObservationRoot<Computed<Value>>(),
-        keyPath: \NodeObservationRoot<Computed<Value>>.wrappedValue
+        keyPath: observationKeyPath
       )
     }
 #endif
@@ -497,7 +506,7 @@ public final class Computed<Value: SendableMetatype>: Node, Observable, CustomDe
         Only register the registration to the current node.
         */
         _cachedValue = ThreadLocal.registration.withValue(nil) {
-          withGraphMutationProhibited(.computedDescriptor) {
+          withGraphMutationProhibited(.computedDescriptor, allowingStoredInitialization: true) {
             descriptor.compute(context: &context)
           }
         }
@@ -564,11 +573,11 @@ extension Computed: GraphTransactionInvalidatableNode {
 
 #if canImport(Observation)
     if #available(macOS 14.0, iOS 17.0, watchOS 10.0, tvOS 17.0, *) {
-      observationWillSetDelivery.appendWillSetOperation { [observationRegistrar] in
+      observationWillSetDelivery.appendWillSetOperation { [observationRegistrar, observationKeyPath] in
         withMainActor {
           observationRegistrar.willSet(
             NodeObservationRoot<Computed<Value>>(),
-            keyPath: \NodeObservationRoot<Computed<Value>>.wrappedValue
+            keyPath: observationKeyPath
           )
         }
       }
@@ -615,11 +624,11 @@ extension Computed: EvaluationReleaseInvalidatableNode {
 
 #if canImport(Observation)
     if #available(macOS 14.0, iOS 17.0, watchOS 10.0, tvOS 17.0, *) {
-      evaluation.deferDelivery { [observationRegistrar] in
+      evaluation.deferDelivery { [observationRegistrar, observationKeyPath] in
         withMainActor {
           observationRegistrar.willSet(
             NodeObservationRoot<Computed<Value>>(),
-            keyPath: \NodeObservationRoot<Computed<Value>>.wrappedValue
+            keyPath: observationKeyPath
           )
         }
       }

@@ -192,9 +192,26 @@ Likewise, accessing an externally locked store from the body while another
 thread mutates it is outside the transaction's lock-order guarantees.
 
 Keep both committed and transaction-local `Computed` descriptor computation and
-equality free of graph mutations. StateGraph marks these closures as read-only and
-diagnoses violations in DEBUG builds. Non-DEBUG builds omit that tracking, so a
-violation remains unsupported rather than carrying runtime diagnostic overhead.
+equality free of mutations to existing graph state. StateGraph diagnoses violations
+in DEBUG builds; they remain unsupported in non-DEBUG builds.
+
+A computation may construct a model with `@GraphStored` properties and assign its
+initial values. This includes properties with defaults or optional values, even
+when Swift dispatches an initializer's assignment through the ordinary setter.
+The permission applies only to nodes created in that same descriptor invocation,
+before their first value read or `onDidSet` registration. Repeated assignments
+before that first read are allowed; assigning after a read remains a mutation.
+Passing a reference elsewhere does not itself end permission, but a value read or
+ordinary mutation on another thread does. Nested computations have independent
+permission, and equality and comparators do not inherit it.
+
+These initial assignments preserve the node's identity and skip comparison,
+notifications, and transaction staging. A model retained after a transaction rolls
+back therefore keeps its initial values. Subsequent ordinary assignments still
+participate in transactions. Generated property observers retain their usual
+accessor behavior: an implicit `oldValue` capture is part of an assignment, while
+an explicit property read in `willSet` or `didSet` ends initialization permission.
+
 Dependency cycles, including direct self-read, remain unsupported because the graph
 must be a DAG.
 

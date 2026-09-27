@@ -41,10 +41,12 @@ final class ComputedEvaluationStack {
 
   // MARK: - Thread-Local Storage
 
-  /// A dedicated POSIX key keeps the check in every node release to a few nanoseconds.
+  /// The key under which each thread keeps its stack until it exits.
   ///
-  /// `ThreadLocalValue` performs a `Thread.threadDictionary` lookup, which costs tens
-  /// of nanoseconds and would be paid by each deinitializing node that has edges.
+  /// This does not use `ThreadLocalValue`, which models values that graph operations
+  /// install and restore around a scope. A thread creates its stack on its first
+  /// evaluation and reuses it for its lifetime, and every deinitializing node with edges
+  /// reads it.
   private static let key: pthread_key_t = {
     var key = pthread_key_t()
     let result = pthread_key_create(&key) { stack in
