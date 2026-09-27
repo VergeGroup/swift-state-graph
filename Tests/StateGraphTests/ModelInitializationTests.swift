@@ -31,13 +31,13 @@ struct ModelInitializationTests {
       @GraphStored
       var count: Int = 0 {
         didSet {
-          observedValues.append(count)
+          observedChanges.append("\(oldValue)->\(count)")
         }
       }
 
       let name: String
       var nodeIdentifiers: [ObjectIdentifier] = []
-      var observedValues: [Int] = []
+      var observedChanges: [String] = []
 
       init() {
         let initialNode = ObjectIdentifier($count)
@@ -55,7 +55,8 @@ struct ModelInitializationTests {
 
     #expect(model.count == 2)
     #expect(Set(model.nodeIdentifiers) == [ObjectIdentifier(model.$count)])
-    #expect(model.observedValues == [2])
+    // The setter's old value comes from the same node the init accessor wrote.
+    #expect(model.observedChanges == ["1->2"])
   }
 
   // Swift's definite initialization destroys the first stored properties again
