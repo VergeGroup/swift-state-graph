@@ -22,13 +22,15 @@ public macro GraphIgnored() = #externalMacro(module: "StateGraphMacro", type: "I
 @attached(peer, names: prefixed(`$`), prefixed(`$__init_`))
 public macro GraphStored() = #externalMacro(module: "StateGraphMacro", type: "GraphStoredMacro")
 
-/// Zero-size storage that `@GraphStored` init accessors initialize.
+/// Zero-size storage used by `@GraphStored` to work around a Swift compiler bug.
 ///
-/// An init accessor that only accesses the existing `Stored` node would have an
-/// empty `initializes` list. Definite initialization then destroys the wrong
-/// stored property when an initializer throws or returns `nil` before every
-/// stored property is initialized. Initializing this marker keeps the generated
-/// init accessors out of that path while the `Stored` node keeps its identity.
+/// After an init accessor with an empty `initializes` list runs, an initializer
+/// that throws or returns `nil` before `self` is fully initialized can destroy
+/// stored properties twice. This definite-initialization bug was reproduced
+/// with Swift 6.4. The marker supplies an initialization target while assignments
+/// continue to use the same `Stored` node.
+///
+/// This type is public so generated code in client modules can use the workaround.
 public struct GraphStoredInitMarker: Hashable, Sendable {
   public init() {}
 }

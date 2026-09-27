@@ -222,7 +222,8 @@ extension GraphStoredMacro: PeerMacro {
     return peers
   }
 
-  /// Supplies a default so synthesized decoding can omit this implementation detail.
+  /// Gives the workaround marker a default so synthesized `Decodable` can omit it
+  /// from `CodingKeys`.
   private static func createInitMarkerDeclaration(propertyName: String) -> DeclSyntax {
     "@GraphIgnored private nonisolated(unsafe) var $__init_\(raw: propertyName): GraphStoredInitMarker = .init()"
   }
@@ -363,9 +364,14 @@ extension GraphStoredMacro: AccessorMacro {
 
   /// Creates an init accessor that keeps the existing `Stored` node's identity.
   ///
-  /// The marker gives the accessor a non-empty `initializes` list. Without it,
-  /// definite initialization destroys the wrong stored property when an
-  /// initializer exits early.
+  /// Workaround for a Swift definite initialization bug, reproduced with Swift 6.4:
+  /// after an init accessor with an empty `initializes` list runs, a `throw` or
+  /// `return nil` before `self` is fully initialized can destroy stored properties twice.
+  /// Giving the accessor a marker to initialize avoids that compiler path.
+  ///
+  /// Keep the marker and its `initializes` entry until the initializer failure cases in
+  /// `ModelInitializationTests` pass without them on every supported Swift compiler.
+  /// Removing the workaround must still preserve the existing `Stored` node.
   private static func createAccessInitAccessor(
     propertyName: String
   ) -> AccessorDeclSyntax {
