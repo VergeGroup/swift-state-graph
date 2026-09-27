@@ -15,9 +15,10 @@ struct ThreadLocalValue<Value>: ~Copyable, Sendable {
 
   var value: Value? {
     get {
-      // A read never allocates storage. A missing entry means nothing was
-      // installed on this thread, or the key is being torn down at thread exit.
-      currentStorage()?.value
+      // A read never allocates storage. A missing entry means nothing was ever
+      // installed in this slot on this thread, or this slot's thread-exit
+      // destructor has already finished and nothing was installed since.
+      withCurrentStorage { $0.value } ?? nil
     }
   }
 
@@ -42,9 +43,14 @@ struct ThreadLocalValue<Value>: ~Copyable, Sendable {
   /// throwing closure wrapper so its failure type remains unchanged.
   @discardableResult
   func replaceValue(_ value: Value?) -> Value? {
-    if let storage = currentStorage() {
+    if let oldValue = withCurrentStorage({ storage in
+      // Move the old value out before storing the new one. It is returned and
+      // released only after this access ends, so no deinitializer runs while the
+      // cell is being mutated.
       let oldValue = storage.value
       storage.value = value
+      return oldValue
+    }) {
       return oldValue
     }
 
@@ -74,15 +80,22 @@ struct ThreadLocalValue<Value>: ~Copyable, Sendable {
     return try perform()
   }
 
+  /// Runs `body` with this thread's storage, or returns `nil` when the thread has
+  /// none.
   @inline(__always)
-  private func currentStorage() -> ThreadLocalSlotStorage<Value>? {
+  private func withCurrentStorage<R>(
+    _ body: (ThreadLocalSlotStorage<Value>) -> R
+  ) -> R? {
     guard let pointer = pthread_getspecific(key) else {
       return nil
     }
     // Only this slot installs entries for its key, and it always installs a
     // `ThreadLocalSlotStorage<Value>`, so the unchecked conversion is sound. The key
-    // keeps the storage alive for as long as the current thread can observe it.
-    return Unmanaged<ThreadLocalSlotStorage<Value>>.fromOpaque(pointer).takeUnretainedValue()
+    // holds a +1 reference that only this thread's key destructor gives up, and that
+    // destructor keeps its own reference while it runs, so the storage outlives
+    // `body`. Borrowing it this way skips a retain/release pair on every access.
+    return Unmanaged<ThreadLocalSlotStorage<Value>>.fromOpaque(pointer)
+      ._withUnsafeGuaranteedRef(body)
   }
 
 }
@@ -113,7 +126,13 @@ private class ThreadLocalSlotStorageBase {
 /// The per-thread cell behind one `ThreadLocalValue` key.
 private final class ThreadLocalSlotStorage<Value>: ThreadLocalSlotStorageBase {
 
-  var value: Value?
+  /// The installed value.
+  ///
+  /// Dynamic exclusivity checks would cost more than the rest of a slot operation,
+  /// and no two accesses can overlap. The storage is reachable only from its owning
+  /// thread, and every mutation moves the old value out before it is released, so
+  /// no deinitializer can re-enter this field while an access is in progress.
+  @exclusivity(unchecked) var value: Value?
 
   fileprivate init(key: pthread_key_t, value: Value?) {
     self.value = value

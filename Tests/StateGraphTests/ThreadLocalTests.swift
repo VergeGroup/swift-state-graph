@@ -120,19 +120,52 @@ struct ThreadLocalTests {
   }
 
   @Test
-  func valuesAreIsolatedPerThread() {
-    let local = Probe("local")
+  func valuesAreIsolatedPerThread() async {
+    // Both sides run on dedicated threads, so the blocking handoff between them
+    // never occupies a cooperative-executor worker.
+    let finished = TestSignal()
+    let observed = OSAllocatedUnfairLock<IsolationObservation?>(initialState: nil)
 
-    Slots.isolation.withValue(local) {
-      let other = runOnNewThread {
-        let before = Slots.isolation.value?.name
-        Slots.isolation.replaceValue(Probe("other"))
-        return Observed(before: before, after: Slots.isolation.value?.name)
+    Thread {
+      let local = Probe("local")
+
+      Slots.isolation.withValue(local) {
+        let otherFinished = TestThreadSignal()
+        let other = OSAllocatedUnfairLock<(before: String?, after: String?)?>(initialState: nil)
+
+        Thread {
+          let before = Slots.isolation.value?.name
+          Slots.isolation.replaceValue(Probe("other"))
+          let after = Slots.isolation.value?.name
+          other.withLock { $0 = (before, after) }
+          otherFinished.signal()
+        }.start()
+
+        let otherDidFinish = otherFinished.wait(until: Date().addingTimeInterval(5))
+        let otherValues = other.withLock { $0 }
+        observed.withLock {
+          $0 = IsolationObservation(
+            otherDidFinish: otherDidFinish,
+            otherBefore: otherValues?.before,
+            otherAfter: otherValues?.after,
+            localAfterOther: Slots.isolation.value?.name
+          )
+        }
       }
 
-      #expect(other == Observed(before: nil, after: "other"))
-      #expect(Slots.isolation.value === local)
-    }
+      finished.signal()
+    }.start()
+
+    #expect(await finished.wait(for: .seconds(5)))
+    #expect(
+      observed.withLock { $0 }
+        == IsolationObservation(
+          otherDidFinish: true,
+          otherBefore: nil,
+          otherAfter: "other",
+          localAfterOther: "local"
+        )
+    )
   }
 
   @Test
@@ -224,39 +257,24 @@ private enum Slots {
   static let chain = ThreadLocalValue<ThreadLocalTests.Probe>()
 }
 
-private struct Observed: Equatable, Sendable {
-  let before: String?
-  let after: String?
+private struct IsolationObservation: Equatable, Sendable {
+  let otherDidFinish: Bool
+  let otherBefore: String?
+  let otherAfter: String?
+  let localAfterOther: String?
 }
 
 /// Holds a weak reference that a test can inspect from another thread.
-private final class WeakBox<Object: AnyObject>: @unchecked Sendable {
-  private let lock = NSLock()
-  private weak var _value: Object?
+private final class WeakBox<Object: AnyObject & Sendable>: Sendable {
+
+  private struct Reference: Sendable {
+    weak var object: Object?
+  }
+
+  private let reference = OSAllocatedUnfairLock(initialState: Reference())
 
   var value: Object? {
-    get { lock.withLock { _value } }
-    set { lock.withLock { _value = newValue } }
+    get { reference.withLock { $0.object } }
+    set { reference.withLock { $0.object = newValue } }
   }
-}
-
-/// Runs `body` on a fresh thread and waits for its result.
-///
-/// The wait is bounded so a regression fails the test instead of hanging the run.
-private func runOnNewThread<Result: Sendable>(
-  _ body: @escaping @Sendable () -> Result
-) -> Result? {
-  let semaphore = DispatchSemaphore(value: 0)
-  let result = OSAllocatedUnfairLock<Result?>(initialState: nil)
-
-  Thread {
-    let value = body()
-    result.withLock { $0 = value }
-    semaphore.signal()
-  }.start()
-
-  guard semaphore.wait(timeout: .now() + 5) == .success else {
-    return nil
-  }
-  return result.withLock { $0 }
 }
