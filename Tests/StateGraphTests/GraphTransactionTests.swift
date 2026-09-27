@@ -1548,7 +1548,8 @@ struct GraphTransactionTests {
       }
       if shouldPause {
         descriptorStarted.signal()
-        resumeDescriptor.wait(until: Date().addingTimeInterval(5))
+        // A backstop only; the coordinator normally opens the gate much earlier.
+        resumeDescriptor.wait(until: Date().addingTimeInterval(10))
       }
       return source.wrappedValue
     }
@@ -1582,13 +1583,16 @@ struct GraphTransactionTests {
         transactionFinished.signal()
       }.start()
 
+      // Writers in other suites can delay this transaction's admission, so allow the
+      // full budget. The wait returns as soon as any publisher blocks, so a longer
+      // deadline never keeps the gate closed longer.
       let didBlock = GraphTransactionCoordinator.shared.__testing__waitForPublisherToBlock(
-        until: Date().addingTimeInterval(1)
+        until: Date().addingTimeInterval(5)
       )
       scenarioResult.withLock { $0.didObserveBlockedPublisher = didBlock }
     }.start()
 
-    #expect(await coordinatorFinished.wait(for: .seconds(10)))
+    #expect(await coordinatorFinished.wait(for: .seconds(15)))
     let result = scenarioResult.withLock { $0 }
     #expect(result.descriptorStarted)
     #expect(result.didObserveBlockedPublisher)
