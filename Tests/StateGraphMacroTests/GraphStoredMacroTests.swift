@@ -35,9 +35,11 @@ final class GraphStoredMacroTests: XCTestCase {
       final class Model {
         var count: Int {
           @storageRestrictions(
+            initializes: $__init_count,
             accesses: $count
           )
           init(initialValue) {
+            $__init_count = .init()
             $count.wrappedValue = initialValue
           }
           get {
@@ -49,6 +51,8 @@ final class GraphStoredMacroTests: XCTestCase {
         }
 
         @GraphIgnored let $count: Stored<Int> = .init(name: "count", wrappedValue: 0)
+
+        @GraphIgnored private nonisolated(unsafe) var $__init_count: GraphStoredInitMarker
 
       }
       """
@@ -68,9 +72,11 @@ final class GraphStoredMacroTests: XCTestCase {
       final class Model {
         private(set) var value: Int {
           @storageRestrictions(
+            initializes: $__init_value,
             accesses: $value
           )
           init(initialValue) {
+            $__init_value = .init()
             $value.wrappedValue = initialValue
           }
           get {
@@ -83,6 +89,8 @@ final class GraphStoredMacroTests: XCTestCase {
 
         @GraphIgnored
           private let $value: Stored<Int> = .init(name: "value", wrappedValue: 0)
+
+        @GraphIgnored private nonisolated(unsafe) var $__init_value: GraphStoredInitMarker
       }
       """
     }
@@ -103,9 +111,11 @@ final class GraphStoredMacroTests: XCTestCase {
       struct ViewState {
         var count: Int {
           @storageRestrictions(
+            initializes: $__init_count,
             accesses: $count
           )
           init(initialValue) {
+            $__init_count = .init()
             $count.wrappedValue = initialValue
           }
           get {
@@ -117,6 +127,8 @@ final class GraphStoredMacroTests: XCTestCase {
         }
 
         @GraphIgnored let $count: Stored<Int> = .init(name: "count", wrappedValue: 0)
+
+        @GraphIgnored private nonisolated(unsafe) var $__init_count: GraphStoredInitMarker
 
       }
       """
@@ -181,9 +193,11 @@ final class GraphStoredMacroTests: XCTestCase {
       final class Model {
         var count: Int? {
           @storageRestrictions(
+            initializes: $__init_count,
             accesses: $count
           )
           init(initialValue) {
+            $__init_count = .init()
             $count.wrappedValue = initialValue
           }
           get {
@@ -195,6 +209,8 @@ final class GraphStoredMacroTests: XCTestCase {
         }
 
         @GraphIgnored let $count: Stored<Int?> = .init(name: "count", wrappedValue: nil)
+
+        @GraphIgnored private nonisolated(unsafe) var $__init_count: GraphStoredInitMarker
 
       }
       """
@@ -216,9 +232,11 @@ final class GraphStoredMacroTests: XCTestCase {
       final class Model {
         var community: Community! {
           @storageRestrictions(
+            initializes: $__init_community,
             accesses: $community
           )
           init(initialValue) {
+            $__init_community = .init()
             $community.wrappedValue = initialValue
           }
           get {
@@ -230,6 +248,8 @@ final class GraphStoredMacroTests: XCTestCase {
         }
 
         @GraphIgnored let $community: Stored<Community?> = .init(name: "community", wrappedValue: nil)
+
+        @GraphIgnored private nonisolated(unsafe) var $__init_community: GraphStoredInitMarker
 
       }
       """
@@ -335,6 +355,44 @@ final class GraphStoredMacroTests: XCTestCase {
       }
       """
     }
+  }
+
+  func test_rejected_properties_do_not_declare_init_marker() throws {
+    let accepted = try expandGraphStoredPeersInClass(
+      from: parseVariableDecl("@GraphStored var value: Int = 0")
+    )
+    XCTAssertTrue(accepted.contains { $0.description.contains("$__init_value") })
+
+    for source in [
+      "@GraphStored let value: Int = 0",
+      "@GraphStored weak var value: AnyObject?",
+      "@GraphStored unowned var value: AnyObject",
+    ] {
+      let peers = try expandGraphStoredPeersInClass(from: parseVariableDecl(source))
+      XCTAssertFalse(peers.contains { $0.description.contains("$__init_") }, source)
+    }
+  }
+
+  private func expandGraphStoredPeersInClass(
+    from variableDecl: VariableDeclSyntax
+  ) throws -> [DeclSyntax] {
+    let attribute = try XCTUnwrap(
+      variableDecl.attributes.compactMap { attribute -> AttributeSyntax? in
+        guard case .attribute(let attributeSyntax) = attribute else {
+          return nil
+        }
+        return attributeSyntax
+      }.first
+    )
+    let classDecl = try XCTUnwrap(
+      Parser.parse(source: "final class Model {}").statements.first?.item.as(ClassDeclSyntax.self)
+    )
+
+    return try GraphStoredMacro.expansion(
+      of: attribute,
+      providingPeersOf: variableDecl,
+      in: BasicMacroExpansionContext(lexicalContext: [Syntax(classDecl)])
+    )
   }
 
   private func expandGraphStoredAccessors(

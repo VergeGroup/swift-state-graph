@@ -208,7 +208,23 @@ extension GraphStoredMacro: PeerMacro {
       return []
     }
 
-    return [DeclSyntax(createStorageDeclaration(from: variableDecl))]
+    var peers = [DeclSyntax(createStorageDeclaration(from: variableDecl))]
+
+    // Rejected declarations receive no init accessor, so they must not declare
+    // a marker that nothing initializes.
+    if !variableDecl.isConstant,
+      !variableDecl.isWeak,
+      !variableDecl.isUnowned,
+      usesForwardingInitAccessor(for: variableDecl, context: context)
+    {
+      peers.append(createInitMarkerDeclaration(propertyName: variableDecl.name))
+    }
+
+    return peers
+  }
+
+  private static func createInitMarkerDeclaration(propertyName: String) -> DeclSyntax {
+    "@GraphIgnored private nonisolated(unsafe) var $__init_\(raw: propertyName): GraphStoredInitMarker"
   }
 }
 
@@ -262,7 +278,7 @@ extension GraphStoredMacro: AccessorMacro {
 
     if determineIfInitAccessorNeeded(for: variableDecl, context: context) {
       accessors.append(createInitAccessor(propertyName: propertyName))
-    } else if !variableDecl.isStatic && !isTopLevelProperty(context: context) {
+    } else if usesForwardingInitAccessor(for: variableDecl, context: context) {
       accessors.append(createAccessInitAccessor(propertyName: propertyName))
     }
 
@@ -302,6 +318,16 @@ extension GraphStoredMacro: AccessorMacro {
     return !variableDecl.hasInitializer
   }
 
+  /// Whether the init accessor forwards its value into an existing `Stored` node.
+  private static func usesForwardingInitAccessor(
+    for variableDecl: VariableDeclSyntax,
+    context: some MacroExpansionContext
+  ) -> Bool {
+    !determineIfInitAccessorNeeded(for: variableDecl, context: context)
+      && !variableDecl.isStatic
+      && !isTopLevelProperty(context: context)
+  }
+
   private static func isTopLevelProperty(
     context: some MacroExpansionContext
   ) -> Bool {
@@ -335,15 +361,22 @@ extension GraphStoredMacro: AccessorMacro {
     )
   }
 
+  /// Creates an init accessor that keeps the existing `Stored` node's identity.
+  ///
+  /// The marker gives the accessor a non-empty `initializes` list. Without it,
+  /// definite initialization destroys the wrong stored property when an
+  /// initializer exits early.
   private static func createAccessInitAccessor(
     propertyName: String
   ) -> AccessorDeclSyntax {
     AccessorDeclSyntax(
       """
       @storageRestrictions(
+        initializes: $__init_\(raw: propertyName),
         accesses: $\(raw: propertyName)
       )
       init(initialValue) {
+        $__init_\(raw: propertyName) = .init()
         $\(raw: propertyName).wrappedValue = initialValue
       }
       """
