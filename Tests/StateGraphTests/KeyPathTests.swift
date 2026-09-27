@@ -1,3 +1,4 @@
+import Foundation
 @preconcurrency import Testing
 @testable import StateGraph
 
@@ -26,5 +27,31 @@ struct KeyPathTests {
       any KeyPath<NodeObservationRoot<Stored<Int>>, Void> & Sendable = keyPath
 
     #expect(sendableKeyPath == keyPath)
+  }
+
+  @Test("Nodes reuse a cached KeyPath equal to the readable literal on every thread")
+  func cachedNodeKeyPathEqualsReadableLiteral() async {
+    let literal = \NodeObservationRoot<Stored<Int>>.wrappedValue
+    let cached = NodeObservationKeyPaths.stored(Int.self)
+
+    #expect(cached == literal)
+    #expect(cached.hashValue == literal.hashValue)
+    #expect(String(describing: cached) == String(describing: literal))
+    // Nothing suspends between these calls, so both come from this thread's table.
+    #expect(cached === NodeObservationKeyPaths.stored(Int.self))
+    // Stored and Computed nodes of one value type have distinct entries.
+    #expect(
+      NodeObservationKeyPaths.computed(Int.self)
+        == \NodeObservationRoot<Computed<Int>>.wrappedValue
+    )
+
+    let cachedOnAnotherThread = await withCheckedContinuation { continuation in
+      Thread {
+        continuation.resume(returning: NodeObservationKeyPaths.stored(Int.self))
+      }.start()
+    }
+
+    #expect(cachedOnAnotherThread == literal)
+    #expect(cachedOnAnotherThread.hashValue == literal.hashValue)
   }
 }
