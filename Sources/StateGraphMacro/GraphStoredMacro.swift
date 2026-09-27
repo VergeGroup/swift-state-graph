@@ -208,7 +208,24 @@ extension GraphStoredMacro: PeerMacro {
       return []
     }
 
-    return [DeclSyntax(createStorageDeclaration(from: variableDecl))]
+    var peers = [DeclSyntax(createStorageDeclaration(from: variableDecl))]
+
+    // Rejected declarations receive no init accessor and do not need marker storage.
+    if !variableDecl.isConstant,
+      !variableDecl.isWeak,
+      !variableDecl.isUnowned,
+      usesForwardingInitAccessor(for: variableDecl, context: context)
+    {
+      peers.append(createInitMarkerDeclaration(propertyName: variableDecl.name))
+    }
+
+    return peers
+  }
+
+  /// Gives the workaround marker a default so synthesized `Decodable` can omit it
+  /// from `CodingKeys`.
+  private static func createInitMarkerDeclaration(propertyName: String) -> DeclSyntax {
+    "@GraphIgnored private nonisolated(unsafe) var $__init_\(raw: propertyName): GraphStoredInitMarker = .init()"
   }
 }
 
@@ -262,7 +279,7 @@ extension GraphStoredMacro: AccessorMacro {
 
     if determineIfInitAccessorNeeded(for: variableDecl, context: context) {
       accessors.append(createInitAccessor(propertyName: propertyName))
-    } else if !variableDecl.isStatic && !isTopLevelProperty(context: context) {
+    } else if usesForwardingInitAccessor(for: variableDecl, context: context) {
       accessors.append(createAccessInitAccessor(propertyName: propertyName))
     }
 
@@ -302,6 +319,16 @@ extension GraphStoredMacro: AccessorMacro {
     return !variableDecl.hasInitializer
   }
 
+  /// Whether the init accessor forwards its value into an existing `Stored` node.
+  private static func usesForwardingInitAccessor(
+    for variableDecl: VariableDeclSyntax,
+    context: some MacroExpansionContext
+  ) -> Bool {
+    !determineIfInitAccessorNeeded(for: variableDecl, context: context)
+      && !variableDecl.isStatic
+      && !isTopLevelProperty(context: context)
+  }
+
   private static func isTopLevelProperty(
     context: some MacroExpansionContext
   ) -> Bool {
@@ -335,15 +362,27 @@ extension GraphStoredMacro: AccessorMacro {
     )
   }
 
+  /// Creates an init accessor that keeps the existing `Stored` node's identity.
+  ///
+  /// Workaround for a Swift definite initialization bug, reproduced with Swift 6.4:
+  /// after an init accessor with an empty `initializes` list runs, a `throw` or
+  /// `return nil` before `self` is fully initialized can destroy stored properties twice.
+  /// Giving the accessor a marker to initialize avoids that compiler path.
+  ///
+  /// Keep the marker and its `initializes` entry until the initializer failure cases in
+  /// `ModelInitializationTests` pass without them on every supported Swift compiler.
+  /// Removing the workaround must still preserve the existing `Stored` node.
   private static func createAccessInitAccessor(
     propertyName: String
   ) -> AccessorDeclSyntax {
     AccessorDeclSyntax(
       """
       @storageRestrictions(
+        initializes: $__init_\(raw: propertyName),
         accesses: $\(raw: propertyName)
       )
       init(initialValue) {
+        $__init_\(raw: propertyName) = .init()
         $\(raw: propertyName).wrappedValue = initialValue
       }
       """

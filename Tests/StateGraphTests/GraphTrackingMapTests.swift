@@ -338,6 +338,11 @@ struct GraphTrackingMapTests {
       let didProcessSmallChange: TestSignal
       private var lastValue: Int?
 
+      init(didProcessSmallChange: TestSignal) {
+        self.didProcessSmallChange = didProcessSmallChange
+        self.lastValue = nil
+      }
+
       mutating func send(value: Int) -> Int? {
         if value == 3 {
           didProcessSmallChange.signal()
