@@ -278,7 +278,7 @@ final class GraphStoredMacroTests: XCTestCase {
       }
 
       set(__graphStoredNewValue) {
-        let previousValue: Int = $count.wrappedValue
+        let previousValue: Int = $count._valueForGraphStoredAssignment
         $count.wrappedValue = __graphStoredNewValue
         do {
           history.append((previousValue, count))
@@ -317,7 +317,7 @@ final class GraphStoredMacroTests: XCTestCase {
           let nextValue: Int = __graphStoredNewValue
           history.append((count, nextValue))
         }
-        let previousValue: Int = $count.wrappedValue
+        let previousValue: Int = $count._valueForGraphStoredAssignment
         $count.wrappedValue = __graphStoredNewValue
         do {
           history.append((previousValue, count))

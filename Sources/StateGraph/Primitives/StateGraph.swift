@@ -121,9 +121,13 @@ public enum StateGraphGlobal {
 /// - Changes propagate: When this node's value changes, downstream nodes are notified
 ///
 /// - Important: Descriptor computation and equality are read-only graph operations.
-///   DEBUG builds diagnose entry into a supported mutation API; non-DEBUG builds omit
-///   that tracking and violations remain unsupported. Dependency cycles, including
-///   direct self-read, are unsupported because the graph must remain a DAG.
+///   A computation may initialize `Stored` nodes created during that invocation until
+///   their first value read or assignment-observer registration. Such initialization
+///   preserves node identity and does not publish changes or stage transaction writes.
+///   Equality does not receive this initialization permission.
+///   DEBUG builds diagnose prohibited mutations; violations remain unsupported in
+///   non-DEBUG builds. Dependency cycles, including direct self-read, are unsupported
+///   because the graph must remain a DAG.
 ///
 /// `Value` itself does not need to conform to `Sendable`. `SendableMetatype` allows the
 /// node's isolated closures to use generic conformances safely.
@@ -271,14 +275,14 @@ public final class Computed<Value: SendableMetatype>: Node, Observable, CustomDe
     ThreadLocal.currentNode.withValue(nil) {
       if ThreadLocal.graphTransaction.value?.recordsDependencies == true {
         var context = Context(environment: .init())
-        return withGraphMutationProhibited(.computedDescriptor) {
+        return withGraphMutationProhibited(.computedDescriptor, allowingStoredInitialization: true) {
           descriptor.compute(context: &context)
         }
       }
 
       return ThreadLocal.registration.withValue(nil) {
         var context = Context(environment: .init())
-        return withGraphMutationProhibited(.computedDescriptor) {
+        return withGraphMutationProhibited(.computedDescriptor, allowingStoredInitialization: true) {
           descriptor.compute(context: &context)
         }
       }
@@ -473,7 +477,7 @@ public final class Computed<Value: SendableMetatype>: Node, Observable, CustomDe
         Only register the registration to the current node.
         */
         _cachedValue = ThreadLocal.registration.withValue(nil) {
-          withGraphMutationProhibited(.computedDescriptor) {
+          withGraphMutationProhibited(.computedDescriptor, allowingStoredInitialization: true) {
             descriptor.compute(context: &context)
           }
         }

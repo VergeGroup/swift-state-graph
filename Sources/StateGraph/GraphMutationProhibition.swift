@@ -22,6 +22,13 @@ enum GraphMutationProhibition: Sendable {
 #endif
 }
 
+/// Identifies one descriptor invocation that may initialize its newly created nodes.
+///
+/// Nodes keep a weak reference to this identity so permission expires when the
+/// invocation ends. It owns no graph nodes. Nested evaluations receive independent
+/// identities, and comparators and other read-only callbacks suspend the enclosing permission.
+final class StoredInitializationScope: Sendable {}
+
 /// Asserts in DEBUG when a mutation enters a graph context that must be read-only.
 @inline(__always)
 func assertGraphMutationAllowed(_ operation: String) {
@@ -34,12 +41,23 @@ func assertGraphMutationAllowed(_ operation: String) {
 #endif
 }
 
-/// Runs a closure under a DEBUG-only marker that diagnoses graph mutation.
+/// Runs a read-only graph closure with optional permission to initialize new nodes.
+///
+/// Initialization scopes are active in every build. Mutation diagnostics use a
+/// separate DEBUG-only marker.
 @inline(__always)
 func withGraphMutationProhibited<Result>(
   _ prohibition: GraphMutationProhibition,
+  allowingStoredInitialization: Bool = false,
   _ body: () -> Result
 ) -> Result {
+  let previousInitializationScope = ThreadLocal.storedInitializationScope.replaceValue(
+    allowingStoredInitialization ? StoredInitializationScope() : nil
+  )
+  defer {
+    ThreadLocal.storedInitializationScope.replaceValue(previousInitializationScope)
+  }
+
 #if DEBUG
   let previousProhibition = ThreadLocal.graphMutationProhibition.replaceValue(prohibition)
   defer {
@@ -51,18 +69,25 @@ func withGraphMutationProhibited<Result>(
 #endif
 }
 
-/// Runs a throwing closure under a DEBUG-only marker that diagnoses graph mutation.
+/// Runs a throwing read-only closure with initialization permission suspended.
+/// Mutation diagnostics use a separate DEBUG-only marker.
 @inline(__always)
 func withGraphMutationProhibited<Result, Failure: Error>(
   _ prohibition: GraphMutationProhibition,
   _ body: () throws(Failure) -> Result
 ) throws(Failure) -> Result {
+  // A mutation callback must not inherit permission from an enclosing descriptor.
+  let previousInitializationScope = ThreadLocal.storedInitializationScope.replaceValue(nil)
+  defer {
+    ThreadLocal.storedInitializationScope.replaceValue(previousInitializationScope)
+  }
+
 #if DEBUG
-  try ThreadLocal.graphMutationProhibition.withValue(
+  return try ThreadLocal.graphMutationProhibition.withValue(
     prohibition,
     perform: body
   )
 #else
-  try body()
+  return try body()
 #endif
 }

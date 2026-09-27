@@ -65,10 +65,13 @@ import Foundation
 ///   hop: after a hop, the handler reads the coherent committed snapshot current
 ///   when it runs rather than transaction-local staged storage.
 /// - Important: StateGraph's API contract prohibits graph mutations from `Stored`
-///   comparators, ``Stored/unsafeModify(_:)``, and ``Computed`` descriptors. DEBUG
-///   builds diagnose violations. Non-DEBUG builds omit that tracking, so violating
-///   the contract remains unsupported. Mutate from `onDidSet(_:)` or another
-///   post-mutation callback instead.
+///   comparators, ``Stored/unsafeModify(_:)``, and ``Computed`` descriptors. A
+///   descriptor may initialize a new ``Stored`` node before its first value read
+///   or observer registration. Those initial assignments are not staged and survive
+///   rollback if the new node is retained. DEBUG builds diagnose prohibited
+///   mutations; violating the contract remains unsupported in non-DEBUG builds.
+///   Mutate existing graph state from `onDidSet(_:)` or another post-mutation
+///   callback instead.
 /// - Parameters:
 ///   - file: The source file that starts the transaction.
 ///   - line: The source line that starts the transaction.
