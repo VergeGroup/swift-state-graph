@@ -52,7 +52,7 @@ final class GraphStoredMacroTests: XCTestCase {
 
         @GraphIgnored let $count: Stored<Int> = .init(name: "count", wrappedValue: 0)
 
-        @GraphIgnored private nonisolated(unsafe) var $__init_count: GraphStoredInitMarker
+        @GraphIgnored private nonisolated(unsafe) var $__init_count: GraphStoredInitMarker = .init()
 
       }
       """
@@ -90,7 +90,7 @@ final class GraphStoredMacroTests: XCTestCase {
         @GraphIgnored
           private let $value: Stored<Int> = .init(name: "value", wrappedValue: 0)
 
-        @GraphIgnored private nonisolated(unsafe) var $__init_value: GraphStoredInitMarker
+        @GraphIgnored private nonisolated(unsafe) var $__init_value: GraphStoredInitMarker = .init()
       }
       """
     }
@@ -128,7 +128,7 @@ final class GraphStoredMacroTests: XCTestCase {
 
         @GraphIgnored let $count: Stored<Int> = .init(name: "count", wrappedValue: 0)
 
-        @GraphIgnored private nonisolated(unsafe) var $__init_count: GraphStoredInitMarker
+        @GraphIgnored private nonisolated(unsafe) var $__init_count: GraphStoredInitMarker = .init()
 
       }
       """
@@ -210,7 +210,7 @@ final class GraphStoredMacroTests: XCTestCase {
 
         @GraphIgnored let $count: Stored<Int?> = .init(name: "count", wrappedValue: nil)
 
-        @GraphIgnored private nonisolated(unsafe) var $__init_count: GraphStoredInitMarker
+        @GraphIgnored private nonisolated(unsafe) var $__init_count: GraphStoredInitMarker = .init()
 
       }
       """
@@ -249,7 +249,7 @@ final class GraphStoredMacroTests: XCTestCase {
 
         @GraphIgnored let $community: Stored<Community?> = .init(name: "community", wrappedValue: nil)
 
-        @GraphIgnored private nonisolated(unsafe) var $__init_community: GraphStoredInitMarker
+        @GraphIgnored private nonisolated(unsafe) var $__init_community: GraphStoredInitMarker = .init()
 
       }
       """

@@ -161,6 +161,24 @@ struct ModelInitializationTests {
     #expect(counter.count == 1)
   }
 
+  /// Synthesized decoding must allow transient graph state to retain its default.
+  @Test func synthesized_decoding_preserves_excluded_graph_defaults() throws {
+    final class Model: Codable {
+      @GraphStored var value: Int = 7
+      @GraphStored var optionalValue: Int?
+      var name: String
+
+      enum CodingKeys: String, CodingKey {
+        case name
+      }
+    }
+
+    let model = try JSONDecoder().decode(Model.self, from: Data(#"{"name":"test"}"#.utf8))
+    #expect(model.name == "test")
+    #expect(model.value == 7)
+    #expect(model.optionalValue == nil)
+  }
+
   @Test func decoding_failure_throws_after_assigning_graph_stored_property() {
     final class Model: Decodable {
       @GraphStored var value: Int = 0

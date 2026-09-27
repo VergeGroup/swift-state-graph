@@ -210,8 +210,7 @@ extension GraphStoredMacro: PeerMacro {
 
     var peers = [DeclSyntax(createStorageDeclaration(from: variableDecl))]
 
-    // Rejected declarations receive no init accessor, so they must not declare
-    // a marker that nothing initializes.
+    // Rejected declarations receive no init accessor and do not need marker storage.
     if !variableDecl.isConstant,
       !variableDecl.isWeak,
       !variableDecl.isUnowned,
@@ -223,8 +222,9 @@ extension GraphStoredMacro: PeerMacro {
     return peers
   }
 
+  /// Supplies a default so synthesized decoding can omit this implementation detail.
   private static func createInitMarkerDeclaration(propertyName: String) -> DeclSyntax {
-    "@GraphIgnored private nonisolated(unsafe) var $__init_\(raw: propertyName): GraphStoredInitMarker"
+    "@GraphIgnored private nonisolated(unsafe) var $__init_\(raw: propertyName): GraphStoredInitMarker = .init()"
   }
 }
 
