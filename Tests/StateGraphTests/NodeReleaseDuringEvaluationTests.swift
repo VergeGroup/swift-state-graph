@@ -33,6 +33,21 @@ struct NodeReleaseDuringEvaluationTests {
     #expect(evaluationCount.withLock { $0 } == 2)
   }
 
+  @Test("Releasing a model initialized by a descriptor keeps its reader clean")
+  func releasingModelInitializedByDescriptor() {
+    let source = Stored(wrappedValue: 1)
+    let computed = Computed<Int> { _ in
+      // The initializer replaces the node's default before the descriptor reads it.
+      DefaultInitializedModel(count: source.wrappedValue).count
+    }
+
+    #expect(computed.wrappedValue == 1)
+    #expect(computed.potentiallyDirty == false)
+
+    source.wrappedValue = 2
+    #expect(computed.wrappedValue == 2)
+  }
+
   @Test("Releasing a temporary computed read by a descriptor detaches it from its source")
   func releasingTemporaryComputedReadByDescriptor() {
     let source = Stored(wrappedValue: 1)
@@ -414,6 +429,15 @@ struct NodeReleaseDuringEvaluationTests {
 
 private final class ReleasedModel {
   @GraphStored var count: Int
+
+  init(count: Int) {
+    self.count = count
+  }
+}
+
+/// A model whose node is created with a default and then initialized by `init`.
+private final class DefaultInitializedModel {
+  @GraphStored var count: Int = 0
 
   init(count: Int) {
     self.count = count
