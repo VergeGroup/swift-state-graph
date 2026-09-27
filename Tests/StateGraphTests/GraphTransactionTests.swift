@@ -1516,11 +1516,15 @@ struct GraphTransactionTests {
   }
 
 #if DEBUG
+  /// Holds the process-wide publication gate closed while a Computed read is in flight.
+  ///
+  /// Suites running concurrently may block on that gate from the main actor or a
+  /// cooperative-executor worker. Every step between closing and reopening the gate
+  /// therefore runs on dedicated threads, and the async test task only awaits the outcome.
   @Test
-  @MainActor
   func observationSnapshotWaitsForAnInFlightComputedRead() async {
     let source = Stored(wrappedValue: 0)
-    let descriptorStarted = TestSignal()
+    let descriptorStarted = TestThreadSignal()
     let resumeDescriptor = TestThreadGate()
     let shouldPauseDescriptor = LockedBox(true)
     let initialObservedValue = LockedBox<Int?>(nil)
@@ -1528,6 +1532,13 @@ struct GraphTransactionTests {
     let observerReadFinished = TestSignal()
     let transactionFinished = TestSignal()
     let observationDelivered = TestSignal()
+    let coordinatorFinished = TestSignal()
+    let scenarioResult = OSAllocatedUnfairLock(
+      initialState: (
+        descriptorStarted: false,
+        didObserveBlockedPublisher: false
+      )
+    )
 
     let computed = Computed { _ in
       var shouldPause = false
@@ -1552,29 +1563,35 @@ struct GraphTransactionTests {
       observerReadFinished.signal()
     }.start()
 
-    #expect(await descriptorStarted.wait(for: .seconds(5)))
-
+    // The coordinator reopens the gate itself as soon as the publisher blocks. Handing
+    // that step back to the test task could stall every graph reader in the process.
     Thread {
-      withGraphTransaction {
-        source.wrappedValue = 1
+      defer {
+        resumeDescriptor.open()
+        coordinatorFinished.signal()
       }
-      transactionFinished.signal()
-    }.start()
 
-    let publisherWaitFinished = TestSignal()
-    let didObserveBlockedPublisher = LockedBox(false)
-    Thread {
+      let didStart = descriptorStarted.wait(until: Date().addingTimeInterval(5))
+      scenarioResult.withLock { $0.descriptorStarted = didStart }
+      guard didStart else { return }
+
+      Thread {
+        withGraphTransaction {
+          source.wrappedValue = 1
+        }
+        transactionFinished.signal()
+      }.start()
+
       let didBlock = GraphTransactionCoordinator.shared.__testing__waitForPublisherToBlock(
         until: Date().addingTimeInterval(1)
       )
-      didObserveBlockedPublisher.update { $0 = didBlock }
-      publisherWaitFinished.signal()
+      scenarioResult.withLock { $0.didObserveBlockedPublisher = didBlock }
     }.start()
 
-    #expect(await publisherWaitFinished.wait(for: .seconds(5)))
-    #expect(didObserveBlockedPublisher.value)
-
-    resumeDescriptor.open()
+    #expect(await coordinatorFinished.wait(for: .seconds(10)))
+    let result = scenarioResult.withLock { $0 }
+    #expect(result.descriptorStarted)
+    #expect(result.didObserveBlockedPublisher)
 
     #expect(await observerReadFinished.wait(for: .seconds(5)))
     #expect(await transactionFinished.wait(for: .seconds(5)))
