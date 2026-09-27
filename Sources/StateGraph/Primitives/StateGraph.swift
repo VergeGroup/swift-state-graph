@@ -233,6 +233,11 @@ public final class Computed<Value: SendableMetatype>: Node, Observable, CustomDe
     lock.lock()
     defer { lock.unlock() }
 
+    return preparePotentiallyDirtyStateWhileLocked()
+  }
+
+  /// Marks this node dirty and captures callbacks while the caller holds its node lock.
+  private func preparePotentiallyDirtyStateWhileLocked() -> InvalidationWork? {
     guard !_potentiallyDirty else { return nil }
     _potentiallyDirty = true
 
@@ -412,13 +417,14 @@ public final class Computed<Value: SendableMetatype>: Node, Observable, CustomDe
     self.outgoingEdges.removeAll()
     lock.unlock()
 
-    for edge in incomingEdges {
-      edge.from?.removeOutgoingEdge(edge)
-    }
+    guard !incomingEdges.isEmpty || !outgoingEdges.isEmpty else { return }
 
-    for edge in outgoingEdges {
-      edge.to?.sourceDidRelease(edge)
-    }
+    // A descriptor or a replaced cached value can release this node while this thread
+    // still holds a neighbor's evaluation lock.
+    ComputedEvaluationStack.publishRelease(
+      incomingEdges: incomingEdges,
+      outgoingEdges: outgoingEdges
+    )
   }
 
   public func recomputeIfNeeded() {
@@ -436,7 +442,6 @@ public final class Computed<Value: SendableMetatype>: Node, Observable, CustomDe
   /// Recomputes while the caller owns one committed-graph read scope.
   private func recomputeIfNeededWithinReadAccess() {
     lock.lock()
-    defer { lock.unlock() }
 
     // record dependency
     if let currentNode = ThreadLocal.currentNode.value {
@@ -450,16 +455,30 @@ public final class Computed<Value: SendableMetatype>: Node, Observable, CustomDe
       self.trackingRegistrations.insert(registration)
     }
 
-    if !_potentiallyDirty && _cachedValue != nil { return }
+    if !_potentiallyDirty && _cachedValue != nil {
+      lock.unlock()
+      return
+    }
+
+    // Refreshing sources, running the descriptor, and replacing the cached value can
+    // each deinitialize nodes while this lock is held.
+    let evaluationStack = ComputedEvaluationStack.beginEvaluation(of: self)
 
     for edge in incomingEdges {
       edge.from?.recomputeIfNeeded()
     }
 
-    let hasPendingIncomingEdge = incomingEdges.contains {
-      $0.isPending
+    // Another thread can release a source after its weak edge detaches but before the
+    // release marks that edge pending. Drop a detached edge only when this pass
+    // recomputes, so the release is not lost with its tombstone.
+    var hasPendingIncomingEdge = false
+    incomingEdges.removeAll { edge in
+      let isDetached = edge.from == nil
+      if isDetached || edge.isPending {
+        hasPendingIncomingEdge = true
+      }
+      return isDetached
     }
-    incomingEdges.removeAll(where: { $0.from == nil })
 
     if hasPendingIncomingEdge || _cachedValue == nil {
 
@@ -501,6 +520,7 @@ public final class Computed<Value: SendableMetatype>: Node, Observable, CustomDe
 
     _potentiallyDirty = false
 
+    evaluationStack.endEvaluation(of: self, unlocking: lock)
   }
 
   private func removeIncomingEdges() {
@@ -571,6 +591,50 @@ extension Computed: GraphTransactionInvalidatableNode {
         registration.perform()
       }
     }
+  }
+}
+
+extension Computed: EvaluationReleaseInvalidatableNode {
+
+  /// Marks this node dirty for a release observed while `evaluation` holds node locks.
+  ///
+  /// The dirty state is visible at once, so a later refresh of this node in the same
+  /// evaluation recomputes it. Callbacks keep the setter's order but wait for the
+  /// thread's outermost evaluation to unlock.
+  func invalidateWithoutWaiting(during evaluation: ComputedEvaluationStack) -> Bool {
+    guard lock.lockIfAvailable() else { return false }
+    let invalidationWork = preparePotentiallyDirtyStateWhileLocked()
+    lock.unlock()
+
+    guard let invalidationWork else { return true }
+
+#if canImport(Observation)
+    if #available(macOS 14.0, iOS 17.0, watchOS 10.0, tvOS 17.0, *) {
+      evaluation.deferDelivery { [observationRegistrar] in
+        withMainActor {
+          observationRegistrar.willSet(
+            NodeObservationRoot<Computed<Value>>(),
+            keyPath: \NodeObservationRoot<Computed<Value>>.wrappedValue
+          )
+        }
+      }
+    }
+#endif
+
+    for edge in invalidationWork.outgoingEdges {
+      evaluation.invalidateTarget(of: edge)
+    }
+
+    let trackingRegistrations = invalidationWork.trackingRegistrations
+    if !trackingRegistrations.isEmpty {
+      evaluation.deferDelivery {
+        for registration in trackingRegistrations {
+          registration.perform()
+        }
+      }
+    }
+
+    return true
   }
 }
 
@@ -668,4 +732,9 @@ public final class Edge: CustomDebugStringConvertible {
 /// User callbacks must run outside this lock. Immediate writers that release it for
 /// comparison or Observation delivery retain a coordinator-owned logical
 /// reservation until their value is published.
+///
+/// A `Computed` evaluation keeps this lock while it locks its sources, so nested node
+/// locks are acquired only from downstream to upstream. A node deinitialized while its
+/// thread holds an evaluation lock never waits for a neighbor's lock. It defers that
+/// work until the thread's outermost evaluation unlocks.
 public typealias NodeLock = OSAllocatedUnfairLock<Void>

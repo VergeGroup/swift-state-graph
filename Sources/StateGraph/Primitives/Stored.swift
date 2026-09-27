@@ -670,9 +670,14 @@ public final class Stored<Value: SendableMetatype>: Node, Observable, CustomDebu
     self.outgoingEdges.removeAll()
     lock.unlock()
 
-    for edge in outgoingEdges {
-      edge.to?.sourceDidRelease(edge)
-    }
+    guard !outgoingEdges.isEmpty else { return }
+
+    // A descriptor or a replaced cached value can release this node while this thread
+    // still holds a reader's evaluation lock.
+    ComputedEvaluationStack.publishRelease(
+      incomingEdges: [],
+      outgoingEdges: outgoingEdges
+    )
   }
 
   public func recomputeIfNeeded() {
