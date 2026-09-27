@@ -42,21 +42,6 @@ extension TypeErasedNode {
     edge.isPending = true
     potentiallyDirty = true
   }
-
-  /// Marks this node dirty unless it has consumed `edge` by recomputing.
-  ///
-  /// A release observed during an evaluation defers this call when another thread
-  /// holds this node's lock. A recomputation that has since removed `edge` either
-  /// read its sources after the change or recorded a replacement edge, which the
-  /// change reaches separately.
-  func invalidateUnlessConsumed(_ edge: Edge) {
-    lock.lock()
-    let isIncomingEdge = incomingEdges.contains { $0 === edge }
-    lock.unlock()
-
-    guard isIncomingEdge else { return }
-    potentiallyDirty = true
-  }
 }
 
 public protocol Node: TypeErasedNode {

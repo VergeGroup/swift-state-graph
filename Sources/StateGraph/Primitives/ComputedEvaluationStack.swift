@@ -107,7 +107,8 @@ final class ComputedEvaluationStack {
         case .detachSource(let edge):
           edge.from?.removeOutgoingEdge(edge)
         case .invalidateTarget(let edge):
-          edge.to?.invalidateUnlessConsumed(edge)
+          guard let target = edge.to else { break }
+          Self.releaseInvalidatableNode(target).invalidateUnlessConsumed(edge)
         case .deliver(let callbacks):
           callbacks()
         }
@@ -159,15 +160,23 @@ final class ComputedEvaluationStack {
     guard let target = edge.to else { return }
     guard !evaluatingNodes.contains(ObjectIdentifier(target)) else { return }
 
+    if !Self.releaseInvalidatableNode(target).invalidateWithoutWaiting(during: self) {
+      deferredWork.append(.invalidateTarget(edge))
+    }
+  }
+
+  /// Returns a dependency target's release invalidation support.
+  ///
+  /// Only `Computed` nodes record incoming edges, so every edge target conforms.
+  private static func releaseInvalidatableNode(
+    _ target: any TypeErasedNode
+  ) -> any EvaluationReleaseInvalidatableNode {
     guard let target = target as? any EvaluationReleaseInvalidatableNode else {
       preconditionFailure(
         "A node release reached a dependency node without evaluation-time invalidation support."
       )
     }
-
-    if !target.invalidateWithoutWaiting(during: self) {
-      deferredWork.append(.invalidateTarget(edge))
-    }
+    return target
   }
 
   /// Delivers callbacks after the thread's outermost evaluation unlocks.
@@ -186,4 +195,10 @@ protocol EvaluationReleaseInvalidatableNode: AnyObject {
   /// - Returns: `false` if this node's lock is held. The caller must defer the
   ///   invalidation instead of waiting.
   func invalidateWithoutWaiting(during evaluation: ComputedEvaluationStack) -> Bool
+
+  /// Marks this node dirty unless it has consumed `edge` by recomputing.
+  ///
+  /// Runs a deferred invalidation after the releasing thread's outermost evaluation
+  /// unlocks, so it may wait for this node's lock.
+  func invalidateUnlessConsumed(_ edge: Edge)
 }

@@ -295,6 +295,10 @@ struct NodeReleaseDuringEvaluationTests {
     guard didUpstreamFinish, didDownstreamFinish else { return nil }
 
     #expect(downstreamValue.withLock { $0 } == 4)
+
+    // The refresh consumed the released node's edge, so any deferred invalidation of
+    // `downstream` must leave it clean.
+    #expect(downstream.potentiallyDirty == false)
     return didMeet.withLock { $0 }
   }
 

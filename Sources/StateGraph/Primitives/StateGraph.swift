@@ -201,30 +201,35 @@ public final class Computed<Value: SendableMetatype>: Node, Observable, CustomDe
       }
 
       guard let invalidationWork = preparePotentiallyDirtyState() else { return }
+      deliverPotentiallyDirtyState(invalidationWork)
+    }
+  }
 
-      // Notify observers when becoming potentially dirty, even if the computed value
-      // might not actually change. This is necessary for SwiftUI and other Observation
-      // consumers to know they should check for updates. The actual value equality
-      // is checked during recomputation to avoid unnecessary downstream propagation.
+  /// Delivers the callbacks and downstream invalidation captured with a dirty mark.
+  ///
+  /// Call this after releasing the node lock.
+  private func deliverPotentiallyDirtyState(_ invalidationWork: consuming InvalidationWork) {
+    // Notify observers when becoming potentially dirty, even if the computed value
+    // might not actually change. This is necessary for SwiftUI and other Observation
+    // consumers to know they should check for updates. The actual value equality
+    // is checked during recomputation to avoid unnecessary downstream propagation.
 #if canImport(Observation)
-      if #available(macOS 14.0, iOS 17.0, watchOS 10.0, tvOS 17.0, *) {
-        withMainActor { [observationRegistrar] in
-          observationRegistrar.willSet(
-            NodeObservationRoot<Computed<Value>>(),
-            keyPath: \NodeObservationRoot<Computed<Value>>.wrappedValue
-          )
-        }
+    if #available(macOS 14.0, iOS 17.0, watchOS 10.0, tvOS 17.0, *) {
+      withMainActor { [observationRegistrar] in
+        observationRegistrar.willSet(
+          NodeObservationRoot<Computed<Value>>(),
+          keyPath: \NodeObservationRoot<Computed<Value>>.wrappedValue
+        )
       }
+    }
 #endif
 
-      for edge in invalidationWork.outgoingEdges {
-        edge.to?.potentiallyDirty = true
-      }
+    for edge in invalidationWork.outgoingEdges {
+      edge.to?.potentiallyDirty = true
+    }
 
-      for registration in invalidationWork.trackingRegistrations {
-        registration.perform()
-      }
-            
+    for registration in invalidationWork.trackingRegistrations {
+      registration.perform()
     }
   }
 
@@ -635,6 +640,26 @@ extension Computed: EvaluationReleaseInvalidatableNode {
     }
 
     return true
+  }
+
+  /// Marks this node dirty unless it has consumed `edge` by recomputing.
+  ///
+  /// A recomputation that removed `edge` either read its sources after the change or
+  /// recorded a replacement edge, which the change reaches separately. Checking and
+  /// marking under one lock hold keeps a recomputation that consumes `edge` in between
+  /// from being dirtied again.
+  func invalidateUnlessConsumed(_ edge: Edge) {
+    lock.lock()
+    let invalidationWork: InvalidationWork?
+    if incomingEdges.contains(where: { $0 === edge }) {
+      invalidationWork = preparePotentiallyDirtyStateWhileLocked()
+    } else {
+      invalidationWork = nil
+    }
+    lock.unlock()
+
+    guard let invalidationWork else { return }
+    deliverPotentiallyDirtyState(invalidationWork)
   }
 }
 
