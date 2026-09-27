@@ -1,17 +1,38 @@
+import Darwin
 
-import Foundation
-
+/// One thread-local slot backed by a dedicated pthread key.
+///
+/// Every outermost node read installs and restores thread-local markers, so this
+/// type sits on the hottest graph paths. Each thread lazily allocates one
+/// `ThreadLocalSlotStorage` per slot on its first non-nil install and reuses it
+/// for the rest of the thread's lifetime. Reads and replacements therefore cost a
+/// `pthread_getspecific` plus a field access, without per-call allocation, string
+/// hashing or dynamic casts.
+///
+/// The storage is reachable only through the owning thread's key, so values never
+/// cross threads and the stored field needs no synchronization.
 struct ThreadLocalValue<Value>: ~Copyable, Sendable {
 
   var value: Value? {
     get {
-      Thread.current.threadDictionary[key] as? Value
+      // A read never allocates storage. A missing entry means nothing was
+      // installed on this thread, or the key is being torn down at thread exit.
+      currentStorage()?.value
     }
   }
 
-  let key: String
+  private let key: pthread_key_t
 
-  init(key: String) {
+  /// Creates the pthread key for this slot.
+  ///
+  /// Slots are static members, so Swift's lazy global initialization creates each
+  /// key exactly once per process. Keys are never deleted.
+  init() {
+    var key = pthread_key_t()
+    let result = pthread_key_create(&key, destroyThreadLocalSlotStorage)
+    // Exhausting the process-wide key space is a programming error rather than a
+    // recoverable condition.
+    precondition(result == 0, "pthread_key_create failed: \(result)")
     self.key = key
   }
 
@@ -21,17 +42,25 @@ struct ThreadLocalValue<Value>: ~Copyable, Sendable {
   /// throwing closure wrapper so its failure type remains unchanged.
   @discardableResult
   func replaceValue(_ value: Value?) -> Value? {
-    let oldValue = self.value
-    setValue(value)
-    return oldValue
-  }
-
-  private func setValue(_ value: Value?) {
-    if let value {
-      Thread.current.threadDictionary[key] = value
-    } else {
-      Thread.current.threadDictionary.removeObject(forKey: key)
+    if let storage = currentStorage() {
+      let oldValue = storage.value
+      storage.value = value
+      return oldValue
     }
+
+    // Restoring nil on a thread without storage must not allocate. Besides saving
+    // work, this keeps deinitializers that run during pthread key destruction from
+    // re-arming an already destroyed key.
+    guard let value else {
+      return nil
+    }
+
+    let storage = ThreadLocalSlotStorage<Value>(key: key, value: value)
+    // The key owns this +1 reference until the thread exits; see
+    // `destroyThreadLocalSlotStorage`.
+    let result = pthread_setspecific(key, Unmanaged.passRetained(storage).toOpaque())
+    precondition(result == 0, "pthread_setspecific failed: \(result)")
+    return nil
   }
 
   func withValue<R, Failure: Error>(
@@ -45,20 +74,95 @@ struct ThreadLocalValue<Value>: ~Copyable, Sendable {
     return try perform()
   }
 
+  @inline(__always)
+  private func currentStorage() -> ThreadLocalSlotStorage<Value>? {
+    guard let pointer = pthread_getspecific(key) else {
+      return nil
+    }
+    // Only this slot installs entries for its key, and it always installs a
+    // `ThreadLocalSlotStorage<Value>`, so the unchecked conversion is sound. The key
+    // keeps the storage alive for as long as the current thread can observe it.
+    return Unmanaged<ThreadLocalSlotStorage<Value>>.fromOpaque(pointer).takeUnretainedValue()
+  }
+
+}
+
+/// The type-erased part of a per-thread slot cell.
+///
+/// The pthread destructor receives only a raw pointer, so it releases the
+/// installed value through this base class without knowing `Value`.
+private class ThreadLocalSlotStorageBase {
+
+  /// The key that owns this storage. The destructor reinstalls the storage under
+  /// this key while released values deinitialize.
+  fileprivate let key: pthread_key_t
+
+  fileprivate init(key: pthread_key_t) {
+    self.key = key
+  }
+
+  /// Clears and releases the installed value.
+  ///
+  /// - Returns: `false` when no value was installed.
+  fileprivate func releaseInstalledValue() -> Bool {
+    preconditionFailure("ThreadLocalSlotStorage must override releaseInstalledValue()")
+  }
+
+}
+
+/// The per-thread cell behind one `ThreadLocalValue` key.
+private final class ThreadLocalSlotStorage<Value>: ThreadLocalSlotStorageBase {
+
+  var value: Value?
+
+  fileprivate init(key: pthread_key_t, value: Value?) {
+    self.value = value
+    super.init(key: key)
+  }
+
+  fileprivate override func releaseInstalledValue() -> Bool {
+    guard let oldValue = value else {
+      return false
+    }
+    // Empty the slot before the old value is released, so its deinitializer sees
+    // the same state as after an ordinary restore.
+    value = nil
+    withExtendedLifetime(oldValue) {}
+    return true
+  }
+
+}
+
+/// Releases one thread's storage for one key when that thread exits.
+///
+/// pthread clears the key before calling its destructor. A deinitializer that then
+/// installed a value in the same slot would allocate replacement storage and force
+/// another destructor pass, so the storage stays installed while its values are
+/// released and any value installed during that release is drained in the same
+/// pass. Other slots follow the normal lazy path: a deinitializer that installs a
+/// value in a slot whose destructor already ran re-arms that key, and pthread
+/// destroys it again in a later pass, up to `PTHREAD_DESTRUCTOR_ITERATIONS`.
+private func destroyThreadLocalSlotStorage(_ pointer: UnsafeMutableRawPointer) {
+  let storage = Unmanaged<ThreadLocalSlotStorageBase>.fromOpaque(pointer).takeRetainedValue()
+  pthread_setspecific(storage.key, pointer)
+  while storage.releaseInstalledValue() {}
+  // Clear the key before `storage` is released so no later access or destructor
+  // pass can observe a dangling pointer.
+  pthread_setspecific(storage.key, nil)
 }
 
 enum ThreadLocal: Sendable {
 
-  static let registration: ThreadLocalValue<TrackingRegistration> = .init(key: "org.vergegroup.state-graph.registration")
-  static let subscriptions: ThreadLocalValue<Subscriptions> = .init(key: "org.vergegroup.state-graph.subscriptions")
-  static let currentNode: ThreadLocalValue<any TypeErasedNode> = .init(key: "org.vergegroup.state-graph.currentNode")
-  static let currentCancellable: ThreadLocalValue<GraphTrackingCancellable> = .init(key: "org.vergegroup.state-graph.currentCancellable")
-  static let graphTransaction: ThreadLocalValue<GraphTransactionContext> = .init(key: "org.vergegroup.state-graph.transaction")
-  static let graphTransactionReadScope: ThreadLocalValue<GraphTransactionReadScope> = .init(key: "org.vergegroup.state-graph.transaction-read-scope")
-  static let graphImmediateWriterScope: ThreadLocalValue<GraphImmediateWriterScope> = .init(key: "org.vergegroup.state-graph.immediate-writer-scope")
-  static let storedInitializationScope: ThreadLocalValue<StoredInitializationScope> = .init(key: "org.vergegroup.state-graph.stored-initialization")
+  static let registration: ThreadLocalValue<TrackingRegistration> = .init()
+  static let subscriptions: ThreadLocalValue<Subscriptions> = .init()
+  static let currentNode: ThreadLocalValue<any TypeErasedNode> = .init()
+  static let currentCancellable: ThreadLocalValue<GraphTrackingCancellable> = .init()
+  static let graphTransaction: ThreadLocalValue<GraphTransactionContext> = .init()
+  static let graphTransactionReadScope: ThreadLocalValue<GraphTransactionReadScope> = .init()
+  static let graphImmediateWriterScope: ThreadLocalValue<GraphImmediateWriterScope> = .init()
+  static let storedInitializationScope: ThreadLocalValue<StoredInitializationScope> = .init()
 #if DEBUG
-  static let graphMutationProhibition: ThreadLocalValue<GraphMutationProhibition> = .init(key: "org.vergegroup.state-graph.mutation-prohibition")
+  static let graphMutationProhibition: ThreadLocalValue<GraphMutationProhibition> = .init()
 #endif
 
 }
