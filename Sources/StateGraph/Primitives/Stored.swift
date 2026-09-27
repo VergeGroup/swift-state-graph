@@ -132,6 +132,11 @@ public final class Stored<Value: SendableMetatype>: Node, Observable, CustomDebu
 #if canImport(Observation)
   @available(macOS 14.0, iOS 17.0, watchOS 10.0, tvOS 17.0, *)
   private let observationRegistrar = ObservationRegistrar()
+
+  /// Obtained once so Observation calls do not instantiate a key path on every read.
+  @available(macOS 14.0, iOS 17.0, watchOS 10.0, tvOS 17.0, *)
+  let observationKeyPath: KeyPath<NodeObservationRoot<Stored<Value>>, Void> & Sendable =
+    NodeObservationKeyPaths.stored(Value.self)
 #endif
 
   public var potentiallyDirty: Bool {
@@ -244,7 +249,7 @@ public final class Stored<Value: SendableMetatype>: Node, Observable, CustomDebu
     {
       observationRegistrar.access(
         NodeObservationRoot<Stored<Value>>(),
-        keyPath: \NodeObservationRoot<Stored<Value>>.wrappedValue
+        keyPath: observationKeyPath
       )
     }
 #endif
@@ -275,7 +280,7 @@ public final class Stored<Value: SendableMetatype>: Node, Observable, CustomDebu
     if #available(macOS 14.0, iOS 17.0, watchOS 10.0, tvOS 17.0, *) {
       observationRegistrar.access(
         NodeObservationRoot<Stored<Value>>(),
-        keyPath: \NodeObservationRoot<Stored<Value>>.wrappedValue
+        keyPath: observationKeyPath
       )
     }
 #endif
@@ -376,10 +381,10 @@ public final class Stored<Value: SendableMetatype>: Node, Observable, CustomDebu
     if shouldNotify,
       #available(macOS 14.0, iOS 17.0, watchOS 10.0, tvOS 17.0, *)
     {
-      withMainActor { [observationRegistrar] in
+      withMainActor { [observationRegistrar, observationKeyPath] in
         observationRegistrar.willSet(
           NodeObservationRoot<Stored<Value>>(),
-          keyPath: \NodeObservationRoot<Stored<Value>>.wrappedValue
+          keyPath: observationKeyPath
         )
       }
     }
@@ -423,10 +428,10 @@ public final class Stored<Value: SendableMetatype>: Node, Observable, CustomDebu
     if delivery.shouldNotify,
       #available(macOS 14.0, iOS 17.0, watchOS 10.0, tvOS 17.0, *)
     {
-      withMainActor { [observationRegistrar] in
+      withMainActor { [observationRegistrar, observationKeyPath] in
         observationRegistrar.didSet(
           NodeObservationRoot<Stored<Value>>(),
-          keyPath: \NodeObservationRoot<Stored<Value>>.wrappedValue
+          keyPath: observationKeyPath
         )
       }
     }
@@ -540,11 +545,11 @@ public final class Stored<Value: SendableMetatype>: Node, Observable, CustomDebu
 
 #if canImport(Observation)
     if #available(macOS 14.0, iOS 17.0, watchOS 10.0, tvOS 17.0, *) {
-      observationWillSetDelivery.appendWillSetOperation { [observationRegistrar] in
+      observationWillSetDelivery.appendWillSetOperation { [observationRegistrar, observationKeyPath] in
         withMainActor {
           observationRegistrar.willSet(
             NodeObservationRoot<Stored<Value>>(),
-            keyPath: \NodeObservationRoot<Stored<Value>>.wrappedValue
+            keyPath: observationKeyPath
           )
         }
       }
@@ -609,10 +614,10 @@ public final class Stored<Value: SendableMetatype>: Node, Observable, CustomDebu
     if transactionCommitWork.shouldNotify,
       #available(macOS 14.0, iOS 17.0, watchOS 10.0, tvOS 17.0, *)
     {
-      withMainActor { [observationRegistrar] in
+      withMainActor { [observationRegistrar, observationKeyPath] in
         observationRegistrar.didSet(
           NodeObservationRoot<Stored<Value>>(),
-          keyPath: \NodeObservationRoot<Stored<Value>>.wrappedValue
+          keyPath: observationKeyPath
         )
       }
     }

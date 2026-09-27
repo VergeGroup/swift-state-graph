@@ -180,6 +180,11 @@ public final class Computed<Value: SendableMetatype>: Node, Observable, CustomDe
   #if canImport(Observation)
     @available(macOS 14.0, iOS 17.0, watchOS 10.0, tvOS 17.0, *)
     private let observationRegistrar = ObservationRegistrar()
+
+    /// Obtained once so Observation calls do not instantiate a key path on every read.
+    @available(macOS 14.0, iOS 17.0, watchOS 10.0, tvOS 17.0, *)
+    let observationKeyPath: KeyPath<NodeObservationRoot<Computed<Value>>, Void> & Sendable =
+      NodeObservationKeyPaths.computed(Value.self)
   #endif
 
   /// Single-use graph work captured when this node first becomes potentially dirty.
@@ -212,10 +217,10 @@ public final class Computed<Value: SendableMetatype>: Node, Observable, CustomDe
       // is checked during recomputation to avoid unnecessary downstream propagation.
 #if canImport(Observation)
       if #available(macOS 14.0, iOS 17.0, watchOS 10.0, tvOS 17.0, *) {
-        withMainActor { [observationRegistrar] in
+        withMainActor { [observationRegistrar, observationKeyPath] in
           observationRegistrar.willSet(
             NodeObservationRoot<Computed<Value>>(),
-            keyPath: \NodeObservationRoot<Computed<Value>>.wrappedValue
+            keyPath: observationKeyPath
           )
         }
       }
@@ -294,7 +299,7 @@ public final class Computed<Value: SendableMetatype>: Node, Observable, CustomDe
     if #available(macOS 14.0, iOS 17.0, watchOS 10.0, tvOS 17.0, *) {
       observationRegistrar.access(
         NodeObservationRoot<Computed<Value>>(),
-        keyPath: \NodeObservationRoot<Computed<Value>>.wrappedValue
+        keyPath: observationKeyPath
       )
     }
 #endif
@@ -543,11 +548,11 @@ extension Computed: GraphTransactionInvalidatableNode {
 
 #if canImport(Observation)
     if #available(macOS 14.0, iOS 17.0, watchOS 10.0, tvOS 17.0, *) {
-      observationWillSetDelivery.appendWillSetOperation { [observationRegistrar] in
+      observationWillSetDelivery.appendWillSetOperation { [observationRegistrar, observationKeyPath] in
         withMainActor {
           observationRegistrar.willSet(
             NodeObservationRoot<Computed<Value>>(),
-            keyPath: \NodeObservationRoot<Computed<Value>>.wrappedValue
+            keyPath: observationKeyPath
           )
         }
       }
