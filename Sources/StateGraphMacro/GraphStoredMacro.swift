@@ -442,7 +442,9 @@ extension GraphStoredMacro: AccessorMacro {
 
     if variableDecl.didSetBlock != nil {
       let oldValueName = variableDecl.didSetParameterName
-      statements.append("let \(oldValueName)\(typeAnnotation) = \(assignmentTarget)")
+      // Capturing oldValue is part of the generated assignment, not a user read
+      // that publishes a newly created node as a computation dependency.
+      statements.append("let \(oldValueName)\(typeAnnotation) = $\(variableDecl.name)._valueForGraphStoredAssignment")
     }
 
     statements.append("\(assignmentTarget) = __graphStoredNewValue")
