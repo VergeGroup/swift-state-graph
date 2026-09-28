@@ -4,6 +4,7 @@
 /// Bionic allow only 128 keys per process, so this list is also the key budget.
 /// The key-path table in `KeyPath.swift` still creates one key of its own and is
 /// not listed here yet.
+///
 /// Declare new slots here rather than next to their users. The slot primitives
 /// live in `Threading/`.
 enum ThreadLocal: Sendable {
