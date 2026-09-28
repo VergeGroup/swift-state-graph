@@ -18,8 +18,6 @@ final class UserDefaultsAccessCoordinator: @unchecked Sendable {
 
   private let accessLock = NSRecursiveLock()
   private let publicationCondition = NSCondition()
-  private let drainingContextKey =
-    "org.vergegroup.state-graph.user-defaults-publication-drainer"
 
   private var accessDepth = 0
   private var currentPublications: [@Sendable () -> Void] = []
@@ -111,16 +109,28 @@ final class UserDefaultsAccessCoordinator: @unchecked Sendable {
     }
   }
 
+  /// Whether the calling thread is inside this coordinator's owner drain.
+  ///
+  /// True only on the thread running ``drainAsOwner()`` for this coordinator, for
+  /// the whole synchronous drain, including the inline drains that its
+  /// publication callbacks start. Other threads never see it, so they wait for
+  /// their tickets instead of draining concurrently.
   private var isDrainingOnCurrentThread: Bool {
-    Thread.current.threadDictionary[drainingContextKey] as? Bool == true
+    ThreadLocal.userDefaultsPublicationDrainer.value === self
   }
 
+  /// Drains every pending batch on the calling thread as the owner.
+  ///
+  /// Marks the thread as this coordinator's drainer for the whole synchronous
+  /// drain, so a publication callback that writes again drains through its own
+  /// batch instead of waiting for this thread. Owner drains of one coordinator
+  /// never nest on a thread: `isDraining` stays set until the drain loop empties
+  /// the queue, so every write made inside it gets a non-owner ticket, and the
+  /// value that `withValue` restores is `nil`.
   private func drainAsOwner() {
-    let threadDictionary = Thread.current.threadDictionary
-    threadDictionary[drainingContextKey] = true
-    defer { threadDictionary.removeObject(forKey: drainingContextKey) }
-
-    drainPublications(until: nil)
+    ThreadLocal.userDefaultsPublicationDrainer.withValue(self) {
+      drainPublications(until: nil)
+    }
   }
 
   private func drainPublications(until targetID: UInt64?) {
