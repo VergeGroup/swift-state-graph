@@ -111,20 +111,22 @@ final class UserDefaultsAccessCoordinator: @unchecked Sendable {
 
   /// Whether the calling thread is inside this coordinator's owner drain.
   ///
-  /// True only on the thread running ``drainAsOwner()`` for this coordinator, while
-  /// that drain is the thread's innermost one. Other threads and other
-  /// coordinators never see it, so they wait for their tickets instead of draining
-  /// concurrently.
+  /// True only on the thread running ``drainAsOwner()`` for this coordinator, for
+  /// the whole synchronous drain, including the inline drains that its
+  /// publication callbacks start. Other threads never see it, so they wait for
+  /// their tickets instead of draining concurrently.
   private var isDrainingOnCurrentThread: Bool {
     ThreadLocal.userDefaultsPublicationDrainer.value === self
   }
 
-  /// Drains every pending batch on the calling thread.
+  /// Drains every pending batch on the calling thread as the owner.
   ///
   /// Marks the thread as this coordinator's drainer for the whole synchronous
   /// drain, so a publication callback that writes again drains through its own
-  /// batch instead of waiting for this thread. Only the innermost drain on a
-  /// thread is marked: the previous drainer is restored when this drain returns.
+  /// batch instead of waiting for this thread. Owner drains of one coordinator
+  /// never nest on a thread: `isDraining` stays set until the drain loop empties
+  /// the queue, so every write made inside it gets a non-owner ticket, and the
+  /// value that `withValue` restores is `nil`.
   private func drainAsOwner() {
     ThreadLocal.userDefaultsPublicationDrainer.withValue(self) {
       drainPublications(until: nil)

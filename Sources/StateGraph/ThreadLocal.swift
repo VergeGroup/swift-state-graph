@@ -17,7 +17,7 @@ enum ThreadLocal: Sendable {
   static let graphTransactionReadScope: ThreadLocalValue<GraphTransactionReadScope> = .init()
   static let graphImmediateWriterScope: ThreadLocalValue<GraphImmediateWriterScope> = .init()
   static let storedInitializationScope: ThreadLocalValue<StoredInitializationScope> = .init()
-  /// The coordinator whose publications the calling thread is draining.
+  /// The coordinator whose owner drain the calling thread is running.
   static let userDefaultsPublicationDrainer: ThreadLocalValue<UserDefaultsAccessCoordinator> = .init()
 #if DEBUG
   static let graphMutationProhibition: ThreadLocalValue<GraphMutationProhibition> = .init()
