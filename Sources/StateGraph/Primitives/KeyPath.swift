@@ -1,4 +1,3 @@
-import Foundation
 import Observation
 
 /// A type-specific subject that gives every node registrar a readable property key path.
@@ -68,16 +67,17 @@ enum NodeObservationKeyPaths {
   }
 }
 
-/// The calling thread's node key paths.
+/// The calling thread's node key paths, kept in ``ThreadLocal/nodeObservationKeyPaths``.
 ///
-/// Only the owning thread reads or writes a table, so it needs no lock. The table lives
-/// in raw thread-specific storage rather than an object so that a lookup performs no
-/// reference counting. It is destroyed when its thread exits; nodes keep their own
-/// references to the key paths they were given.
+/// Only the owning thread reads or writes a table, so it needs no lock, and each
+/// access borrows the table in place without copying it or retaining its storage.
+/// The table is destroyed when its thread exits; nodes keep their own references to
+/// the key paths they were given.
 ///
-/// It does not use `ThreadLocalValue`, which models values that graph operations install
-/// and restore around a scope; this table instead lives as long as its thread.
-private struct NodeObservationKeyPathTable {
+/// It is kept in a `ThreadLocalState` rather than a `ThreadLocalValue`, which models
+/// values that graph operations install and restore around a scope; this table
+/// instead lives as long as its thread.
+struct NodeObservationKeyPathTable {
 
   enum NodeKind {
     case stored
@@ -95,47 +95,24 @@ private struct NodeObservationKeyPathTable {
     }
   }
 
-  var keyPaths: [Key: AnyKeyPath] = [:]
+  private var keyPaths: [Key: AnyKeyPath] = [:]
 
   /// Returns this thread's key path for `key`, evaluating `makeKeyPath` on first use.
   ///
   /// The lookup is not generic, so callers pay for node type metadata only on a miss.
+  /// `makeKeyPath` runs between the lookup and the insertion rather than inside an
+  /// access, so it could use the table itself without tripping `ThreadLocalState`'s
+  /// re-entrancy trap.
   static func keyPath(
     for key: Key,
     _ makeKeyPath: () -> AnyKeyPath
   ) -> AnyKeyPath {
-    let table = current
-
-    if let cached = table.pointee.keyPaths[key] {
+    if let cached = ThreadLocal.nodeObservationKeyPaths.withCurrent({ $0.keyPaths[key] }) {
       return cached
     }
 
     let keyPath = makeKeyPath()
-    table.pointee.keyPaths[key] = keyPath
+    ThreadLocal.nodeObservationKeyPaths.withCurrent { $0.keyPaths[key] = keyPath }
     return keyPath
   }
-
-  private static var current: UnsafeMutablePointer<NodeObservationKeyPathTable> {
-    if let pointer = pthread_getspecific(threadSpecificKey) {
-      return pointer.assumingMemoryBound(to: NodeObservationKeyPathTable.self)
-    }
-
-    let table = UnsafeMutablePointer<NodeObservationKeyPathTable>.allocate(capacity: 1)
-    table.initialize(to: NodeObservationKeyPathTable())
-    // An unregistered table would be leaked and replaced on every lookup.
-    let status = pthread_setspecific(threadSpecificKey, table)
-    precondition(status == 0, "Failed to store the node key path table")
-    return table
-  }
-
-  private static let threadSpecificKey: pthread_key_t = {
-    var key = pthread_key_t()
-    let status = pthread_key_create(&key) { pointer in
-      let table = pointer.assumingMemoryBound(to: NodeObservationKeyPathTable.self)
-      table.deinitialize(count: 1)
-      table.deallocate()
-    }
-    precondition(status == 0, "Failed to create the node key path table key")
-    return key
-  }()
 }
