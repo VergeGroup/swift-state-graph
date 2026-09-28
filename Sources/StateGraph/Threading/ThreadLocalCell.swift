@@ -67,7 +67,11 @@ extension ThreadSpecificKey {
     // The unchecked conversion is sound by the precondition. The key's +1
     // reference, or the local one `threadDidExit` holds while it runs, outlives
     // `body`, so borrowing skips a retain/release pair on every access.
-    return Unmanaged<Cell>.fromOpaque(pointer)._withUnsafeGuaranteedRef(body)
+    //
+    // Wrap `body` in a literal: passing the parameter itself converts it to the
+    // throwing type `_withUnsafeGuaranteedRef` takes, and the optimizer then stops
+    // inlining a caller's closure that calls another closure.
+    return Unmanaged<Cell>.fromOpaque(pointer)._withUnsafeGuaranteedRef { body($0) }
   }
 
   /// Hands a +1 reference to `cell` to the calling thread's slot, which owns it
