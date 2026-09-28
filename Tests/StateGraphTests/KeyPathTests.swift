@@ -58,4 +58,24 @@ struct KeyPathTests {
     #expect(keyPathOnAnotherThread == literal)
     #expect(keyPathOnAnotherThread.hashValue == literal.hashValue)
   }
+
+  @Test("Each thread keeps one cached KeyPath per node kind and value type")
+  func eachThreadCachesOneKeyPathPerNodeKindAndValueType() async {
+    // A dedicated thread starts with an empty table, so the first node of each kind
+    // fills it and the second one must hit it.
+    let observed = await withCheckedContinuation { continuation in
+      Thread {
+        let stored = Stored(wrappedValue: 0).observationKeyPath
+        let computed = Computed { _ in 0 }.observationKeyPath
+        continuation.resume(returning: [
+          stored === Stored(wrappedValue: 1).observationKeyPath,
+          computed === Computed { _ in 1 }.observationKeyPath,
+          // Stored and Computed nodes of one value type have separate entries.
+          (stored as AnyKeyPath) != (computed as AnyKeyPath),
+        ])
+      }.start()
+    }
+
+    #expect(observed == [true, true, true])
+  }
 }

@@ -27,8 +27,7 @@ import Android
 ///   so no destructor can race a deletion.
 /// - Each key consumes one entry of a small per-process budget: 128 on musl and
 ///   Bionic, 512 on Darwin, 1024 on glibc. `ThreadLocal` lists every slot built on
-///   this type; the key-path table in `KeyPath.swift` still creates one key of its
-///   own.
+///   this type.
 /// - A thread reads and writes only its own pointer. Pointers never cross threads,
 ///   so no access needs synchronization.
 /// - A non-nil pointer is a +1 retained cell, stored by ``install(_:)``. The key
