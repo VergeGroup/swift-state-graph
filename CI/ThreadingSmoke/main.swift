@@ -74,6 +74,26 @@ enum Slots {
   static let chain = ThreadLocalValue<Probe>()
 }
 
+struct Counter {
+  var count = 0
+  var probe: Probe?
+}
+
+let stateFactoryCalls = Shared(0)
+
+enum States {
+  static let counter = ThreadLocalState {
+    stateFactoryCalls.mutate { $0 += 1 }
+    return Counter()
+  }
+  static let threadExit = ThreadLocalState { Counter() }
+  static let reentrantExit = ThreadLocalState { Counter() }
+  static let mixed = ThreadLocalState { Counter() }
+  static let mixedSlot = ThreadLocalValue<Probe>()
+  static let late = ThreadLocalState { Counter() }
+  static let lateSlot = ThreadLocalValue<Probe>()
+}
+
 struct SmokeError: Error {}
 
 let failures = Shared<[String]>([])
@@ -182,6 +202,85 @@ do {
     Slots.chain.replaceValue(makeLink(8))
   }
   check(lastReleased.wait(), "chain: last link was not released")
+}
+
+// ThreadLocalState: created once per thread, mutated in place, isolated per thread.
+onDedicatedThread {
+  States.counter.withCurrent { $0.count += 1 }
+  States.counter.withCurrent { $0.count += 1 }
+  check(States.counter.withCurrent { $0.count } == 2, "state: not mutated in place")
+  check(stateFactoryCalls.value == 1, "state: factory ran \(stateFactoryCalls.value) times on one thread")
+  onDedicatedThread {
+    check(States.counter.withCurrent { $0.count } == 0, "state: other thread saw this thread's state")
+  }
+  check(stateFactoryCalls.value == 2, "state: other thread did not get its own state")
+}
+
+// A state left at thread exit is destroyed.
+do {
+  let released = Signal()
+  onDedicatedThread {
+    States.threadExit.withCurrent { $0.probe = Probe("state") { released.signal() } }
+  }
+  check(released.wait(), "state thread exit: state was not destroyed")
+}
+
+// A deinitializer that runs while the teardown destroys the state gets a new state,
+// and what it leaves there is destroyed too.
+do {
+  let observedCount = Shared<Int?>(nil)
+  let replacementReleased = Signal()
+  onDedicatedThread {
+    States.reentrantExit.withCurrent {
+      $0.count = 5
+      $0.probe = Probe("first") {
+        States.reentrantExit.withCurrent {
+          observedCount.value = $0.count
+          $0.probe = Probe("replacement") { replacementReleased.signal() }
+        }
+      }
+    }
+  }
+  check(replacementReleased.wait(), "state reentrant: replacement was not released")
+  check(observedCount.value == 0, "state reentrant: deinit saw \(String(describing: observedCount.value))")
+}
+
+// Thread-exit deinitializers may move between value slots and states in either order.
+do {
+  let stateReleased = Signal()
+  let valueReleased = Signal()
+  onDedicatedThread {
+    States.mixedSlot.replaceValue(Probe("value") {
+      States.mixed.withCurrent { $0.probe = Probe("from value") { stateReleased.signal() } }
+    })
+    States.mixed.withCurrent {
+      $0.probe = Probe("state") {
+        States.mixedSlot.replaceValue(Probe("from state") { valueReleased.signal() })
+      }
+    }
+  }
+  check(stateReleased.wait(), "mixed: state installed by a value's deinit was not released")
+  check(valueReleased.wait(), "mixed: value installed by a state's deinit was not released")
+}
+
+// A deinitializer that uses a state after that state's teardown finished gets a new
+// state, and a later destructor pass destroys it. Touching the state first creates
+// its key before the value slot's, and glibc and Darwin run destructors in ascending
+// key order, so the state is torn down before the value's deinitializer runs.
+do {
+  let observedCount = Shared<Int?>(nil)
+  let probeReleased = Signal()
+  onDedicatedThread {
+    States.late.withCurrent { $0.count = 5 }
+    States.lateSlot.replaceValue(Probe("value") {
+      States.late.withCurrent {
+        observedCount.value = $0.count
+        $0.probe = Probe("late") { probeReleased.signal() }
+      }
+    })
+  }
+  check(probeReleased.wait(), "state late pass: replacement was not released")
+  check(observedCount.value == 0, "state late pass: deinit saw \(String(describing: observedCount.value))")
 }
 
 let result = failures.value
