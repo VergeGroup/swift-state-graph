@@ -7,7 +7,13 @@ struct StaticPropertyTests {
   final class ModelWithStatic {
     @GraphStored
     static var sharedValue: Int = 0
-    
+
+    // Written only by `static_property_reactivity`. Tests in this suite run concurrently,
+    // so sharing `sharedValue` would let another test's writes land while that test
+    // awaits a projection.
+    @GraphStored
+    static var observedValue: Int = 0
+
     @GraphStored
     var instanceValue: Int = 0
   }
@@ -27,33 +33,37 @@ struct StaticPropertyTests {
   }
   
   @Test @MainActor func static_property_reactivity() async {
-    // Reset static value
-    ModelWithStatic.sharedValue = 0
-    
+    // Reset the value left by an earlier repetition.
+    ModelWithStatic.observedValue = 0
+
+    let observedTen = TestSignal()
+    let observedFortyTwo = TestSignal()
+
     await confirmation(expectedCount: 2) { c in
+      // The initial projection runs synchronously, so tracking is established before
+      // the first write.
       let cancellable = withGraphTracking {
         withGraphTrackingMap {
-          ModelWithStatic.$sharedValue.wrappedValue
+          ModelWithStatic.$observedValue.wrappedValue
         } onChange: { value in
           if value == 10 {
             c.confirm()
+            observedTen.signal()
           } else if value == 42 {
             c.confirm()
+            observedFortyTwo.signal()
           }
         }
       }
-      
-      // Wait a bit before changing values
-      try? await Task.sleep(for: .milliseconds(10))
-      
-      ModelWithStatic.sharedValue = 10
-      
-      try? await Task.sleep(for: .milliseconds(10))
-      
-      ModelWithStatic.sharedValue = 42
-      
-      try? await Task.sleep(for: .milliseconds(10))
-      
+
+      // Re-projection is asynchronous. Awaiting each delivery keeps the next write from
+      // coalescing with the previous one.
+      ModelWithStatic.observedValue = 10
+      #expect(await observedTen.wait(for: .seconds(5)))
+
+      ModelWithStatic.observedValue = 42
+      #expect(await observedFortyTwo.wait(for: .seconds(5)))
+
       withExtendedLifetime(cancellable, {})
     }
   }
