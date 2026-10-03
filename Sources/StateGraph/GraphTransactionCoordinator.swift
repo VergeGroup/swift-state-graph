@@ -582,5 +582,17 @@ final class GraphTransactionCoordinator: @unchecked Sendable {
     }
     return true
   }
+
+  /// Returns whether a publication has closed admission to new committed reads.
+  ///
+  /// A test thread that waits inside a committed read for another thread's read polls
+  /// this seam. It stops waiting once a publication closes admission, because that
+  /// publication in turn waits for the test thread's read to finish.
+  func __testing__isReadAdmissionClosed() -> Bool {
+    condition.lock()
+    defer { condition.unlock() }
+
+    return isPublishing
+  }
 #endif
 }
