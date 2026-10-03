@@ -131,16 +131,21 @@ struct StoredComparatorTests {
     // Given: Stored node with onChange callback
     let stored = Stored(name: "stored", wrappedValue: 100)
 
-    var changeCount = 0
+    // Re-projection delivers onChange on another thread, so the count needs a lock.
+    let changeCount = OSAllocatedUnfairLock(initialState: 0)
+    let differentValueDelivered = TestSignal()
 
     let cancellable = withGraphTracking {
       withGraphTrackingMap { stored.wrappedValue } onChange: { newValue in
-        changeCount += 1
+        changeCount.withLock { $0 += 1 }
+        if newValue == 200 {
+          differentValueDelivered.signal()
+        }
       }
     }
 
     // Initial state
-    #expect(changeCount == 1)
+    #expect(changeCount.withLock { $0 } == 1)
 
     // When: Set the same value multiple times
     stored.wrappedValue = 100
@@ -149,15 +154,15 @@ struct StoredComparatorTests {
     try? await Task.sleep(for: .milliseconds(50))
 
     // Then: onChange should not be invoked
-    #expect(changeCount == 1, "onChange should not be called for same value")
+    #expect(changeCount.withLock { $0 } == 1, "onChange should not be called for same value")
 
     // When: Set a different value
     stored.wrappedValue = 200
 
-    try? await Task.sleep(for: .milliseconds(50))
+    #expect(await differentValueDelivered.wait(for: .seconds(5)))
 
     // Then: onChange should be invoked
-    #expect(changeCount == 2, "onChange should be called once for different value")
+    #expect(changeCount.withLock { $0 } == 2, "onChange should be called once for different value")
 
     withExtendedLifetime(cancellable, {})
   }
