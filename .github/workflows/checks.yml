@@ -61,3 +61,23 @@ jobs:
           otool -hv "$NORMALIZATION_BINARY" | grep DYLIB
           test "$(find "$APP_PATH" -type d -name 'StateGraph.framework' | wc -l | tr -d '[:space:]')" = "1"
           test "$(find "$APP_PATH" -type d -name 'StateGraphNormalization.framework' | wc -l | tr -d '[:space:]')" = "1"
+
+  # StateGraph itself does not build on Linux yet, and resolving the package would
+  # fetch swift-syntax, so this job compiles only Sources/StateGraph/Threading/ with
+  # plain swiftc. That folder depends on nothing but the standard library and libc.
+  linux-threading:
+    runs-on: ubuntu-latest
+    container: swift:6.3-noble
+
+    steps:
+      - uses: actions/checkout@v7
+      - name: Type-check the threading component
+        run: swiftc -swift-version 6 -warnings-as-errors -typecheck Sources/StateGraph/Threading/*.swift
+      - name: Build the threading smoke test
+        run: |
+          swiftc -swift-version 6 -warnings-as-errors -O \
+            Sources/StateGraph/Threading/*.swift CI/ThreadingSmoke/main.swift \
+            -o "$RUNNER_TEMP/threading-smoke"
+      - name: Run the threading smoke test
+        run: |
+          "$RUNNER_TEMP/threading-smoke"

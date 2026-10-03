@@ -4,7 +4,8 @@ import os
 
 @testable import StateGraph
 
-/// Covers the pthread-backed ``ThreadLocalValue`` semantics the graph relies on.
+/// Covers the ``ThreadLocalValue`` semantics the graph relies on, and the
+/// thread-specific-storage component under it.
 ///
 /// Every test uses its own slots so tests running in parallel never share a key.
 /// Slots are static members, like the library's own slots, because each one owns a
@@ -117,6 +118,56 @@ struct ThreadLocalTests {
     #expect(Slots.integer.replaceValue(1) == nil)
     #expect(Slots.integer.replaceValue(2) == 1)
     #expect(Slots.integer.replaceValue(nil) == 2)
+  }
+
+  @Test
+  func readsAndNilRestoresNeverAllocate() async {
+    // A dedicated thread starts without a cell for this slot, so the key shows
+    // whether an operation allocated one.
+    let finished = TestSignal()
+    let observed = OSAllocatedUnfairLock<[Bool]>(initialState: [])
+
+    Thread {
+      var hasCell: [Bool] = []
+      _ = Slots.allocation.value
+      hasCell.append(Slots.allocation.key.get() != nil)
+      Slots.allocation.replaceValue(nil)
+      hasCell.append(Slots.allocation.key.get() != nil)
+      Slots.allocation.withValue(nil) {}
+      hasCell.append(Slots.allocation.key.get() != nil)
+      Slots.allocation.withValue(Probe("installed")) {}
+      hasCell.append(Slots.allocation.key.get() != nil)
+      let result = hasCell
+      observed.withLock { $0 = result }
+      finished.signal()
+    }.start()
+
+    #expect(await finished.wait(for: .seconds(5)))
+    #expect(observed.withLock { $0 } == [false, false, false, true])
+  }
+
+  @Test
+  func eachThreadAllocatesOneCellPerSlot() async {
+    let finished = TestSignal()
+    let observed = OSAllocatedUnfairLock<[Bool]>(initialState: [])
+
+    Thread {
+      Slots.reuse.withValue(Probe("first")) {}
+      let firstCell = Slots.reuse.key.get()
+      Slots.reuse.withValue(Probe("second")) {
+        Slots.reuse.withValue(Probe("nested")) {}
+      }
+      Slots.reuse.replaceValue(Probe("third"))
+      Slots.reuse.replaceValue(nil)
+      let laterCell = Slots.reuse.key.get()
+      // Compare outside the lock: raw pointers are not Sendable.
+      let result = [firstCell != nil, firstCell == laterCell]
+      observed.withLock { $0 = result }
+      finished.signal()
+    }.start()
+
+    #expect(await finished.wait(for: .seconds(5)))
+    #expect(observed.withLock { $0 } == [true, true])
   }
 
   @Test
@@ -250,6 +301,8 @@ private enum Slots {
   static let retain = ThreadLocalValue<ThreadLocalTests.Probe>()
   static let node = ThreadLocalValue<any TypeErasedNode>()
   static let integer = ThreadLocalValue<Int>()
+  static let allocation = ThreadLocalValue<ThreadLocalTests.Probe>()
+  static let reuse = ThreadLocalValue<ThreadLocalTests.Probe>()
   static let isolation = ThreadLocalValue<ThreadLocalTests.Probe>()
   static let threadExit = ThreadLocalValue<ThreadLocalTests.Probe>()
   static let reentrant = ThreadLocalValue<ThreadLocalTests.Probe>()
