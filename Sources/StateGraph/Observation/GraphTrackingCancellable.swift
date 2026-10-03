@@ -1,5 +1,9 @@
 
+import os.lock
+
+#if canImport(Combine)
 import Combine
+#endif
 
 /// A tree-structured Cancellable that manages hierarchical subscription lifecycles.
 ///
@@ -10,7 +14,7 @@ import Combine
 /// ## Key Features
 /// - Supports parent-child relationships between cancellables
 /// - Children are automatically cancelled when parent re-executes
-/// - Conforms to `Cancellable` for compatibility with `AnyCancellable`
+/// - Conforms to `Combine.Cancellable` when Combine is available
 /// - Thread-safe using `OSAllocatedUnfairLock`
 ///
 /// ## Nested Tracking Example
@@ -44,7 +48,7 @@ import Combine
 ///
 /// When `enableA` changes from `true` to `false`, the nested group tracking `valueA`
 /// is automatically cancelled. When it changes back to `true`, a new nested group is created.
-final class GraphTrackingCancellable: Cancellable, @unchecked Sendable {
+final class GraphTrackingCancellable: @unchecked Sendable {
 
   /// Weak parent storage accessed only while the owning cancellable state is locked.
   private final class WeakParent {
@@ -149,7 +153,6 @@ final class GraphTrackingCancellable: Cancellable, @unchecked Sendable {
   /// 2. Recursively cancels all children
   /// 3. Calls the onCancel closure
   ///
-  /// - Note: Conforms to `Cancellable` protocol.
   func cancel() {
     guard let work = state.withLock({ state -> CancellationWork? in
       guard !state.isCancelled else { return nil }
@@ -179,3 +182,8 @@ final class GraphTrackingCancellable: Cancellable, @unchecked Sendable {
     work.onCancel?()
   }
 }
+
+#if canImport(Combine)
+/// Allows Combine tokens to own a graph scope when Combine is available.
+extension GraphTrackingCancellable: Combine.Cancellable {}
+#endif
