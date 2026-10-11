@@ -13,7 +13,7 @@ final class Subscriptions: Sendable, Hashable {
     hasher.combine(ObjectIdentifier(self))
   }
   
-  let cancellables = OSAllocatedUnfairLock<[AnyCancellable]>(initialState: [])
+  let cancellables = AllocatedLock<[AnyCancellable]>(initialState: [])
   
   init() {
     

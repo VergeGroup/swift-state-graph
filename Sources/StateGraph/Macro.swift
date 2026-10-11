@@ -35,4 +35,6 @@ public struct GraphStoredInitMarker: Hashable, Sendable {
   public init() {}
 }
 
+#if canImport(os.lock)
 @_exported import os.lock
+#endif
