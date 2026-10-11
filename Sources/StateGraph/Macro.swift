@@ -14,9 +14,14 @@ public macro GraphIgnored() = #externalMacro(module: "StateGraphMacro", type: "I
 /// For persistent values, use `GraphUserDefault`; its projected reference
 /// handle delegates dependency tracking to an internal `Stored` node.
 ///
+/// An initial value can supply the property's type. Without an initial value,
+/// declare the type explicitly. An explicit type also provides context for
+/// expressions such as `.init()`, `nil`, or an empty collection.
+///
 /// Example:
 /// ```swift
-/// @GraphStored var count: Int = 0
+/// @GraphStored var count = 0
+/// @GraphStored var title: String
 /// ```
 @attached(accessor, names: named(init), named(get), named(set))
 @attached(peer, names: prefixed(`$`), prefixed(`$__init_`))
