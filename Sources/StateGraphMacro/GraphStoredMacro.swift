@@ -184,9 +184,10 @@ extension GraphStoredMacro {
     }
 
     return storageDecl.modifyingInit { initializer in
-      // Preserve contextual typing for annotated properties. Without an annotation,
-      // naming `Stored` lets Swift infer its value type from the initial value.
-      let constructor = variableDecl.typeSyntax == nil ? "Stored" : ".init"
+      // Preserve contextual typing for annotated properties. When inference is needed,
+      // select the module explicitly so client declarations cannot shadow the node
+      // constructor.
+      let constructor = variableDecl.typeSyntax == nil ? "StateGraph::Stored" : ".init"
       let expression = #"\#(raw: constructor)(name: "\#(raw: propertyName)", wrappedValue: \#(initializer.trimmed.value))"# as ExprSyntax
       return .init(value: expression)
     }

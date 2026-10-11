@@ -89,7 +89,7 @@ final class GraphStoredMacroTests: XCTestCase {
           }
         }
 
-        @GraphIgnored let $createdAt = Stored(name: "createdAt", wrappedValue: Date.now)
+        @GraphIgnored let $createdAt = StateGraph::Stored(name: "createdAt", wrappedValue: Date.now)
 
         @GraphIgnored private nonisolated(unsafe) var $__init_createdAt: GraphStoredInitMarker = .init()
 
@@ -204,7 +204,7 @@ final class GraphStoredMacroTests: XCTestCase {
           }
         }
 
-        @GraphIgnored let $count = Stored(name: "count", wrappedValue: 0)
+        @GraphIgnored let $count = StateGraph::Stored(name: "count", wrappedValue: 0)
 
         @GraphIgnored private nonisolated(unsafe) var $__init_count: GraphStoredInitMarker = .init()
 
@@ -222,7 +222,7 @@ final class GraphStoredMacroTests: XCTestCase {
         from: parseVariableDecl("@GraphStored var \(propertyName) = \(initializer)")
       )
       let expectedStorage = try parseVariableDecl(
-        "@GraphIgnored let $\(propertyName) = Stored(name: \"\(propertyName)\", wrappedValue: \(initializer))"
+        "@GraphIgnored let $\(propertyName) = StateGraph::Stored(name: \"\(propertyName)\", wrappedValue: \(initializer))"
       )
 
       XCTAssertEqual(
@@ -238,7 +238,7 @@ final class GraphStoredMacroTests: XCTestCase {
       from: parseVariableDecl("@GraphStored static var count = 0")
     )
     let expectedStorage = try parseVariableDecl(
-      "@GraphIgnored static let $count = Stored(name: \"count\", wrappedValue: 0)"
+      "@GraphIgnored static let $count = StateGraph::Stored(name: \"count\", wrappedValue: 0)"
     )
 
     XCTAssertEqual(
@@ -253,7 +253,7 @@ final class GraphStoredMacroTests: XCTestCase {
       context: BasicMacroExpansionContext(lexicalContext: [])
     )
     let expectedStorage = try parseVariableDecl(
-      "@GraphIgnored let $count = Stored(name: \"count\", wrappedValue: 0)"
+      "@GraphIgnored let $count = StateGraph::Stored(name: \"count\", wrappedValue: 0)"
     )
 
     XCTAssertEqual(
