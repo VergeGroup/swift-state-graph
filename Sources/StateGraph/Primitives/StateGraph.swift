@@ -1,5 +1,3 @@
-import os.lock
-
 #if canImport(Observation)
   import Observation
 #endif
@@ -104,7 +102,7 @@ public struct ComputedEnvironmentValues {
 
 public enum StateGraphGlobal {
   
-  public static let computedEnvironmentValues: OSAllocatedUnfairLock<ComputedEnvironmentValues> = .init(
+  public static let computedEnvironmentValues: AllocatedLock<ComputedEnvironmentValues> = .init(
     uncheckedState: .init()
   )
   
@@ -636,7 +634,7 @@ public final class Edge: CustomDebugStringConvertible {
   weak var from: (any TypeErasedNode)?
   weak var to: (any TypeErasedNode)?
   
-  private let lock: OSAllocatedUnfairLock<Void> = .init()
+  private let lock: AllocatedLock<Void> = .init()
   
   var isPending: Bool {
     _read {
@@ -674,7 +672,9 @@ public final class Edge: CustomDebugStringConvertible {
 
 /// The nonrecursive physical lock protecting one node's value and graph metadata.
 ///
+/// Copies share the same allocated lock across supported platforms.
+///
 /// User callbacks must run outside this lock. Immediate writers that release it for
 /// comparison or Observation delivery retain a coordinator-owned logical
 /// reservation until their value is published.
-public typealias NodeLock = OSAllocatedUnfairLock<Void>
+public typealias NodeLock = AllocatedLock<Void>

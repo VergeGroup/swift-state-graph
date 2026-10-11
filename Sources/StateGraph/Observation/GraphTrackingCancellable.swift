@@ -1,6 +1,4 @@
 
-import os.lock
-
 #if canImport(Combine)
 import Combine
 #endif
@@ -15,7 +13,7 @@ import Combine
 /// - Supports parent-child relationships between cancellables
 /// - Children are automatically cancelled when parent re-executes
 /// - Conforms to `Combine.Cancellable` when Combine is available
-/// - Thread-safe using `OSAllocatedUnfairLock`
+/// - Thread-safe using `AllocatedLock`
 ///
 /// ## Nested Tracking Example
 ///
@@ -69,10 +67,10 @@ final class GraphTrackingCancellable: @unchecked Sendable {
     let onCancel: (() -> Void)?
   }
 
-  private let state: OSAllocatedUnfairLock<State>
+  private let state: AllocatedLock<State>
 
   init(onCancel: @escaping () -> Void = {}) {
-    self.state = OSAllocatedUnfairLock(uncheckedState: State(onCancel: onCancel))
+    self.state = AllocatedLock(uncheckedState: State(onCancel: onCancel))
   }
 
   /// Adds a child cancellable to this parent.

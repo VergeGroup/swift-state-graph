@@ -213,7 +213,7 @@ public final class TrackingRegistration: Sendable, Hashable {
     hasher.combine(ObjectIdentifier(self))
   }
 
-  private let state: OSAllocatedUnfairLock<State>
+  private let state: AllocatedLock<State>
 
   init(
     didChange: @escaping () -> Void,
