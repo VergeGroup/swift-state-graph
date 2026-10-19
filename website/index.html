@@ -314,7 +314,7 @@ footer a { color: var(--ink); opacity: .8; }
   <div class="wrap">
     <div class="tiles">
       <div class="tile light">
-        <h2>Start with two property wrappers</h2>
+        <h2>Start with two macros</h2>
         <p>Mark sources with <code>@GraphStored</code> and derived values with <code>@GraphComputed</code>.</p>
         <a class="more" href="https://github.com/VergeGroup/swift-state-graph/blob/main/Sources/StateGraph/Documentation.docc/Quick-Start-Guide.md">Read the quick start</a>
 <pre><code class="swift">final class Counter {
@@ -368,7 +368,7 @@ init() {
     <div class="feature">
       <p class="eyebrow">SwiftUI</p>
       <h3>Just read the properties.</h3>
-      <p>Views observe graph properties with no extra wrappers. Bindings come from the projected value. Conform to <code>GraphObject</code> to pass a model through the Environment, and use <code>.graphTracking</code> to keep a subscription alive only while a view is on screen.</p>
+      <p>Views observe graph properties directly, with no <code>@ObservedObject</code> or <code>@State</code> needed. Bindings come from the projected value. Conform to <code>GraphObject</code> to pass a model through the Environment, and use <code>.graphTracking</code> to keep a subscription alive only while a view is on screen.</p>
 <pre><code class="swift">struct ItemListView: View {
   let store: ItemStore
 
