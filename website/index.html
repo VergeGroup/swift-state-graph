@@ -1,0 +1,573 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Swift State Graph</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<meta name="description" content="A graph-based reactive state management library for Swift. Stored and computed nodes track their own dependencies and work with SwiftUI, UIKit, and Observable.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Schibsted+Grotesk:wght@500;700;800&family=IBM+Plex+Sans:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: a working graph diagram opens the page, then a single reading column
+   with code beside prose. Stored nodes are always orange, computed nodes always teal. */
+:root {
+  --bg: #eef1f5;
+  --surface: #ffffff;
+  --ink: #131a2b;
+  --muted: #56607a;
+  --line: #d3d9e4;
+  --stored: #e5482f;
+  --stored-soft: #fde4de;
+  --computed: #157a74;
+  --computed-soft: #d8efec;
+  --code-bg: #141b2d;
+  --code-fg: #dde3f0;
+  --code-dim: #7d89a6;
+  --code-kw: #ff8a6b;
+  --code-str: #8fd6b4;
+  --code-type: #9cc3ff;
+  --code-attr: #ffc66d;
+  --font-display: "Schibsted Grotesk", "Helvetica Neue", Arial, sans-serif;
+  --font-body: "IBM Plex Sans", "Helvetica Neue", Arial, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #0f1420; --surface: #171e2e; --ink: #e8ecf5; --muted: #98a2bb; --line: #2a3347;
+    --stored: #ff6b4f; --stored-soft: #3a1f1c; --computed: #3cc2b6; --computed-soft: #12302e;
+    --code-bg: #0a0e17; --code-fg: #dde3f0; --code-dim: #6f7a95;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #0f1420; --surface: #171e2e; --ink: #e8ecf5; --muted: #98a2bb; --line: #2a3347;
+  --stored: #ff6b4f; --stored-soft: #3a1f1c; --computed: #3cc2b6; --computed-soft: #12302e;
+  --code-bg: #0a0e17; --code-fg: #dde3f0; --code-dim: #6f7a95;
+  color-scheme: dark;
+}
+
+* { box-sizing: border-box; }
+html { -webkit-text-size-adjust: 100%; }
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--ink);
+  font: 400 16px/1.65 var(--font-body);
+}
+a { color: inherit; }
+a:focus-visible, button:focus-visible { outline: 2px solid var(--computed); outline-offset: 3px; border-radius: 4px; }
+.wrap {
+  max-width: 1080px;
+  margin: 0 auto;
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+}
+
+/* Top bar */
+.top { padding-block: 20px; }
+.top .wrap { display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
+.brand { display: flex; align-items: center; gap: 10px; font: 700 17px/1 var(--font-display); text-decoration: none; }
+.brand svg { flex: none; }
+.top nav { display: flex; gap: 20px; flex-wrap: wrap; font-size: 15px; }
+.top nav a { text-decoration: none; color: var(--muted); }
+.top nav a:hover { color: var(--ink); }
+
+/* Hero */
+.hero { padding-block: 40px 56px; }
+.hero .wrap { display: grid; grid-template-columns: minmax(0, 5fr) minmax(0, 6fr); gap: 48px; align-items: center; }
+.eyebrow { font: 500 12px/1 var(--font-mono); letter-spacing: .08em; text-transform: uppercase; color: var(--muted); margin: 0 0 18px; }
+h1 {
+  font: 800 clamp(40px, 6vw, 68px)/0.98 var(--font-display);
+  letter-spacing: -0.03em;
+  margin: 0 0 22px;
+  text-wrap: balance;
+}
+h1 .s { color: var(--stored); }
+h1 .c { color: var(--computed); }
+.lede { font-size: 19px; color: var(--muted); max-width: 34ch; margin: 0 0 28px; }
+.cta { display: flex; gap: 12px; flex-wrap: wrap; }
+.btn {
+  display: inline-flex; align-items: center; gap: 8px;
+  padding: 12px 18px; border-radius: 8px;
+  font: 600 15px/1 var(--font-body); text-decoration: none;
+  border: 1px solid var(--line); background: var(--surface); color: var(--ink);
+  cursor: pointer;
+}
+.btn.primary { background: var(--ink); color: var(--bg); border-color: var(--ink); }
+.btn:hover { border-color: var(--ink); }
+.badges { margin-top: 26px; display: flex; gap: 8px; flex-wrap: wrap; font: 500 12px/1 var(--font-mono); color: var(--muted); }
+.badges span { border: 1px solid var(--line); border-radius: 999px; padding: 6px 10px; }
+
+/* Live graph */
+.demo { background: var(--surface); border: 1px solid var(--line); border-radius: 14px; padding: 18px; min-width: 0; }
+.demo-head { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; flex-wrap: wrap; margin-bottom: 8px; }
+.demo-head p { margin: 0; font: 500 12px/1.4 var(--font-mono); color: var(--muted); }
+.legend { display: flex; gap: 14px; font: 500 12px/1 var(--font-mono); color: var(--muted); }
+.legend i { display: inline-block; width: 10px; height: 10px; border-radius: 3px; margin-right: 6px; vertical-align: -1px; }
+.legend .ls { background: var(--stored); }
+.legend .lc { background: var(--computed); }
+#graph { width: 100%; height: auto; display: block; }
+#graph .edge { fill: none; stroke: var(--line); stroke-width: 2; }
+#graph .edge.hot { stroke: var(--stored); stroke-dasharray: 6 6; animation: flow .6s linear infinite; }
+#graph .node rect { stroke-width: 2; }
+#graph .node.stored rect { fill: var(--stored-soft); stroke: var(--stored); }
+#graph .node.computed rect { fill: var(--computed-soft); stroke: var(--computed); }
+#graph .node.dirty rect { stroke-dasharray: 5 4; fill: var(--surface); }
+#graph .node.flash rect { animation: pop .5s ease-out; }
+#graph .name { font: 500 11px var(--font-mono); fill: var(--muted); }
+#graph .val { font: 600 15px var(--font-body); fill: var(--ink); }
+#graph .tag { font: 500 10px var(--font-mono); letter-spacing: .06em; }
+#graph .stored .tag { fill: var(--stored); }
+#graph .computed .tag { fill: var(--computed); }
+@keyframes flow { to { stroke-dashoffset: -12; } }
+@keyframes pop { 0% { transform: scale(1); } 40% { transform: scale(1.06); } 100% { transform: scale(1); } }
+#graph .node { transform-box: fill-box; transform-origin: center; }
+.controls { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 10px; }
+.controls button {
+  font: 500 13px/1 var(--font-mono); padding: 9px 12px; border-radius: 6px; cursor: pointer;
+  background: var(--bg); color: var(--ink); border: 1px solid var(--line);
+}
+.controls button:hover { border-color: var(--stored); }
+#log { margin: 12px 0 0; padding: 10px 12px; min-height: 64px; border-radius: 8px; background: var(--bg); font: 400 12px/1.6 var(--font-mono); color: var(--muted); list-style: none; }
+#log li b { color: var(--ink); font-weight: 500; }
+
+/* Sections */
+section.block { padding-block: 64px; border-top: 1px solid var(--line); }
+h2 { font: 700 clamp(28px, 3.6vw, 38px)/1.1 var(--font-display); letter-spacing: -0.02em; margin: 0 0 14px; text-wrap: balance; }
+h3 { font: 700 19px/1.25 var(--font-display); margin: 0 0 8px; text-wrap: balance; }
+.intro { color: var(--muted); max-width: 62ch; margin: 0 0 36px; font-size: 17px; }
+.pair { display: grid; grid-template-columns: minmax(0, 4fr) minmax(0, 6fr); gap: 40px; align-items: start; }
+.pair + .pair { margin-top: 48px; }
+.pair p { margin: 0 0 12px; color: var(--muted); max-width: 52ch; }
+.pair p code, .intro code, li code { font: 500 0.88em var(--font-mono); color: var(--ink); background: var(--surface); border: 1px solid var(--line); padding: 1px 5px; border-radius: 4px; }
+.kicker { font: 500 12px/1 var(--font-mono); letter-spacing: .08em; text-transform: uppercase; margin: 0 0 10px; }
+.kicker.s { color: var(--stored); }
+.kicker.c { color: var(--computed); }
+.kicker.n { color: var(--muted); }
+
+pre {
+  margin: 0; overflow-x: auto; min-width: 0;
+  background: var(--code-bg); color: var(--code-fg);
+  border-radius: 10px; padding: 18px 20px;
+  font: 400 13.5px/1.65 var(--font-mono);
+  tab-size: 2;
+}
+pre .k { color: var(--code-kw); }
+pre .str { color: var(--code-str); }
+pre .t { color: var(--code-type); }
+pre .a { color: var(--code-attr); }
+pre .cm { color: var(--code-dim); font-style: italic; }
+
+.compare { display: grid; grid-template-columns: minmax(0, 1fr); gap: 16px; }
+.compare figure { margin: 0; min-width: 0; }
+.compare figcaption { font: 500 12px/1 var(--font-mono); color: var(--muted); margin-bottom: 8px; text-transform: uppercase; letter-spacing: .08em; }
+
+.install { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
+.copy-row { position: relative; }
+.copy-row button {
+  position: absolute; top: 10px; right: 10px;
+  font: 500 12px/1 var(--font-mono); padding: 7px 10px; border-radius: 6px; cursor: pointer;
+  background: transparent; color: var(--code-fg); border: 1px solid var(--code-dim);
+}
+.note { margin-top: 20px; color: var(--muted); max-width: 70ch; font-size: 15px; }
+
+.guides { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 0; border-top: 1px solid var(--line); }
+.guides a { display: block; padding: 20px 20px 22px 0; text-decoration: none; border-bottom: 1px solid var(--line); }
+.guides a:hover h3 { color: var(--computed); }
+.guides p { margin: 0; color: var(--muted); font-size: 15px; }
+.guides .arrow { font-family: var(--font-mono); color: var(--computed); }
+
+footer { padding-block: 40px 56px; border-top: 1px solid var(--line); color: var(--muted); font-size: 14px; }
+footer .wrap { display: flex; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
+
+@media (max-width: 860px) {
+  .hero .wrap, .pair { grid-template-columns: minmax(0, 1fr); gap: 28px; }
+  .guides { grid-template-columns: minmax(0, 1fr); }
+  .install { grid-template-columns: minmax(0, 1fr); }
+}
+@media (prefers-reduced-motion: reduce) {
+  #graph .edge.hot, #graph .node.flash rect { animation: none; }
+}
+</style>
+</head>
+<body>
+
+<header class="top">
+  <div class="wrap">
+    <a class="brand" href="#">
+      <svg width="26" height="26" viewBox="0 0 26 26" aria-hidden="true">
+        <path d="M7 8 L19 13 M7 18 L19 13" style="stroke:var(--muted)" stroke-width="1.6" fill="none"/>
+        <circle cx="6" cy="7" r="4" style="fill:var(--stored)"/>
+        <circle cx="6" cy="19" r="4" style="fill:var(--stored)"/>
+        <circle cx="20" cy="13" r="4.5" style="fill:var(--computed)"/>
+      </svg>
+      Swift State Graph
+    </a>
+    <nav aria-label="Sections">
+      <a href="#concepts">Concepts</a>
+      <a href="#ui">SwiftUI &amp; UIKit</a>
+      <a href="#install">Install</a>
+      <a href="#guides">Guides</a>
+      <a href="https://github.com/VergeGroup/swift-state-graph">GitHub</a>
+    </nav>
+  </div>
+</header>
+
+<main>
+<section class="hero">
+  <div class="wrap">
+    <div>
+      <p class="eyebrow">Reactive state for Swift</p>
+      <h1>State as a graph of <span class="s">stored</span> and <span class="c">computed</span> nodes.</h1>
+      <p class="lede">Declare where values come from. Swift State Graph tracks every dependency and keeps derived values correct, in SwiftUI, UIKit, or plain Swift.</p>
+      <div class="cta">
+        <a class="btn primary" href="#install">Get started</a>
+        <a class="btn" href="https://github.com/VergeGroup/swift-state-graph">View on GitHub</a>
+      </div>
+      <div class="badges"><span>Swift 6.0+</span><span>iOS 17+</span><span>macOS 14+</span><span>MIT</span></div>
+    </div>
+
+    <div class="demo" aria-label="Interactive dependency graph">
+      <div class="demo-head">
+        <p>Try it: change a stored node</p>
+        <div class="legend"><span><i class="ls"></i>@GraphStored</span><span><i class="lc"></i>@GraphComputed</span></div>
+      </div>
+      <svg id="graph" viewBox="0 0 640 300" role="img" aria-label="Three stored nodes feed computed nodes fullName, isEven and summary">
+        <g id="edges"></g>
+        <g id="nodes"></g>
+      </svg>
+      <div class="controls">
+        <button type="button" id="btn-name">firstName, lastName = next</button>
+        <button type="button" id="btn-count">count += 1</button>
+      </div>
+      <ul id="log" aria-live="polite"></ul>
+    </div>
+  </div>
+</section>
+
+<section class="block" id="concepts">
+  <div class="wrap">
+    <h2>Two kinds of node. Edges are drawn for you.</h2>
+    <p class="intro">A stored node holds a source of truth. A computed node reads other nodes, and every read becomes an edge in the graph. When a source changes, only the nodes downstream of it are marked dirty, and they recompute the next time someone reads them.</p>
+
+    <div class="pair">
+      <div>
+        <p class="kicker s">Stored</p>
+        <h3>Mutable sources of truth</h3>
+        <p><code>@GraphStored</code> holds a value and notifies dependents when it changes. The type can be inferred from the initial value.</p>
+        <p class="kicker c" style="margin-top:24px">Computed</p>
+        <h3>Derived, lazy, cached</h3>
+        <p><code>@GraphComputed</code> tracks what it reads, recalculates only after a dependency changes, and caches the result until then.</p>
+      </div>
+<pre><code class="swift">import StateGraph
+
+final class Counter {
+  @GraphStored var count = 0
+  @GraphComputed var isEven: Bool
+
+  init() {
+    $isEven = .init { [$count] _ in
+      $count.wrappedValue % 2 == 0
+    }
+  }
+}
+
+let counter = Counter()
+counter.count = 5
+print(counter.isEven) // false, computed for you</code></pre>
+    </div>
+
+    <div class="pair">
+      <div>
+        <p class="kicker n">Migration</p>
+        <h3>Coming from @Observable</h3>
+        <p>Stop writing <code>validate()</code> calls by hand. Declare the rule once and it stays true.</p>
+      </div>
+      <div class="compare">
+        <figure>
+          <figcaption>Before</figcaption>
+<pre><code class="swift">@Observable class UserViewModel {
+  var name = ""
+  var isValid = false
+  func validate() {
+    isValid = !name.isEmpty
+  }
+}</code></pre>
+        </figure>
+        <figure>
+          <figcaption>After</figcaption>
+<pre><code class="swift">final class UserViewModel {
+  @GraphStored var name: String = ""
+  @GraphComputed var isValid: Bool
+  init() {
+    $isValid = .init { [$name] _ in
+      !$name.wrappedValue.isEmpty
+    }
+  }
+}</code></pre>
+        </figure>
+      </div>
+    </div>
+
+    <div class="pair">
+      <div>
+        <p class="kicker n">Persistence</p>
+        <h3>UserDefaults that joins the graph</h3>
+        <p><code>@GraphUserDefault</code> reads take part in dependency tracking, and writes persist to UserDefaults.</p>
+        <p class="kicker n" style="margin-top:24px">Sharing</p>
+        <h3>Share a node, not a copy</h3>
+        <p>Assign a projected value to point two objects at the same node.</p>
+      </div>
+<pre><code class="swift">@GraphUserDefault("theme")
+var theme: String = "light"
+
+final class ViewModel {
+  @GraphStored var items: [Item]
+
+  init(service: DataService) {
+    $items = service.$items // same node
+  }
+}</code></pre>
+    </div>
+  </div>
+</section>
+
+<section class="block" id="ui">
+  <div class="wrap">
+    <h2>Works where your views are.</h2>
+    <p class="intro">SwiftUI observes graph properties with no extra wrappers. UIKit and other code subscribe with <code>withGraphTracking</code>, and the subscription re-runs only when something it read has changed.</p>
+
+    <div class="pair">
+      <div>
+        <p class="kicker n">SwiftUI</p>
+        <h3>Read properties, get updates</h3>
+        <p>Bindings come from the projected value. Conform to <code>GraphObject</code> to pass a model through the Environment, and use <code>.graphTracking</code> to keep a subscription alive only while a view is visible.</p>
+      </div>
+<pre><code class="swift">struct ItemListView: View {
+  let store: ItemStore
+
+  var body: some View {
+    List(store.items) { item in
+      Text(item.name)
+    }
+    TextField("New Item", text: store.$newItemName.binding)
+  }
+}</code></pre>
+    </div>
+
+    <div class="pair">
+      <div>
+        <p class="kicker n">UIKit</p>
+        <h3>Tracking groups and maps</h3>
+        <p><code>withGraphTrackingMap</code> calls back when the mapped value changes. Groups can nest: when a parent re-runs, its children are cancelled and created again.</p>
+      </div>
+<pre><code class="swift">subscription = withGraphTracking {
+  withGraphTrackingMap {
+    viewModel.items
+  } onChange: { [weak self] items in
+    self?.tableView.reloadData()
+  }
+}</code></pre>
+    </div>
+  </div>
+</section>
+
+<section class="block" id="install">
+  <div class="wrap">
+    <h2>Install with Swift Package Manager.</h2>
+    <p class="intro">Add the package, then depend on the <code>StateGraph</code> product. Add <code>StateGraphNormalization</code> for <code>EntityStore</code> and relational data.</p>
+    <div class="install">
+      <div class="copy-row">
+<pre><code class="swift" id="pkg-line">.package(
+  url: "https://github.com/VergeGroup/swift-state-graph.git",
+  from: "0.33.0"
+)</code></pre>
+        <button type="button" id="copy-btn">Copy</button>
+      </div>
+<pre><code class="swift">.target(
+  name: "YourTarget",
+  dependencies: ["StateGraph"]
+)</code></pre>
+    </div>
+    <p class="note">Both products ship as dynamic libraries, because StateGraph owns process-wide tracking and transaction context and one process must load a single copy. Embed the frameworks once in the app target. With Tuist, use <code>.runtimeEmbedded</code> in the app and the default <code>.runtime</code> in feature frameworks.</p>
+  </div>
+</section>
+
+<section class="block" id="guides">
+  <div class="wrap">
+    <h2>Guides</h2>
+    <p class="intro">Longer articles live in the DocC catalog in the repository.</p>
+    <div class="guides">
+      <a href="https://github.com/VergeGroup/swift-state-graph/blob/main/Sources/StateGraph/Documentation.docc/Core-Concepts.md"><h3>Core Concepts <span class="arrow">→</span></h3><p>Stored, Computed, and dependency tracking.</p></a>
+      <a href="https://github.com/VergeGroup/swift-state-graph/blob/main/Sources/StateGraph/Documentation.docc/SwiftUI-Integration.md"><h3>SwiftUI Integration <span class="arrow">→</span></h3><p>Bindings, GraphObject, and the Environment.</p></a>
+      <a href="https://github.com/VergeGroup/swift-state-graph/blob/main/Sources/StateGraph/Documentation.docc/UIKit-Integration.md"><h3>UIKit Integration <span class="arrow">→</span></h3><p>Patterns for withGraphTracking.</p></a>
+      <a href="https://github.com/VergeGroup/swift-state-graph/blob/main/Sources/StateGraph/Documentation.docc/UserDefaults.md"><h3>UserDefaults <span class="arrow">→</span></h3><p>Persistent values composed with stored nodes.</p></a>
+      <a href="https://github.com/VergeGroup/swift-state-graph/blob/main/Sources/StateGraph/Documentation.docc/Data-Normalization.md"><h3>Data Normalization <span class="arrow">→</span></h3><p>EntityStore for relational data.</p></a>
+      <a href="https://github.com/VergeGroup/swift-state-graph/blob/main/Sources/StateGraph/Documentation.docc/Migration-from-Observable.md"><h3>Migrating from Observable <span class="arrow">→</span></h3><p>A step-by-step guide.</p></a>
+    </div>
+  </div>
+</section>
+</main>
+
+<footer>
+  <div class="wrap">
+    <span>Swift State Graph · MIT License · <a href="https://github.com/VergeGroup">VergeGroup</a></span>
+    <span><a href="https://github.com/VergeGroup/swift-state-graph/releases">Releases</a> · <a href="https://github.com/VergeGroup/swift-state-graph/issues">Issues</a></span>
+  </div>
+</footer>
+
+<script>
+(function () {
+  // Swift syntax colouring for the code samples.
+  var KW = /^(import|final|class|struct|var|let|init|func|in|if|else|return|some|private|override|super|self|weak|true|false|nil)$/;
+  var TOKEN = /(\/\/[^\n]*)|("(?:\\.|[^"\\\n])*")|(@\w+)|(\b[A-Za-z_]\w*\b)/g;
+  function esc(s) { return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;"); }
+  document.querySelectorAll("code.swift").forEach(function (el) {
+    var src = el.textContent, out = "", last = 0, m;
+    TOKEN.lastIndex = 0;
+    while ((m = TOKEN.exec(src))) {
+      out += esc(src.slice(last, m.index));
+      var t = esc(m[0]);
+      if (m[1]) out += '<span class="cm">' + t + "</span>";
+      else if (m[2]) out += '<span class="str">' + t + "</span>";
+      else if (m[3]) out += '<span class="a">' + t + "</span>";
+      else if (KW.test(m[4])) out += '<span class="k">' + t + "</span>";
+      else if (/^[A-Z]/.test(m[4])) out += '<span class="t">' + t + "</span>";
+      else out += t;
+      last = TOKEN.lastIndex;
+    }
+    el.innerHTML = out + esc(src.slice(last));
+  });
+
+  // Copy the package line.
+  var copyBtn = document.getElementById("copy-btn");
+  copyBtn.addEventListener("click", function () {
+    var text = document.getElementById("pkg-line").textContent;
+    function done(label) { copyBtn.textContent = label; setTimeout(function () { copyBtn.textContent = "Copy"; }, 1600); }
+    try {
+      navigator.clipboard.writeText(text).then(function () { done("Copied"); }, function () { selectCode(); done("Selected"); });
+    } catch (e) { selectCode(); done("Selected"); }
+    function selectCode() {
+      var r = document.createRange(); r.selectNodeContents(document.getElementById("pkg-line"));
+      var s = window.getSelection(); s.removeAllRanges(); s.addRange(r);
+    }
+  });
+
+  // A small model of the graph: stored nodes, computed nodes, and edges.
+  var NS = "http://www.w3.org/2000/svg";
+  var people = [["Ada", "Lovelace"], ["Grace", "Hopper"], ["Alan", "Kay"], ["Barbara", "Liskov"]];
+  var pi = 0;
+  var nodes = {
+    firstName: { kind: "stored", x: 20, y: 30, value: "Ada" },
+    lastName: { kind: "stored", x: 20, y: 123, value: "Lovelace" },
+    count: { kind: "stored", x: 20, y: 216, value: 0 },
+    fullName: { kind: "computed", x: 245, y: 76, deps: ["firstName", "lastName"],
+      fn: function (v) { return v.firstName + " " + v.lastName; } },
+    isEven: { kind: "computed", x: 245, y: 216, deps: ["count"],
+      fn: function (v) { return v.count % 2 === 0; } },
+    summary: { kind: "computed", x: 470, y: 146, deps: ["fullName", "isEven"],
+      fn: function (v) { return v.fullName.split(" ")[0] + (v.isEven ? " · even" : " · odd"); } }
+  };
+  var W = 150, H = 54;
+  var edgesEl = document.getElementById("edges"), nodesEl = document.getElementById("nodes");
+  var edges = [];
+
+  function svg(tag, attrs) {
+    var e = document.createElementNS(NS, tag);
+    for (var k in attrs) e.setAttribute(k, attrs[k]);
+    return e;
+  }
+  Object.keys(nodes).forEach(function (id) {
+    var n = nodes[id];
+    (n.deps || []).forEach(function (d) {
+      var a = nodes[d], x1 = a.x + W, y1 = a.y + H / 2, x2 = n.x, y2 = n.y + H / 2, mx = (x1 + x2) / 2;
+      var p = svg("path", { "class": "edge", d: "M" + x1 + " " + y1 + " C" + mx + " " + y1 + " " + mx + " " + y2 + " " + x2 + " " + y2 });
+      edgesEl.appendChild(p);
+      edges.push({ from: d, to: id, el: p });
+    });
+    var g = svg("g", { "class": "node " + n.kind });
+    g.appendChild(svg("rect", { x: n.x, y: n.y, width: W, height: H, rx: 9 }));
+    var name = svg("text", { "class": "name", x: n.x + 12, y: n.y + 19 }); name.textContent = id;
+    var tag = svg("text", { "class": "tag", x: n.x + W - 12, y: n.y + 19, "text-anchor": "end" });
+    tag.textContent = n.kind === "stored" ? "STORED" : "COMPUTED";
+    var val = svg("text", { "class": "val", x: n.x + 12, y: n.y + 41 });
+    g.appendChild(name); g.appendChild(tag); g.appendChild(val);
+    nodesEl.appendChild(g);
+    n.g = g; n.valEl = val;
+  });
+
+  function read(id) {
+    var n = nodes[id];
+    if (n.kind === "stored") return n.value;
+    if (n.dirty || n.value === undefined) {
+      var v = {};
+      n.deps.forEach(function (d) { v[d] = read(d); });
+      n.value = n.fn(v);
+      if (n.dirty) { n.dirty = false; recomputed.push(id); }
+    }
+    return n.value;
+  }
+  var recomputed = [];
+  function paint() {
+    Object.keys(nodes).forEach(function (id) {
+      var n = nodes[id];
+      n.valEl.textContent = n.dirty ? "needs update" : String(n.value);
+      n.g.classList.toggle("dirty", !!n.dirty);
+    });
+  }
+  function downstream(id, acc) {
+    edges.forEach(function (e) { if (e.from === id && acc.indexOf(e.to) < 0) { acc.push(e.to); downstream(e.to, acc); } });
+    return acc;
+  }
+  var logEl = document.getElementById("log");
+  function log(html) {
+    var li = document.createElement("li"); li.innerHTML = html;
+    logEl.insertBefore(li, logEl.firstChild);
+    while (logEl.children.length > 3) logEl.removeChild(logEl.lastChild);
+  }
+  function flash(id) {
+    var g = nodes[id].g; g.classList.remove("flash"); void g.getBBox(); g.classList.add("flash");
+  }
+
+  var timer;
+  function change(ids, apply, label) {
+    clearTimeout(timer);
+    apply();
+    var touched = [];
+    ids.forEach(function (id) { flash(id); downstream(id, touched); });
+    touched.forEach(function (id) { nodes[id].dirty = true; });
+    edges.forEach(function (e) {
+      e.el.classList.toggle("hot", ids.indexOf(e.from) >= 0 || touched.indexOf(e.from) >= 0);
+    });
+    paint();
+    log("<b>" + label + "</b> marks " + touched.join(", ") + " dirty");
+    timer = setTimeout(function () {
+      recomputed = [];
+      read("summary");
+      recomputed.forEach(flash);
+      edges.forEach(function (e) { e.el.classList.remove("hot"); });
+      paint();
+      log("<b>view reads summary</b> → recomputed " + recomputed.join(", "));
+    }, 1100);
+  }
+
+  document.getElementById("btn-name").addEventListener("click", function () {
+    pi = (pi + 1) % people.length;
+    change(["firstName", "lastName"], function () {
+      nodes.firstName.value = people[pi][0]; nodes.lastName.value = people[pi][1];
+    }, "name = " + people[pi].join(" "));
+  });
+  document.getElementById("btn-count").addEventListener("click", function () {
+    change(["count"], function () { nodes.count.value += 1; }, "count = " + (nodes.count.value + 1));
+  });
+
+  read("summary");
+  paint();
+  log("<b>ready</b> · computed nodes evaluate lazily when read");
+})();
+</script>
+</body>
+</html>
