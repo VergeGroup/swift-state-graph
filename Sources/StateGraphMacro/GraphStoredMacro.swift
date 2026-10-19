@@ -22,7 +22,7 @@ extension GraphStoredMacro.Error: DiagnosticMessage {
     case .computedVariableIsNotSupported:
       return "Computed variables are not supported with @GraphStored"
     case .needsTypeAnnotation:
-      return "@GraphStored requires explicit type annotation"
+      return "@GraphStored requires a type annotation or an initial value"
     case .weakVariableNotSupported:
       return "weak variables are not supported with @GraphStored"
     case .unownedVariableNotSupported:
@@ -54,7 +54,7 @@ extension GraphStoredMacro {
     context: some MacroExpansionContext,
     node: some SyntaxProtocol
   ) -> Bool {
-    guard variableDecl.typeSyntax != nil else {
+    guard variableDecl.typeSyntax != nil || variableDecl.hasInitializer else {
       context.addDiagnostics(from: Error.needsTypeAnnotation, node: node)
       return false
     }
@@ -184,7 +184,11 @@ extension GraphStoredMacro {
     }
 
     return storageDecl.modifyingInit { initializer in
-      let expression = #".init(name: "\#(raw: propertyName)", wrappedValue: \#(initializer.trimmed.value))"# as ExprSyntax
+      // Preserve contextual typing for annotated properties. When inference is needed,
+      // select the module explicitly so client declarations cannot shadow the node
+      // constructor.
+      let constructor = variableDecl.typeSyntax == nil ? "StateGraph::Stored" : ".init"
+      let expression = #"\#(raw: constructor)(name: "\#(raw: propertyName)", wrappedValue: \#(initializer.trimmed.value))"# as ExprSyntax
       return .init(value: expression)
     }
   }
