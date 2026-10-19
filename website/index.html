@@ -368,7 +368,7 @@ init() {
     <div class="feature">
       <p class="eyebrow">SwiftUI</p>
       <h3>Just read the properties.</h3>
-      <p>Views observe graph properties directly, with no <code>@ObservedObject</code> or <code>@State</code> needed. Bindings come from the projected value. Conform to <code>GraphObject</code> to pass a model through the Environment, and use <code>.graphTracking</code> to keep a subscription alive only while a view is on screen.</p>
+      <p>Views observe graph properties directly, with no <code>@ObservedObject</code> needed. Bindings come from the projected value. Conform to <code>GraphObject</code> to pass a model through the Environment, and use <code>.graphTracking</code> to keep a subscription alive only while a view is on screen.</p>
 <pre><code class="swift">struct ItemListView: View {
   let store: ItemStore
 
