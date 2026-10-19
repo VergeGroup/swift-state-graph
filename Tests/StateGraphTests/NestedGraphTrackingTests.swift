@@ -29,6 +29,24 @@ struct NestedGraphTrackingTests {
     }
   }
 
+  /// Records values from tracking handlers, which re-execute on other threads.
+  final class ValueRecorder<Value>: @unchecked Sendable {
+    private let lock = NSLock()
+    private var _values: [Value] = []
+
+    var values: [Value] {
+      lock.lock()
+      defer { lock.unlock() }
+      return _values
+    }
+
+    func append(_ value: Value) {
+      lock.lock()
+      defer { lock.unlock() }
+      _values.append(value)
+    }
+  }
+
   // MARK: - Basic Nested Group Tests
 
   @Test
@@ -79,8 +97,8 @@ struct NestedGraphTrackingTests {
     let outerValue = Stored(wrappedValue: 1)
     let innerValue = Stored(wrappedValue: 100)
 
-    var outerResults: [Int] = []
-    var innerResults: [Int] = []
+    let outerResults = ValueRecorder<Int>()
+    let innerResults = ValueRecorder<Int>()
 
     let cancellable = withGraphTracking {
       // Outer group that creates a nested map
@@ -99,22 +117,22 @@ struct NestedGraphTrackingTests {
     try await Task.sleep(nanoseconds: 50_000_000)
 
     // Initial state
-    #expect(outerResults == [1])
-    #expect(innerResults == [100])
+    #expect(outerResults.values == [1])
+    #expect(innerResults.values == [100])
 
     // Change outer value - inner should be recreated
     outerValue.wrappedValue = 2
     try await Task.sleep(nanoseconds: 100_000_000)
 
-    #expect(outerResults == [1, 2])
-    #expect(innerResults == [100, 100])  // Inner recreated with same value
+    #expect(outerResults.values == [1, 2])
+    #expect(innerResults.values == [100, 100])  // Inner recreated with same value
 
     // Change inner value - only inner should receive
     innerValue.wrappedValue = 200
     try await Task.sleep(nanoseconds: 100_000_000)
 
-    #expect(outerResults == [1, 2])  // No change
-    #expect(innerResults == [100, 100, 200])  // New value
+    #expect(outerResults.values == [1, 2])  // No change
+    #expect(innerResults.values == [100, 100, 200])  // New value
 
     cancellable.cancel()
   }
@@ -253,7 +271,7 @@ struct NestedGraphTrackingTests {
     let mapValue = Stored(wrappedValue: 100)
 
     let groupCounter = CallCounter()
-    var mapResults: [Int] = []
+    let mapResults = ValueRecorder<Int>()
 
     let cancellable = withGraphTracking {
       withGraphTrackingGroup {
@@ -272,21 +290,21 @@ struct NestedGraphTrackingTests {
 
     // Initial state
     #expect(groupCounter.count == 1)
-    #expect(mapResults == [100])
+    #expect(mapResults.values == [100])
 
     // Change group value - both should re-execute
     groupValue.wrappedValue = 2
     try await Task.sleep(nanoseconds: 100_000_000)
 
     #expect(groupCounter.count == 2)
-    #expect(mapResults == [100, 100])  // Map recreated
+    #expect(mapResults.values == [100, 100])  // Map recreated
 
     // Change map value - only map should receive
     mapValue.wrappedValue = 200
     try await Task.sleep(nanoseconds: 100_000_000)
 
     #expect(groupCounter.count == 2)  // Unchanged
-    #expect(mapResults == [100, 100, 200])
+    #expect(mapResults.values == [100, 100, 200])
 
     cancellable.cancel()
   }
@@ -296,7 +314,7 @@ struct NestedGraphTrackingTests {
     let mapValue = Stored(wrappedValue: 1)
     let groupValue = Stored(wrappedValue: 100)
 
-    var mapResults: [Int] = []
+    let mapResults = ValueRecorder<Int>()
     let groupCounter = CallCounter()
 
     let cancellable = withGraphTracking {
@@ -315,21 +333,21 @@ struct NestedGraphTrackingTests {
     try await Task.sleep(nanoseconds: 50_000_000)
 
     // Initial state
-    #expect(mapResults == [1])
+    #expect(mapResults.values == [1])
     #expect(groupCounter.count == 1)
 
     // Change map value - group should be recreated
     mapValue.wrappedValue = 2
     try await Task.sleep(nanoseconds: 100_000_000)
 
-    #expect(mapResults == [1, 2])
+    #expect(mapResults.values == [1, 2])
     #expect(groupCounter.count == 2)
 
     // Change group value - only inner group should re-execute
     groupValue.wrappedValue = 200
     try await Task.sleep(nanoseconds: 100_000_000)
 
-    #expect(mapResults == [1, 2])  // Unchanged
+    #expect(mapResults.values == [1, 2])  // Unchanged
     #expect(groupCounter.count == 3)
 
     cancellable.cancel()
@@ -340,7 +358,7 @@ struct NestedGraphTrackingTests {
   @Test
   func dynamicItemListWithNestedGroups() async throws {
     let items = Stored(wrappedValue: [1, 2, 3])
-    var receivedValues: [[Int]] = []
+    let receivedValues = ValueRecorder<[Int]>()
 
     let cancellable = withGraphTracking {
       withGraphTrackingGroup {
@@ -360,14 +378,14 @@ struct NestedGraphTrackingTests {
     try await Task.sleep(nanoseconds: 50_000_000)
 
     // Initial state: [1, 2, 3]
-    #expect(receivedValues.last == [1, 2, 3])
+    #expect(receivedValues.values.last == [1, 2, 3])
 
     // Change items - old groups should be cancelled, new ones created
     items.wrappedValue = [4, 5]
     try await Task.sleep(nanoseconds: 100_000_000)
 
     // Should have [4, 5] as the new values
-    #expect(receivedValues.last == [4, 5])
+    #expect(receivedValues.values.last == [4, 5])
 
     cancellable.cancel()
   }
@@ -448,8 +466,8 @@ struct NestedGraphTrackingTests {
     let name = Stored(wrappedValue: "Alice")
     let age = Stored(wrappedValue: 25)
 
-    var nameResults: [String] = []
-    var ageResults: [Int] = []
+    let nameResults = ValueRecorder<String>()
+    let ageResults = ValueRecorder<Int>()
 
     let cancellable = withGraphTracking {
       withGraphTrackingGroup {
@@ -474,43 +492,43 @@ struct NestedGraphTrackingTests {
     try await Task.sleep(nanoseconds: 50_000_000)
 
     // Initial state
-    #expect(nameResults == ["Alice"])
-    #expect(ageResults == [])  // Not tracking age yet
+    #expect(nameResults.values == ["Alice"])
+    #expect(ageResults.values == [])  // Not tracking age yet
 
     // Change age - should NOT trigger (not being tracked)
     age.wrappedValue = 26
     try await Task.sleep(nanoseconds: 100_000_000)
 
-    #expect(nameResults == ["Alice"])
-    #expect(ageResults == [])
+    #expect(nameResults.values == ["Alice"])
+    #expect(ageResults.values == [])
 
     // Enable details - age tracking should start
     showDetails.wrappedValue = true
     try await Task.sleep(nanoseconds: 100_000_000)
 
-    #expect(nameResults == ["Alice", "Alice"])  // Name map recreated
-    #expect(ageResults == [26])  // Age tracking started
+    #expect(nameResults.values == ["Alice", "Alice"])  // Name map recreated
+    #expect(ageResults.values == [26])  // Age tracking started
 
     // Change age - should trigger now
     age.wrappedValue = 27
     try await Task.sleep(nanoseconds: 100_000_000)
 
-    #expect(nameResults == ["Alice", "Alice"])
-    #expect(ageResults == [26, 27])
+    #expect(nameResults.values == ["Alice", "Alice"])
+    #expect(ageResults.values == [26, 27])
 
     // Disable details - age tracking should stop
     showDetails.wrappedValue = false
     try await Task.sleep(nanoseconds: 100_000_000)
 
-    #expect(nameResults == ["Alice", "Alice", "Alice"])  // Name map recreated again
-    #expect(ageResults == [26, 27])  // No new age values
+    #expect(nameResults.values == ["Alice", "Alice", "Alice"])  // Name map recreated again
+    #expect(ageResults.values == [26, 27])  // No new age values
 
     // Change age again - should NOT trigger
     age.wrappedValue = 28
     try await Task.sleep(nanoseconds: 100_000_000)
 
-    #expect(nameResults == ["Alice", "Alice", "Alice"])
-    #expect(ageResults == [26, 27])  // Stays same
+    #expect(nameResults.values == ["Alice", "Alice", "Alice"])
+    #expect(ageResults.values == [26, 27])  // Stays same
 
     cancellable.cancel()
   }
@@ -758,14 +776,14 @@ struct NestedGraphTrackingTests {
     let trigger = Stored(wrappedValue: 0)
     let childValues = Stored(wrappedValue: [1, 2, 3])
 
-    var childCreationCount = 0
+    let childCreationCounter = CallCounter()
 
     let cancellable = withGraphTracking {
       withGraphTrackingGroup {
         _ = trigger.wrappedValue
 
         for (_, value) in childValues.wrappedValue.enumerated() {
-          childCreationCount += 1
+          childCreationCounter.increment()
 
           // Each item gets a nested group
           withGraphTrackingGroup {
@@ -777,7 +795,7 @@ struct NestedGraphTrackingTests {
 
     try await Task.sleep(nanoseconds: 50_000_000)
 
-    let initialCreationCount = childCreationCount
+    let initialCreationCount = childCreationCounter.count
 
     // Trigger parent re-execution multiple times
     for i in 1...3 {
@@ -787,7 +805,7 @@ struct NestedGraphTrackingTests {
 
     // Each re-execution should create new children (3 items * 4 executions = 12)
     // This verifies that old children are properly cancelled and new ones created
-    #expect(childCreationCount == initialCreationCount * 4)
+    #expect(childCreationCounter.count == initialCreationCount * 4)
 
     cancellable.cancel()
   }
