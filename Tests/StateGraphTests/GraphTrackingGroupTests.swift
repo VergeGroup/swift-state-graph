@@ -675,22 +675,39 @@ struct ContinuousTrackingTests {
 
     let model = Model()
 
+    // The second tracking pass is the re-registration that follows a delivery. It runs
+    // only after `didChange` returns, so its signal also marks the delivery as complete.
+    let trackingPassCount = OSAllocatedUnfairLock(initialState: 0)
+    let reregistered = TestSignal()
+
     await confirmation(expectedCount: 1) { c in
 
       withContinuousStateGraphTracking {
-        _ = model.count1
-        _ = model.count2
+        let count1 = model.count1
+        let count2 = model.count2
+        let pass = trackingPassCount.withLock { count in
+          count += 1
+          return count
+        }
+        if pass == 2 {
+          #expect(count1 == 1 && count2 == 1)
+          reregistered.signal()
+        }
       } didChange: {
-        print(model.count1, model.count2)
+        #expect(model.count1 == 1 && model.count2 == 1)
         c.confirm()
         return .next
       }
 
-      model.count1 += 1
-      model.count2 += 1
+      // Delivery runs in a task on another thread. Without a transaction, it can re-register
+      // between the writes and receive a second delivery for count2. The transaction
+      // publishes both writes before invalidating the initial registration.
+      withGraphTransaction {
+        model.count1 += 1
+        model.count2 += 1
+      }
 
-      try? await Task.sleep(for: .milliseconds(100))
-
+      #expect(await reregistered.wait(for: .seconds(5)))
     }
 
   }
