@@ -132,8 +132,12 @@ final class Settings {
 ```
 
 For a custom representation, implement
-`UserDefaultsStorable._getValue(from:forKey:defaultValue:)` and
-`UserDefaultsStorable._setValue(to:forKey:)` directly.
+`UserDefaultsStorable._getValueIfPresent(from:forKey:)`,
+`UserDefaultsStorable._getValue(from:forKey:defaultValue:)`, and
+`UserDefaultsStorable._setValue(to:forKey:)` directly. `_getValueIfPresent`
+returns `nil` when no value can be restored, and `Optional` uses it to restore
+its wrapped value. `_getValue` typically returns
+`_getValueIfPresent(from:forKey:) ?? defaultValue`.
 
 ## Ownership
 
