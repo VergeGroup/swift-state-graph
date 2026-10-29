@@ -183,6 +183,61 @@ struct GraphUserDefaultTests {
     return userDefaults
   }
 
+  private func expectRoundTrip<Value: UserDefaultsStorable & SendableMetatype>(
+    _ value: Value,
+    defaultValue: Value,
+    storedValue: (UserDefaults, String) -> Value?,
+    sourceLocation: Testing.SourceLocation = #_sourceLocation
+  ) {
+    let key = makeTestKey()
+    let userDefaults = makeTestUserDefaults()
+    let writer = GraphUserDefault(wrappedValue: defaultValue, key, store: userDefaults)
+
+    writer.wrappedValue = value
+
+    let restored = GraphUserDefault(wrappedValue: defaultValue, key, store: userDefaults)
+    #expect(writer.wrappedValue == value, sourceLocation: sourceLocation)
+    #expect(restored.wrappedValue == value, sourceLocation: sourceLocation)
+    #expect(storedValue(userDefaults, key) == value, sourceLocation: sourceLocation)
+  }
+
+  private func expectOptionalRoundTrip<Wrapped: UserDefaultsStorable & SendableMetatype>(
+    _ value: Wrapped,
+    storedValue: (UserDefaults, String) -> Wrapped?,
+    sourceLocation: Testing.SourceLocation = #_sourceLocation
+  ) {
+    let key = makeTestKey()
+    let userDefaults = makeTestUserDefaults()
+    let writer = GraphUserDefault<Wrapped?>(wrappedValue: nil, key, store: userDefaults)
+
+    writer.wrappedValue = value
+
+    let restored = GraphUserDefault<Wrapped?>(wrappedValue: nil, key, store: userDefaults)
+    #expect(writer.wrappedValue == value, sourceLocation: sourceLocation)
+    #expect(restored.wrappedValue == value, sourceLocation: sourceLocation)
+    #expect(storedValue(userDefaults, key) == value, sourceLocation: sourceLocation)
+
+    writer.wrappedValue = nil
+
+    let restoredAfterRemoval = GraphUserDefault<Wrapped?>(
+      wrappedValue: nil,
+      key,
+      store: userDefaults
+    )
+    #expect(writer.wrappedValue == nil, sourceLocation: sourceLocation)
+    #expect(restoredAfterRemoval.wrappedValue == nil, sourceLocation: sourceLocation)
+    #expect(userDefaults.object(forKey: key) == nil, sourceLocation: sourceLocation)
+  }
+
+  private static func decodedCodableValue(
+    from userDefaults: UserDefaults,
+    forKey key: String
+  ) -> CodableValue? {
+    userDefaults.data(forKey: key).flatMap {
+      try? JSONDecoder().decode(CodableValue.self, from: $0)
+    }
+  }
+
   @Test
   func projectionSharesIdentityAndPersistsWrites() {
     let key = makeTestKey()
@@ -291,6 +346,83 @@ struct GraphUserDefaultTests {
       store: userDefaults
     )
     #expect(restored.wrappedValue == CodableValue(name: "saved", count: 42))
+  }
+
+  @Test
+  func optionalCodableValueRoundTripsAndNilRemovesKey() {
+    expectOptionalRoundTrip(
+      CodableValue(name: "saved", count: 42),
+      storedValue: Self.decodedCodableValue
+    )
+  }
+
+  @Test
+  func optionalURLRoundTripsAndNilRemovesKey() {
+    // UserDefaults archives a web URL as Data but stores a file URL as its path string.
+    expectOptionalRoundTrip(URL(string: "https://example.com/path?query=1")!) {
+      $0.url(forKey: $1)
+    }
+    expectOptionalRoundTrip(URL(fileURLWithPath: "/path/to/file.txt")) {
+      $0.url(forKey: $1)
+    }
+  }
+
+  @Test
+  func supportedValuesRoundTripInFoundationRepresentation() {
+    expectRoundTrip(true, defaultValue: false) { $0.object(forKey: $1) as? Bool }
+    expectRoundTrip(42, defaultValue: 0) { $0.object(forKey: $1) as? Int }
+    expectRoundTrip(Float(1.5), defaultValue: 0) { $0.object(forKey: $1) as? Float }
+    expectRoundTrip(3.14, defaultValue: 0) { $0.object(forKey: $1) as? Double }
+    expectRoundTrip("value", defaultValue: "default") { $0.string(forKey: $1) }
+    expectRoundTrip(Data([0x01, 0x02]), defaultValue: Data()) { $0.data(forKey: $1) }
+    expectRoundTrip(
+      Date(timeIntervalSince1970: 1_700_000_000),
+      defaultValue: Date(timeIntervalSince1970: 0)
+    ) { $0.object(forKey: $1) as? Date }
+    expectRoundTrip(
+      URL(string: "https://example.com/path")!,
+      defaultValue: URL(string: "https://example.com/default")!
+    ) { $0.url(forKey: $1) }
+    expectRoundTrip(
+      CodableValue(name: "saved", count: 42),
+      defaultValue: CodableValue(name: "default", count: 0),
+      storedValue: Self.decodedCodableValue
+    )
+  }
+
+  @Test
+  func optionalPropertyListValuesRoundTripAndNilRemovesKey() {
+    expectOptionalRoundTrip(true) { $0.object(forKey: $1) as? Bool }
+    expectOptionalRoundTrip(42) { $0.object(forKey: $1) as? Int }
+    expectOptionalRoundTrip(Float(1.5)) { $0.object(forKey: $1) as? Float }
+    expectOptionalRoundTrip(3.14) { $0.object(forKey: $1) as? Double }
+    expectOptionalRoundTrip("value") { $0.string(forKey: $1) }
+    expectOptionalRoundTrip(Data([0x01, 0x02])) { $0.data(forKey: $1) }
+    expectOptionalRoundTrip(Date(timeIntervalSince1970: 1_700_000_000)) {
+      $0.object(forKey: $1) as? Date
+    }
+  }
+
+  @Test
+  func optionalValueUsesDefaultWithoutRestorableWrappedValue() {
+    let userDefaults = makeTestUserDefaults()
+    let unreadableKey = makeTestKey()
+    userDefaults.set(Data("not json".utf8), forKey: unreadableKey)
+    let fallback = CodableValue(name: "fallback", count: -1)
+
+    let absent = GraphUserDefault<CodableValue?>(
+      wrappedValue: fallback,
+      makeTestKey(),
+      store: userDefaults
+    )
+    let unreadable = GraphUserDefault<CodableValue?>(
+      wrappedValue: fallback,
+      unreadableKey,
+      store: userDefaults
+    )
+
+    #expect(absent.wrappedValue == fallback)
+    #expect(unreadable.wrappedValue == fallback)
   }
 
   @Test
