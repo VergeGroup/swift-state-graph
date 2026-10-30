@@ -1,0 +1,647 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Swift State Graph</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<meta name="description" content="A graph-based reactive state management library for Swift. Stored and computed nodes track their own dependencies and work with SwiftUI, UIKit, and Observable.">
+<style>
+/* Layout: a framework product page. Sticky frosted local nav, centered hero with the
+   live graph as the hero visual, a band of two large tiles, a narrow feature column,
+   a band of guide cards, then install. Stored nodes are orange, computed nodes indigo. */
+:root {
+  --bg: #ffffff;
+  --band: #f5f5f7;
+  --tile: #ffffff;
+  --ink: #1d1d1f;
+  --muted: #6e6e73;
+  --hair: #d2d2d7;
+  --link: #0066cc;
+  --cta: #0071e3;
+  --cta-ink: #ffffff;
+  --nav-bg: rgba(255, 255, 255, 0.72);
+  --stored: #f56300;
+  --stored-soft: #fff1e6;
+  --computed: #5856d6;
+  --computed-soft: #eeeefc;
+  --code-bg: #fbfbfd;
+  --code-ink: #1d1d1f;
+  --code-kw: #ad3da4;
+  --code-str: #d12f1b;
+  --code-type: #703daa;
+  --code-attr: #947100;
+  --code-num: #272ad8;
+  --code-cm: #707f8c;
+  --blue-tile: #0071e3;
+  --blue-tile-2: #0a84ff;
+  --dark-tile: #000000;
+  --dark-tile-ink: #f5f5f7;
+  --font-display: -apple-system, BlinkMacSystemFont, "SF Pro Display", "Helvetica Neue", Helvetica, Arial, sans-serif;
+  --font-text: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", Helvetica, Arial, sans-serif;
+  --font-mono: "SF Mono", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #000000; --band: #101012; --tile: #1d1d1f; --ink: #f5f5f7; --muted: #86868b; --hair: #424245;
+    --link: #2997ff; --cta: #0071e3; --nav-bg: rgba(22, 22, 23, 0.72);
+    --stored: #ff9f0a; --stored-soft: #33240d; --computed: #7d7aff; --computed-soft: #1f1f3d;
+    --code-bg: #1d1d1f; --code-ink: #f5f5f7; --code-kw: #fc5fa3; --code-str: #fc6a5d; --code-type: #d0a8ff;
+    --code-attr: #fd8f3f; --code-num: #d0bf69; --code-cm: #7f8c98;
+    --dark-tile: #1d1d1f;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #000000; --band: #101012; --tile: #1d1d1f; --ink: #f5f5f7; --muted: #86868b; --hair: #424245;
+  --link: #2997ff; --cta: #0071e3; --nav-bg: rgba(22, 22, 23, 0.72);
+  --stored: #ff9f0a; --stored-soft: #33240d; --computed: #7d7aff; --computed-soft: #1f1f3d;
+  --code-bg: #1d1d1f; --code-ink: #f5f5f7; --code-kw: #fc5fa3; --code-str: #fc6a5d; --code-type: #d0a8ff;
+  --code-attr: #fd8f3f; --code-num: #d0bf69; --code-cm: #7f8c98;
+  --dark-tile: #1d1d1f;
+  color-scheme: dark;
+}
+
+* { box-sizing: border-box; }
+html { -webkit-text-size-adjust: 100%; scroll-padding-top: 64px; }
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--ink);
+  font: 400 17px/1.47 var(--font-text);
+  letter-spacing: -0.022em;
+  -webkit-font-smoothing: antialiased;
+}
+a { color: var(--link); text-decoration: none; }
+a:hover { text-decoration: underline; }
+a:focus-visible, button:focus-visible { outline: 2px solid var(--cta); outline-offset: 3px; border-radius: 6px; }
+.wrap {
+  max-width: 1024px;
+  margin: 0 auto;
+  padding-left: max(22px, env(safe-area-inset-left, 0px));
+  padding-right: max(22px, env(safe-area-inset-right, 0px));
+}
+.narrow { max-width: 860px; }
+.more::after { content: " \203A"; }
+
+/* Local nav */
+body::before { content: ""; position: fixed; inset: 0 0 auto; height: env(safe-area-inset-top, 0px); z-index: 10; background: var(--nav-bg); }
+.localnav {
+  position: sticky; top: env(safe-area-inset-top, 0px); z-index: 9;
+  background: var(--nav-bg);
+  -webkit-backdrop-filter: saturate(180%) blur(20px); backdrop-filter: saturate(180%) blur(20px);
+  border-bottom: 1px solid var(--hair);
+}
+.localnav .wrap { display: flex; align-items: center; justify-content: space-between; gap: 16px; min-height: 52px; }
+.localnav .title { display: flex; align-items: center; gap: 9px; font: 600 21px/1 var(--font-display); letter-spacing: 0.011em; color: var(--ink); }
+.localnav .title:hover { text-decoration: none; }
+.localnav .title svg { flex: none; }
+.localnav nav { display: flex; align-items: center; gap: 22px; font-size: 12px; letter-spacing: -0.01em; }
+.localnav nav a { color: var(--ink); opacity: .8; }
+.localnav nav a:hover { opacity: 1; text-decoration: none; color: var(--link); }
+.localnav nav a.pill { opacity: 1; background: var(--cta); color: var(--cta-ink); border-radius: 980px; padding: 4px 11px; }
+.localnav nav a.pill:hover { color: var(--cta-ink); }
+
+/* Hero */
+.hero { text-align: center; padding-block: 72px 80px; }
+.hero h1 {
+  font: 600 clamp(44px, 7vw, 64px)/1.06 var(--font-display);
+  letter-spacing: -0.015em; margin: 0 0 18px; text-wrap: balance;
+}
+.hero .intro {
+  font: 400 clamp(19px, 2.2vw, 24px)/1.36 var(--font-display);
+  letter-spacing: 0.009em; max-width: 720px; margin: 0 auto 22px; text-wrap: balance;
+}
+.hero .links { display: flex; gap: 28px; justify-content: center; flex-wrap: wrap; font-size: 19px; margin-bottom: 52px; }
+
+/* Graph stage */
+.stage {
+  max-width: 900px; margin: 0 auto; text-align: left;
+  background: var(--band); border-radius: 28px; padding: 26px 26px 22px;
+}
+.stage-head { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 6px; }
+.stage-head p { margin: 0; font: 600 14px/1.3 var(--font-text); color: var(--muted); letter-spacing: -0.01em; }
+.legend { display: flex; gap: 16px; font: 400 12px/1 var(--font-mono); color: var(--muted); }
+.legend i { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-right: 6px; vertical-align: -1px; }
+.legend .ls { background: var(--stored); }
+.legend .lc { background: var(--computed); }
+.graph-scroll { overflow-x: auto; min-width: 0; }
+#graph { width: 100%; height: auto; display: block; }
+#graph .edge { fill: none; stroke: var(--hair); stroke-width: 2; }
+#graph .edge.hot { stroke: var(--stored); stroke-dasharray: 6 6; animation: flow .6s linear infinite; }
+#graph .node rect { stroke-width: 1.5; }
+#graph .node.stored rect { fill: var(--stored-soft); stroke: var(--stored); }
+#graph .node.computed rect { fill: var(--computed-soft); stroke: var(--computed); }
+#graph .node.dirty rect { stroke-dasharray: 5 4; fill: var(--tile); }
+#graph .node.flash rect { animation: pop .5s ease-out; }
+#graph .name { font: 400 11px var(--font-mono); fill: var(--muted); }
+#graph .val { font: 600 15px var(--font-text); fill: var(--ink); }
+#graph .tag { font: 600 9px var(--font-text); letter-spacing: .06em; }
+#graph .stored .tag { fill: var(--stored); }
+#graph .computed .tag { fill: var(--computed); }
+#graph .node { transform-box: fill-box; transform-origin: center; }
+@keyframes flow { to { stroke-dashoffset: -12; } }
+@keyframes pop { 0% { transform: scale(1); } 40% { transform: scale(1.05); } 100% { transform: scale(1); } }
+.controls { display: flex; gap: 10px; flex-wrap: wrap; justify-content: center; margin-top: 12px; }
+.controls button {
+  font: 400 15px/1 var(--font-text); letter-spacing: -0.01em;
+  padding: 10px 18px; border-radius: 980px; cursor: pointer;
+  background: var(--cta); color: var(--cta-ink); border: 0;
+}
+.controls button + button { background: var(--tile); color: var(--link); border: 1px solid var(--link); }
+.controls button:hover { filter: brightness(1.08); }
+#log { margin: 16px 0 0; padding: 12px 14px; min-height: 66px; border-radius: 14px; background: var(--tile); font: 400 12px/1.6 var(--font-mono); color: var(--muted); list-style: none; letter-spacing: 0; }
+#log li b { color: var(--ink); font-weight: 600; }
+
+/* Tiles band */
+.band { background: var(--band); padding-block: 64px; }
+.tiles { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 24px; }
+.tile {
+  border-radius: 28px; padding: 44px 36px 40px; text-align: center; min-width: 0;
+  display: flex; flex-direction: column; align-items: center; gap: 14px;
+}
+.tile h2 { font: 600 clamp(28px, 3.4vw, 36px)/1.12 var(--font-display); letter-spacing: 0.004em; margin: 0; text-wrap: balance; }
+.tile p { margin: 0; font-size: 19px; line-height: 1.42; max-width: 30ch; }
+.tile.light { background: linear-gradient(180deg, var(--tile), var(--bg)); }
+.tile.blue { background: linear-gradient(160deg, var(--blue-tile-2), var(--blue-tile)); color: #ffffff; }
+.tile.blue a { color: #ffffff; }
+.tile.blue a:hover { text-decoration: underline; }
+.tile pre { align-self: stretch; text-align: left; margin-top: 10px; }
+.tile .glyphs { margin-top: 14px; display: grid; grid-template-columns: repeat(3, 60px); gap: 18px 28px; justify-content: center; }
+.tile .glyphs svg { width: 60px; height: 60px; }
+
+/* Features */
+.features { padding-block: 88px 40px; }
+.features > .wrap > h2, .guides-band h2 {
+  font: 600 clamp(32px, 4vw, 40px)/1.1 var(--font-display); letter-spacing: 0; margin: 0 0 48px; text-wrap: balance;
+}
+.feature { padding-bottom: 64px; }
+.feature .eyebrow { font: 400 21px/1.2 var(--font-display); color: var(--muted); margin: 0 0 6px; letter-spacing: 0.011em; }
+.feature h3 { font: 600 clamp(26px, 3.2vw, 32px)/1.2 var(--font-display); margin: 0 0 14px; letter-spacing: 0.004em; text-wrap: balance; }
+.feature p { margin: 0 0 22px; max-width: 70ch; }
+.feature p:last-child { margin-bottom: 0; }
+.feature p code, .tile p code, .install-note code {
+  font: 400 0.9em var(--font-mono); letter-spacing: 0;
+}
+.pair-code { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; margin-bottom: 22px; }
+.pair-code figure { margin: 0; min-width: 0; }
+.pair-code figcaption { font: 600 12px/1 var(--font-text); color: var(--muted); margin: 0 0 8px; letter-spacing: .02em; text-transform: uppercase; }
+
+pre {
+  margin: 0 0 22px; overflow-x: auto; min-width: 0;
+  background: var(--code-bg); color: var(--code-ink);
+  border: 1px solid var(--hair); border-radius: 14px;
+  padding: 22px 26px;
+  font: 400 13.5px/1.7 var(--font-mono); letter-spacing: 0;
+  tab-size: 2;
+}
+pre .k { color: var(--code-kw); font-weight: 600; }
+pre .str { color: var(--code-str); }
+pre .t { color: var(--code-type); }
+pre .a { color: var(--code-attr); }
+pre .n { color: var(--code-num); }
+pre .cm { color: var(--code-cm); }
+
+/* Guides band */
+.guides-band { background: var(--band); padding-block: 72px; }
+.cards { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 20px; }
+.card {
+  background: var(--tile); border-radius: 18px; padding: 28px 26px 26px; min-width: 0;
+  display: flex; flex-direction: column; gap: 8px; color: var(--ink);
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.04);
+  transition: transform .3s ease, box-shadow .3s ease;
+}
+.card:hover { text-decoration: none; transform: translateY(-2px); box-shadow: 0 8px 28px rgba(0, 0, 0, 0.08); }
+.card .eyebrow { font: 600 12px/1 var(--font-text); color: var(--muted); letter-spacing: .02em; text-transform: uppercase; }
+.card h3 { font: 600 21px/1.2 var(--font-display); margin: 0; letter-spacing: 0.011em; }
+.card p { margin: 0; color: var(--muted); font-size: 15px; flex: 1; }
+.card .more { color: var(--link); font-size: 15px; margin-top: 10px; }
+
+/* Install */
+.install { padding-block: 72px 88px; }
+.dark-tile {
+  background: var(--dark-tile); color: var(--dark-tile-ink); border-radius: 28px;
+  padding: 52px clamp(22px, 5vw, 64px);
+  display: grid; grid-template-columns: minmax(0, 5fr) minmax(0, 6fr); gap: 40px; align-items: center;
+}
+.dark-tile h2 { font: 600 clamp(30px, 3.8vw, 40px)/1.1 var(--font-display); margin: 0 0 14px; text-wrap: balance; }
+.dark-tile p { margin: 0 0 14px; color: #a1a1a6; }
+.dark-tile a { color: #2997ff; }
+.dark-tile pre { background: #1d1d1f; color: #f5f5f7; border-color: #424245; margin: 0; }
+.dark-tile pre .k { color: #fc5fa3; } .dark-tile pre .str { color: #fc6a5d; } .dark-tile pre .t { color: #d0a8ff; }
+.dark-tile pre .a { color: #fd8f3f; } .dark-tile pre .n { color: #d0bf69; } .dark-tile pre .cm { color: #7f8c98; }
+.dark-tile .code-col { display: grid; gap: 14px; min-width: 0; }
+.copy-row { position: relative; min-width: 0; }
+.copy-row button {
+  position: absolute; top: 10px; right: 10px;
+  font: 400 12px/1 var(--font-text); padding: 6px 12px; border-radius: 980px; cursor: pointer;
+  background: #2997ff; color: #ffffff; border: 0;
+}
+.install-note { font-size: 14px; color: var(--muted); max-width: 80ch; margin: 24px auto 0; text-align: center; }
+
+footer { background: var(--band); color: var(--muted); font-size: 12px; padding-block: 22px 32px; }
+footer .wrap { display: flex; justify-content: space-between; gap: 12px; flex-wrap: wrap; border-top: 1px solid var(--hair); padding-top: 18px; }
+footer a { color: var(--ink); opacity: .8; }
+
+@media (max-width: 834px) {
+  .tiles, .cards, .dark-tile, .pair-code { grid-template-columns: minmax(0, 1fr); }
+  .localnav nav a:not(.pill) { display: none; }
+  .stage { padding: 18px 14px 16px; border-radius: 22px; }
+  #graph { min-width: 520px; }
+  .tile { padding: 36px 18px 28px; }
+  pre { padding: 18px; font-size: 12.5px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  #graph .edge.hot, #graph .node.flash rect { animation: none; }
+  .card { transition: none; }
+}
+</style>
+</head>
+<body>
+
+<header class="localnav">
+  <div class="wrap">
+    <a class="title" href="#top">
+      <svg width="24" height="24" viewBox="0 0 26 26" aria-hidden="true">
+        <path d="M7 8 L19 13 M7 18 L19 13" style="stroke:var(--muted)" stroke-width="1.6" fill="none"/>
+        <circle cx="6" cy="7" r="4" style="fill:var(--stored)"/>
+        <circle cx="6" cy="19" r="4" style="fill:var(--stored)"/>
+        <circle cx="20" cy="13" r="4.5" style="fill:var(--computed)"/>
+      </svg>
+      Swift State Graph
+    </a>
+    <nav aria-label="Sections">
+      <a href="#features">Features</a>
+      <a href="#guides">Guides</a>
+      <a href="#install">Install</a>
+      <a class="pill" href="https://github.com/VergeGroup/swift-state-graph">GitHub</a>
+    </nav>
+  </div>
+</header>
+
+<main id="top">
+<section class="hero">
+  <div class="wrap">
+    <h1>Swift State Graph</h1>
+    <p class="intro">Declare where each value comes from. Swift State Graph tracks every dependency, so derived state stays correct in SwiftUI, UIKit, and plain Swift.</p>
+    <div class="links">
+      <a class="more" href="#install">Get started</a>
+      <a class="more" href="https://github.com/VergeGroup/swift-state-graph">View on GitHub</a>
+    </div>
+
+    <div class="stage" aria-label="Interactive dependency graph">
+      <div class="stage-head">
+        <p>Change a stored value and watch the graph update.</p>
+        <div class="legend"><span><i class="ls"></i>@GraphStored</span><span><i class="lc"></i>@GraphComputed</span></div>
+      </div>
+      <div class="graph-scroll">
+        <svg id="graph" viewBox="0 0 640 300" role="img" aria-label="Three stored nodes feed computed nodes fullName, isEven and summary">
+          <g id="edges"></g>
+          <g id="nodes"></g>
+        </svg>
+      </div>
+      <div class="controls">
+        <button type="button" id="btn-name">Change the name</button>
+        <button type="button" id="btn-count">count += 1</button>
+      </div>
+      <ul id="log" aria-live="polite"></ul>
+    </div>
+  </div>
+</section>
+
+<section class="band">
+  <div class="wrap">
+    <div class="tiles">
+      <div class="tile light">
+        <h2>Start with two macros</h2>
+        <p>Mark sources with <code>@GraphStored</code> and derived values with <code>@GraphComputed</code>.</p>
+        <a class="more" href="https://github.com/VergeGroup/swift-state-graph/blob/main/Sources/StateGraph/Documentation.docc/Quick-Start-Guide.md">Read the quick start</a>
+<pre><code class="swift">final class Counter {
+  @GraphStored var count = 0
+  @GraphComputed var isEven: Bool
+
+  init() {
+    $isEven = .init { [$count] _ in
+      $count.wrappedValue % 2 == 0
+    }
+  }
+}</code></pre>
+      </div>
+      <div class="tile blue">
+        <h2>Coming from @Observable?</h2>
+        <p>Keep your models as classes and let computed values update on their own.</p>
+        <a class="more" href="https://github.com/VergeGroup/swift-state-graph/blob/main/Sources/StateGraph/Documentation.docc/Migration-from-Observable.md">Read the migration guide</a>
+        <div class="glyphs" aria-hidden="true">
+          <svg viewBox="0 0 60 60"><circle cx="30" cy="30" r="13" fill="none" stroke="#fff" stroke-width="3"/></svg>
+          <svg viewBox="0 0 60 60"><path d="M12 30 H46 M36 20 L46 30 L36 40" fill="none" stroke="#fff" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          <svg viewBox="0 0 60 60"><circle cx="30" cy="30" r="13" fill="#fff"/></svg>
+          <svg viewBox="0 0 60 60"><path d="M18 18 L42 30 L18 42" fill="none" stroke="#fff" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          <svg viewBox="0 0 60 60"><rect x="14" y="14" width="32" height="32" rx="9" fill="none" stroke="#fff" stroke-width="3"/></svg>
+          <svg viewBox="0 0 60 60"><path d="M16 31 L26 41 L45 20" fill="none" stroke="#fff" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="features" id="features">
+  <div class="wrap narrow">
+    <h2>Features</h2>
+
+    <div class="feature">
+      <p class="eyebrow">Automatic dependency tracking</p>
+      <h3>Describe the result, not the updates.</h3>
+      <p>A computed node reads other nodes, and every read becomes an edge in the graph. When a source changes, only the nodes downstream of it are marked dirty. They recompute the next time someone reads them, and cache the result until then.</p>
+<pre><code class="swift">@GraphStored var firstName: String = "John"
+@GraphStored var lastName: String = "Doe"
+@GraphComputed var fullName: String
+
+init() {
+  $fullName = .init { [$firstName, $lastName] _ in
+    "\($firstName.wrappedValue) \($lastName.wrappedValue)"
+  }
+}
+// Change firstName, and fullName follows.</code></pre>
+    </div>
+
+    <div class="feature">
+      <p class="eyebrow">SwiftUI</p>
+      <h3>Just read the properties.</h3>
+      <p>Views observe graph properties directly, with no <code>@ObservedObject</code> needed. Bindings come from the projected value. Conform to <code>GraphObject</code> to pass a model through the Environment, and use <code>.graphTracking</code> to keep a subscription alive only while a view is on screen.</p>
+<pre><code class="swift">struct ItemListView: View {
+  let store: ItemStore
+
+  var body: some View {
+    List(store.items) { item in
+      Text(item.name)
+    }
+    TextField("New Item", text: store.$newItemName.binding)
+  }
+}</code></pre>
+      <a class="more" href="https://github.com/VergeGroup/swift-state-graph/blob/main/Sources/StateGraph/Documentation.docc/SwiftUI-Integration.md">Learn more about SwiftUI integration</a>
+    </div>
+
+    <div class="feature">
+      <p class="eyebrow">UIKit and beyond</p>
+      <h3>Track changes anywhere.</h3>
+      <p><code>withGraphTracking</code> re-runs only when something it read has changed. Groups and maps can nest: when a parent re-runs, its children are cancelled and created again.</p>
+<pre><code class="swift">subscription = withGraphTracking {
+  withGraphTrackingMap {
+    viewModel.items
+  } onChange: { [weak self] items in
+    self?.tableView.reloadData()
+  }
+}</code></pre>
+      <a class="more" href="https://github.com/VergeGroup/swift-state-graph/blob/main/Sources/StateGraph/Documentation.docc/UIKit-Integration.md">Learn more about UIKit integration</a>
+    </div>
+
+    <div class="feature">
+      <p class="eyebrow">Drop-in enhancement</p>
+      <h3>Stop calling validate() by hand.</h3>
+      <div class="pair-code">
+        <figure>
+          <figcaption>Before</figcaption>
+<pre><code class="swift">@Observable class UserViewModel {
+  var name = ""
+  var isValid = false
+  func validate() {
+    isValid = !name.isEmpty
+  }
+}</code></pre>
+        </figure>
+        <figure>
+          <figcaption>After</figcaption>
+<pre><code class="swift">final class UserViewModel {
+  @GraphStored var name: String = ""
+  @GraphComputed var isValid: Bool
+  init() {
+    $isValid = .init { [$name] _ in
+      !$name.wrappedValue.isEmpty
+    }
+  }
+}</code></pre>
+        </figure>
+      </div>
+    </div>
+
+    <div class="feature">
+      <p class="eyebrow">Persistence and sharing</p>
+      <h3>UserDefaults that joins the graph.</h3>
+      <p><code>@GraphUserDefault</code> reads take part in dependency tracking, and writes persist to UserDefaults. To share state between objects, assign a projected value so both point at the same node.</p>
+<pre><code class="swift">@GraphUserDefault("theme")
+var theme: String = "light"
+
+final class ViewModel {
+  @GraphStored var items: [Item]
+
+  init(service: DataService) {
+    $items = service.$items // the same node
+  }
+}</code></pre>
+    </div>
+  </div>
+</section>
+
+<section class="guides-band" id="guides">
+  <div class="wrap">
+    <h2>Guides</h2>
+    <div class="cards">
+      <a class="card" href="https://github.com/VergeGroup/swift-state-graph/blob/main/Sources/StateGraph/Documentation.docc/Core-Concepts.md"><span class="eyebrow">Basics</span><h3>Core Concepts</h3><p>Stored, Computed, and dependency tracking.</p><span class="more">Read the guide</span></a>
+      <a class="card" href="https://github.com/VergeGroup/swift-state-graph/blob/main/Sources/StateGraph/Documentation.docc/SwiftUI-Integration.md"><span class="eyebrow">SwiftUI</span><h3>SwiftUI Integration</h3><p>Bindings, GraphObject, and the Environment.</p><span class="more">Read the guide</span></a>
+      <a class="card" href="https://github.com/VergeGroup/swift-state-graph/blob/main/Sources/StateGraph/Documentation.docc/UIKit-Integration.md"><span class="eyebrow">UIKit</span><h3>UIKit Integration</h3><p>Patterns for withGraphTracking.</p><span class="more">Read the guide</span></a>
+      <a class="card" href="https://github.com/VergeGroup/swift-state-graph/blob/main/Sources/StateGraph/Documentation.docc/UserDefaults.md"><span class="eyebrow">Persistence</span><h3>UserDefaults</h3><p>Persistent values composed with stored nodes.</p><span class="more">Read the guide</span></a>
+      <a class="card" href="https://github.com/VergeGroup/swift-state-graph/blob/main/Sources/StateGraph/Documentation.docc/Data-Normalization.md"><span class="eyebrow">Data</span><h3>Data Normalization</h3><p>EntityStore for relational data.</p><span class="more">Read the guide</span></a>
+      <a class="card" href="https://github.com/VergeGroup/swift-state-graph/blob/main/Sources/StateGraph/Documentation.docc/Migration-from-Observable.md"><span class="eyebrow">Migration</span><h3>Migrating from Observable</h3><p>A step-by-step guide.</p><span class="more">Read the guide</span></a>
+    </div>
+  </div>
+</section>
+
+<section class="install" id="install">
+  <div class="wrap">
+    <div class="dark-tile">
+      <div>
+        <h2>Install with Swift Package Manager.</h2>
+        <p>Add the package, then depend on the StateGraph product. Add StateGraphNormalization for EntityStore and relational data.</p>
+        <p>Requires Swift 6.0, iOS 17, or macOS 14 or later.</p>
+        <a class="more" href="https://github.com/VergeGroup/swift-state-graph/releases">See all releases</a>
+      </div>
+      <div class="code-col">
+        <div class="copy-row">
+<pre><code class="swift" id="pkg-line">.package(
+  url: "https://github.com/VergeGroup/swift-state-graph.git",
+  from: "0.33.0"
+)</code></pre>
+          <button type="button" id="copy-btn">Copy</button>
+        </div>
+<pre><code class="swift">.target(
+  name: "YourTarget",
+  dependencies: ["StateGraph"]
+)</code></pre>
+      </div>
+    </div>
+    <p class="install-note">Both products ship as dynamic libraries, because StateGraph owns process-wide tracking and one process must load a single copy. Embed the frameworks once in the app target. With Tuist, use <code>.runtimeEmbedded</code> in the app and the default <code>.runtime</code> in feature frameworks.</p>
+  </div>
+</section>
+</main>
+
+<footer>
+  <div class="wrap">
+    <span>Swift State Graph is open source under the MIT License, by <a href="https://github.com/VergeGroup">VergeGroup</a>.</span>
+    <span><a href="https://github.com/VergeGroup/swift-state-graph/issues">Issues</a> · <a href="https://github.com/VergeGroup/swift-state-graph/releases">Releases</a></span>
+  </div>
+</footer>
+
+<script>
+(function () {
+  // Swift syntax colouring for the code samples.
+  var KW = /^(import|final|class|struct|var|let|init|func|in|if|else|return|some|private|override|super|self|weak|true|false|nil)$/;
+  var TOKEN = /(\/\/[^\n]*)|("(?:\\.|[^"\\\n])*")|(@\w+)|(\b[A-Za-z_]\w*\b)|(\b\d+(?:\.\d+)*\b)/g;
+  function esc(s) { return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;"); }
+  document.querySelectorAll("code.swift").forEach(function (el) {
+    var src = el.textContent, out = "", last = 0, m;
+    TOKEN.lastIndex = 0;
+    while ((m = TOKEN.exec(src))) {
+      out += esc(src.slice(last, m.index));
+      var t = esc(m[0]);
+      if (m[1]) out += '<span class="cm">' + t + "</span>";
+      else if (m[2]) out += '<span class="str">' + t + "</span>";
+      else if (m[3]) out += '<span class="a">' + t + "</span>";
+      else if (m[5]) out += '<span class="n">' + t + "</span>";
+      else if (KW.test(m[4])) out += '<span class="k">' + t + "</span>";
+      else if (/^[A-Z]/.test(m[4])) out += '<span class="t">' + t + "</span>";
+      else out += t;
+      last = TOKEN.lastIndex;
+    }
+    el.innerHTML = out + esc(src.slice(last));
+  });
+
+  // Copy the package line.
+  var copyBtn = document.getElementById("copy-btn");
+  copyBtn.addEventListener("click", function () {
+    var text = document.getElementById("pkg-line").textContent;
+    function done(label) { copyBtn.textContent = label; setTimeout(function () { copyBtn.textContent = "Copy"; }, 1600); }
+    try {
+      navigator.clipboard.writeText(text).then(function () { done("Copied"); }, function () { selectCode(); done("Selected"); });
+    } catch (e) { selectCode(); done("Selected"); }
+    function selectCode() {
+      var r = document.createRange(); r.selectNodeContents(document.getElementById("pkg-line"));
+      var s = window.getSelection(); s.removeAllRanges(); s.addRange(r);
+    }
+  });
+
+  // A small model of the graph: stored nodes, computed nodes, and edges.
+  var NS = "http://www.w3.org/2000/svg";
+  var people = [["Ada", "Lovelace"], ["Grace", "Hopper"], ["Alan", "Kay"], ["Barbara", "Liskov"]];
+  var pi = 0;
+  var nodes = {
+    firstName: { kind: "stored", x: 20, y: 30, value: "Ada" },
+    lastName: { kind: "stored", x: 20, y: 123, value: "Lovelace" },
+    count: { kind: "stored", x: 20, y: 216, value: 0 },
+    fullName: { kind: "computed", x: 245, y: 76, deps: ["firstName", "lastName"],
+      fn: function (v) { return v.firstName + " " + v.lastName; } },
+    isEven: { kind: "computed", x: 245, y: 216, deps: ["count"],
+      fn: function (v) { return v.count % 2 === 0; } },
+    summary: { kind: "computed", x: 470, y: 146, deps: ["fullName", "isEven"],
+      fn: function (v) { return v.fullName.split(" ")[0] + (v.isEven ? " · even" : " · odd"); } }
+  };
+  var W = 150, H = 54;
+  var edgesEl = document.getElementById("edges"), nodesEl = document.getElementById("nodes");
+  var edges = [];
+
+  function svg(tag, attrs) {
+    var e = document.createElementNS(NS, tag);
+    for (var k in attrs) e.setAttribute(k, attrs[k]);
+    return e;
+  }
+  Object.keys(nodes).forEach(function (id) {
+    var n = nodes[id];
+    (n.deps || []).forEach(function (d) {
+      var a = nodes[d], x1 = a.x + W, y1 = a.y + H / 2, x2 = n.x, y2 = n.y + H / 2, mx = (x1 + x2) / 2;
+      var p = svg("path", { "class": "edge", d: "M" + x1 + " " + y1 + " C" + mx + " " + y1 + " " + mx + " " + y2 + " " + x2 + " " + y2 });
+      edgesEl.appendChild(p);
+      edges.push({ from: d, to: id, el: p });
+    });
+    var g = svg("g", { "class": "node " + n.kind });
+    g.appendChild(svg("rect", { x: n.x, y: n.y, width: W, height: H, rx: 9 }));
+    var name = svg("text", { "class": "name", x: n.x + 12, y: n.y + 19 }); name.textContent = id;
+    var tag = svg("text", { "class": "tag", x: n.x + W - 12, y: n.y + 19, "text-anchor": "end" });
+    tag.textContent = n.kind === "stored" ? "STORED" : "COMPUTED";
+    var val = svg("text", { "class": "val", x: n.x + 12, y: n.y + 41 });
+    g.appendChild(name); g.appendChild(tag); g.appendChild(val);
+    nodesEl.appendChild(g);
+    n.g = g; n.valEl = val;
+  });
+
+  function read(id) {
+    var n = nodes[id];
+    if (n.kind === "stored") return n.value;
+    if (n.dirty || n.value === undefined) {
+      var v = {};
+      n.deps.forEach(function (d) { v[d] = read(d); });
+      n.value = n.fn(v);
+      if (n.dirty) { n.dirty = false; recomputed.push(id); }
+    }
+    return n.value;
+  }
+  var recomputed = [];
+  function paint() {
+    Object.keys(nodes).forEach(function (id) {
+      var n = nodes[id];
+      n.valEl.textContent = n.dirty ? "needs update" : String(n.value);
+      n.g.classList.toggle("dirty", !!n.dirty);
+    });
+  }
+  function downstream(id, acc) {
+    edges.forEach(function (e) { if (e.from === id && acc.indexOf(e.to) < 0) { acc.push(e.to); downstream(e.to, acc); } });
+    return acc;
+  }
+  var logEl = document.getElementById("log");
+  function log(html) {
+    var li = document.createElement("li"); li.innerHTML = html;
+    logEl.insertBefore(li, logEl.firstChild);
+    while (logEl.children.length > 3) logEl.removeChild(logEl.lastChild);
+  }
+  function flash(id) {
+    var g = nodes[id].g; g.classList.remove("flash"); void g.getBBox(); g.classList.add("flash");
+  }
+
+  var timer;
+  function change(ids, apply, label) {
+    clearTimeout(timer);
+    apply();
+    var touched = [];
+    ids.forEach(function (id) { flash(id); downstream(id, touched); });
+    touched.forEach(function (id) { nodes[id].dirty = true; });
+    edges.forEach(function (e) {
+      e.el.classList.toggle("hot", ids.indexOf(e.from) >= 0 || touched.indexOf(e.from) >= 0);
+    });
+    paint();
+    log("<b>" + label + "</b> marks " + touched.join(", ") + " dirty");
+    timer = setTimeout(function () {
+      recomputed = [];
+      read("summary");
+      recomputed.forEach(flash);
+      edges.forEach(function (e) { e.el.classList.remove("hot"); });
+      paint();
+      log("<b>view reads summary</b> → recomputed " + recomputed.join(", "));
+    }, 1100);
+  }
+
+  document.getElementById("btn-name").addEventListener("click", function () {
+    pi = (pi + 1) % people.length;
+    change(["firstName", "lastName"], function () {
+      nodes.firstName.value = people[pi][0]; nodes.lastName.value = people[pi][1];
+    }, "name = " + people[pi].join(" "));
+  });
+  document.getElementById("btn-count").addEventListener("click", function () {
+    change(["count"], function () { nodes.count.value += 1; }, "count = " + (nodes.count.value + 1));
+  });
+
+  read("summary");
+  paint();
+  log("<b>ready</b> · computed nodes evaluate lazily when read");
+})();
+</script>
+</body>
+</html>
