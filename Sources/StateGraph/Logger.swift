@@ -11,7 +11,7 @@ public enum StateGraphDiagnostics {
     var isNestedTransactionWarningEnabled = true
   }
 
-  private static let state = OSAllocatedUnfairLock(initialState: State())
+  private static let state = AllocatedLock(initialState: State())
 
   /// Controls the warning emitted when a tracking handler suppresses its own invalidation.
   ///

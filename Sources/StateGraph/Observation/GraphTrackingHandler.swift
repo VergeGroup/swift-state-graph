@@ -25,11 +25,11 @@ final class GraphTrackingHandler: @unchecked Sendable {
     case cancelled
   }
 
-  private let state: OSAllocatedUnfairLock<State>
-  private let executionGate = OSAllocatedUnfairLock<Void>()
+  private let state: AllocatedLock<State>
+  private let executionGate = AllocatedLock<Void>()
 
   init(_ handler: @escaping () -> Void) {
-    self.state = OSAllocatedUnfairLock(
+    self.state = AllocatedLock(
       uncheckedState: .active(ClosureBox(handler))
     )
   }
