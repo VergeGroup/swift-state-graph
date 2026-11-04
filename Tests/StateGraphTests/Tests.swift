@@ -252,6 +252,12 @@ struct Tests {
 
     let model = Model()
 
+    // Each signal marks one completed projection. Re-projection runs asynchronously, so
+    // the next write waits for the previous one to be observed instead of sleeping.
+    let projections = (0..<3).map { _ in TestSignal() }
+    let projectionCount = OSAllocatedUnfairLock(initialState: 0)
+    let sumChanged = TestSignal()
+
     // onChange should be called for initial value and when the computed result actually changes
     // Expected calls: 1) initial value (10), 2) when sum changes to 11
     await confirmation(expectedCount: 2) { c in
@@ -261,27 +267,43 @@ struct Tests {
           model.count1 + model.count2
         }
         withGraphTrackingMap {
-          computed.wrappedValue
+          let sum = computed.wrappedValue
+          let index = projectionCount.withLock { count in
+            defer { count += 1 }
+            return count
+          }
+          if projections.indices.contains(index) {
+            projections[index].signal()
+          }
+          return sum
         } onChange: { value in
           c.confirm()
+          if value == 11 {
+            sumChanged.signal()
+          }
         }
       }
 
-      try? await Task.sleep(for: .milliseconds(100))
+      #expect(await projections[0].wait(for: .seconds(5)))
 
-      // Change count1 and count2, but sum remains 10 - should NOT trigger onChange
-      model.count1 = 6
-      model.count2 = 4
-      try? await Task.sleep(for: .milliseconds(100))
+      // Change count1 and count2, but sum remains 10 - should NOT trigger onChange.
+      // The transaction keeps an intermediate sum from being observed between the writes.
+      withGraphTransaction {
+        model.count1 = 6
+        model.count2 = 4
+      }
+      #expect(await projections[1].wait(for: .seconds(5)))
 
       // Change again, but sum still remains 10 - should NOT trigger onChange
-      model.count1 = 7
-      model.count2 = 3
-      try? await Task.sleep(for: .milliseconds(100))
+      withGraphTransaction {
+        model.count1 = 7
+        model.count2 = 3
+      }
+      #expect(await projections[2].wait(for: .seconds(5)))
 
       // Finally change the sum to 11 - this SHOULD trigger onChange
       model.count1 = 8
-      try? await Task.sleep(for: .milliseconds(100))
+      #expect(await sumChanged.wait(for: .seconds(5)))
 
       withExtendedLifetime(cancellable, {})
     }
