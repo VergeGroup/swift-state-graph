@@ -7,40 +7,33 @@ import Testing
 struct GraphTrackingMapTests {
 
   @Test
+  @MainActor
   func basicProjection() async throws {
     let firstName = Stored(wrappedValue: "John")
     let lastName = Stored(wrappedValue: "Doe")
-
+    let firstChange = TestSignal()
+    let secondChange = TestSignal()
     var receivedValues: [String] = []
 
-    await confirmation(expectedCount: 3) { confirm in
-      let cancellable = withGraphTracking {
-        withGraphTrackingMap {
-          "\(firstName.wrappedValue) \(lastName.wrappedValue)"
-        } onChange: { fullName in
-          receivedValues.append(fullName)
-          print("Full name: \(fullName)")
-          confirm()
+    let cancellable = withGraphTracking {
+      withGraphTrackingMap {
+        "\(firstName.wrappedValue) \(lastName.wrappedValue)"
+      } onChange: { fullName in
+        receivedValues.append(fullName)
+        if fullName == "Jane Doe" {
+          firstChange.signal()
+        } else if fullName == "Jane Smith" {
+          secondChange.signal()
         }
       }
-
-      // Initial value should be captured
-      try? await Task.sleep(nanoseconds: 50_000_000)
-
-      // Change first name
-      Task {
-        firstName.wrappedValue = "Jane"
-      }
-      try? await Task.sleep(nanoseconds: 100_000_000)
-
-      // Change last name
-      Task {
-        lastName.wrappedValue = "Smith"
-      }
-      try? await Task.sleep(nanoseconds: 100_000_000)
-
-      cancellable.cancel()
     }
+    defer { cancellable.cancel() }
+
+    #expect(receivedValues == ["John Doe"])
+    firstName.wrappedValue = "Jane"
+    try #require(await firstChange.wait(for: .seconds(5)))
+    lastName.wrappedValue = "Smith"
+    try #require(await secondChange.wait(for: .seconds(5)))
 
     #expect(receivedValues == ["John Doe", "Jane Doe", "Jane Smith"])
   }
