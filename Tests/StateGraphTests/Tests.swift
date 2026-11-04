@@ -243,7 +243,7 @@ struct Tests {
 
   }
 
-  @Test func computed_onChange_notCalledWhenResultIsSame() async {
+  @Test @MainActor func computed_onChange_notCalledWhenResultIsSame() async throws {
 
     final class Model: Sendable {
       @GraphStored var count1: Int = 5
@@ -252,39 +252,42 @@ struct Tests {
 
     let model = Model()
 
-    // onChange should be called for initial value and when the computed result actually changes
-    // Expected calls: 1) initial value (10), 2) when sum changes to 11
-    await confirmation(expectedCount: 2) { c in
-
-      let cancellable = withGraphTracking {
-        let computed = Computed { _ in
-          model.count1 + model.count2
-        }
-        withGraphTrackingMap {
-          computed.wrappedValue
-        } onChange: { value in
-          c.confirm()
-        }
+    let passes = [TestSignal(), TestSignal(), TestSignal()]
+    var passCount = 0
+    var receivedValues: [Int] = []
+    let cancellable = withGraphTracking {
+      let computed = Computed { _ in
+        model.count1 + model.count2
       }
+      withGraphTrackingMap {
+        let value = computed.wrappedValue
+        if passCount > 0 && passCount <= passes.count {
+          passes[passCount - 1].signal()
+        }
+        passCount += 1
+        return value
+      } onChange: { value in
+        receivedValues.append(value)
+      }
+    }
+    defer { cancellable.cancel() }
 
-      try? await Task.sleep(for: .milliseconds(100))
-
-      // Change count1 and count2, but sum remains 10 - should NOT trigger onChange
+    #expect(receivedValues == [10])
+    withGraphTransaction {
       model.count1 = 6
       model.count2 = 4
-      try? await Task.sleep(for: .milliseconds(100))
-
-      // Change again, but sum still remains 10 - should NOT trigger onChange
+    }
+    try #require(await passes[0].wait(for: .seconds(5)))
+    #expect(receivedValues == [10])
+    withGraphTransaction {
       model.count1 = 7
       model.count2 = 3
-      try? await Task.sleep(for: .milliseconds(100))
-
-      // Finally change the sum to 11 - this SHOULD trigger onChange
-      model.count1 = 8
-      try? await Task.sleep(for: .milliseconds(100))
-
-      withExtendedLifetime(cancellable, {})
     }
+    try #require(await passes[1].wait(for: .seconds(5)))
+    #expect(receivedValues == [10])
+    model.count1 = 8
+    try #require(await passes[2].wait(for: .seconds(5)))
+    #expect(receivedValues == [10, 11])
 
   }
 
