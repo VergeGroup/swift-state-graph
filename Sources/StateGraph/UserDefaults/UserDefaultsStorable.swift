@@ -5,6 +5,14 @@ import Foundation
 /// Conforming values must define deterministic, synchronous conversion because
 /// `GraphUserDefault` uses the restored value as the snapshot stored in its graph node.
 public protocol UserDefaultsStorable: Equatable, Sendable {
+  /// Returns the value stored for `key`, or `nil` when the key is absent or its
+  /// value cannot be restored.
+  @_spi(Internal)
+  static func _getValueIfPresent(
+    from userDefaults: UserDefaults,
+    forKey key: String
+  ) -> Self?
+
   @_spi(Internal)
   static func _getValue(
     from userDefaults: UserDefaults,
@@ -17,28 +25,33 @@ public protocol UserDefaultsStorable: Equatable, Sendable {
 }
 
 extension UserDefaultsStorable {
+  // Public rather than SPI so that conformances in modules without the SPI import
+  // can use it as their witness.
+  public static func _getValueIfPresent(
+    from userDefaults: UserDefaults,
+    forKey key: String
+  ) -> Self? {
+    userDefaults.object(forKey: key) as? Self
+  }
+
   @_spi(Internal)
   public static func _getValue(
     from userDefaults: UserDefaults,
     forKey key: String,
     defaultValue: Self
   ) -> Self {
-    guard userDefaults.object(forKey: key) != nil else {
-      return defaultValue
-    }
-    return userDefaults.object(forKey: key) as? Self ?? defaultValue
+    _getValueIfPresent(from: userDefaults, forKey: key) ?? defaultValue
   }
 }
 
 extension Bool: UserDefaultsStorable {
   @_spi(Internal)
-  public static func _getValue(
+  public static func _getValueIfPresent(
     from userDefaults: UserDefaults,
-    forKey key: String,
-    defaultValue: Bool
-  ) -> Bool {
+    forKey key: String
+  ) -> Bool? {
     guard userDefaults.object(forKey: key) != nil else {
-      return defaultValue
+      return nil
     }
     return userDefaults.bool(forKey: key)
   }
@@ -51,13 +64,12 @@ extension Bool: UserDefaultsStorable {
 
 extension Int: UserDefaultsStorable {
   @_spi(Internal)
-  public static func _getValue(
+  public static func _getValueIfPresent(
     from userDefaults: UserDefaults,
-    forKey key: String,
-    defaultValue: Int
-  ) -> Int {
+    forKey key: String
+  ) -> Int? {
     guard userDefaults.object(forKey: key) != nil else {
-      return defaultValue
+      return nil
     }
     return userDefaults.integer(forKey: key)
   }
@@ -70,13 +82,12 @@ extension Int: UserDefaultsStorable {
 
 extension Float: UserDefaultsStorable {
   @_spi(Internal)
-  public static func _getValue(
+  public static func _getValueIfPresent(
     from userDefaults: UserDefaults,
-    forKey key: String,
-    defaultValue: Float
-  ) -> Float {
+    forKey key: String
+  ) -> Float? {
     guard userDefaults.object(forKey: key) != nil else {
-      return defaultValue
+      return nil
     }
     return userDefaults.float(forKey: key)
   }
@@ -89,13 +100,12 @@ extension Float: UserDefaultsStorable {
 
 extension Double: UserDefaultsStorable {
   @_spi(Internal)
-  public static func _getValue(
+  public static func _getValueIfPresent(
     from userDefaults: UserDefaults,
-    forKey key: String,
-    defaultValue: Double
-  ) -> Double {
+    forKey key: String
+  ) -> Double? {
     guard userDefaults.object(forKey: key) != nil else {
-      return defaultValue
+      return nil
     }
     return userDefaults.double(forKey: key)
   }
@@ -108,12 +118,11 @@ extension Double: UserDefaultsStorable {
 
 extension String: UserDefaultsStorable {
   @_spi(Internal)
-  public static func _getValue(
+  public static func _getValueIfPresent(
     from userDefaults: UserDefaults,
-    forKey key: String,
-    defaultValue: String
-  ) -> String {
-    userDefaults.string(forKey: key) ?? defaultValue
+    forKey key: String
+  ) -> String? {
+    userDefaults.string(forKey: key)
   }
 
   @_spi(Internal)
@@ -124,12 +133,11 @@ extension String: UserDefaultsStorable {
 
 extension Data: UserDefaultsStorable {
   @_spi(Internal)
-  public static func _getValue(
+  public static func _getValueIfPresent(
     from userDefaults: UserDefaults,
-    forKey key: String,
-    defaultValue: Data
-  ) -> Data {
-    userDefaults.data(forKey: key) ?? defaultValue
+    forKey key: String
+  ) -> Data? {
+    userDefaults.data(forKey: key)
   }
 
   @_spi(Internal)
@@ -140,12 +148,11 @@ extension Data: UserDefaultsStorable {
 
 extension Date: UserDefaultsStorable {
   @_spi(Internal)
-  public static func _getValue(
+  public static func _getValueIfPresent(
     from userDefaults: UserDefaults,
-    forKey key: String,
-    defaultValue: Date
-  ) -> Date {
-    userDefaults.object(forKey: key) as? Date ?? defaultValue
+    forKey key: String
+  ) -> Date? {
+    userDefaults.object(forKey: key) as? Date
   }
 
   @_spi(Internal)
@@ -156,12 +163,11 @@ extension Date: UserDefaultsStorable {
 
 extension URL: UserDefaultsStorable {
   @_spi(Internal)
-  public static func _getValue(
+  public static func _getValueIfPresent(
     from userDefaults: UserDefaults,
-    forKey key: String,
-    defaultValue: URL
-  ) -> URL {
-    userDefaults.url(forKey: key) ?? defaultValue
+    forKey key: String
+  ) -> URL? {
+    userDefaults.url(forKey: key)
   }
 
   @_spi(Internal)
@@ -170,17 +176,26 @@ extension URL: UserDefaultsStorable {
   }
 }
 
+// Public rather than SPI so that Codable types in modules without the SPI import
+// can conform through these witnesses.
 extension UserDefaultsStorable where Self: Codable {
+  public static func _getValueIfPresent(
+    from userDefaults: UserDefaults,
+    forKey key: String
+  ) -> Self? {
+    guard let data = userDefaults.data(forKey: key) else {
+      return nil
+    }
+
+    return try? JSONDecoder().decode(Self.self, from: data)
+  }
+
   public static func _getValue(
     from userDefaults: UserDefaults,
     forKey key: String,
     defaultValue: Self
   ) -> Self {
-    guard let data = userDefaults.data(forKey: key) else {
-      return defaultValue
-    }
-
-    return (try? JSONDecoder().decode(Self.self, from: data)) ?? defaultValue
+    _getValueIfPresent(from: userDefaults, forKey: key) ?? defaultValue
   }
 
   public func _setValue(to userDefaults: UserDefaults, forKey key: String) {
@@ -194,15 +209,13 @@ extension UserDefaultsStorable where Self: Codable {
 
 extension Optional: UserDefaultsStorable where Wrapped: UserDefaultsStorable {
   @_spi(Internal)
-  public static func _getValue(
+  public static func _getValueIfPresent(
     from userDefaults: UserDefaults,
-    forKey key: String,
-    defaultValue: Self
-  ) -> Self {
-    guard userDefaults.object(forKey: key) != nil else {
-      return defaultValue
-    }
-    return userDefaults.object(forKey: key) as? Wrapped
+    forKey key: String
+  ) -> Self? {
+    // Map instead of returning `Wrapped?` directly, which would promote a missing
+    // value to `.some(nil)` and bypass the caller's default value.
+    Wrapped._getValueIfPresent(from: userDefaults, forKey: key).map(Self.some)
   }
 
   @_spi(Internal)

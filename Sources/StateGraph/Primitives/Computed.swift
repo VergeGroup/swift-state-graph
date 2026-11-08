@@ -1,0 +1,629 @@
+#if canImport(Observation)
+  import Observation
+#endif
+
+/**
+ based on
+ https://talk.objc.io/episodes/S01E429-attribute-graph-part-1
+ */
+
+/// Describes how a computed node produces and compares values.
+///
+/// `Value` itself does not need to conform to `Sendable`. `SendableMetatype` allows the
+/// descriptor's sendable closures to use generic conformances safely.
+public protocol ComputedDescriptor<Value>: Sendable {
+  
+  associatedtype Value: SendableMetatype
+  
+  func compute(context: inout Computed<Value>.Context) -> Value
+  
+  func isEqual(lhs: Value, rhs: Value) -> Bool
+}
+
+extension ComputedDescriptor {
+  
+  @Sendable
+  public static func any<Value: SendableMetatype>(
+    _ compute: @Sendable @escaping (inout Computed<Value>.Context) -> Value
+  ) -> Self where Self == AnyComputedDescriptor<Value> {
+    AnyComputedDescriptor(compute: compute, isEqual: { _, _ in false })
+  }
+  
+  @Sendable
+  public static func any<Value: SendableMetatype>(
+    _ compute: @Sendable @escaping (
+      inout Computed<Value>.Context
+    ) -> Value
+  ) -> Self where Self == AnyComputedDescriptor<Value>, Value: Equatable {
+    AnyComputedDescriptor(compute: compute)
+  }
+  
+}
+
+public struct AnyComputedDescriptor<Value: SendableMetatype>: ComputedDescriptor {
+
+  private let computeClosure: @Sendable (inout Computed<Value>.Context) -> Value
+  private let isEqualClosure: @Sendable (Value, Value) -> Bool
+  
+  public init(
+    compute: @escaping @Sendable (inout Computed<Value>.Context) -> Value,
+    isEqual: @escaping @Sendable (Value, Value) -> Bool
+  ) {
+    self.computeClosure = compute  
+    self.isEqualClosure = isEqual
+  }
+  
+  public init(
+    compute: @escaping @Sendable (inout Computed<Value>.Context) -> Value
+  ) where Value: Equatable {
+    self.computeClosure = compute  
+    self.isEqualClosure = { $0 == $1 }
+  }
+      
+  public func compute(context: inout Computed<Value>.Context) -> Value {
+    computeClosure(&context)
+  }
+  
+  public func isEqual(lhs: Value, rhs: Value) -> Bool {
+    isEqualClosure(lhs, rhs)
+  }
+      
+}
+
+public protocol ComputedEnvironmentKey {
+  associatedtype Value
+}
+
+public struct ComputedEnvironmentValues {
+  
+  struct AnyMetatypeWrapper: Hashable {
+    let metatype: Any.Type
+    
+    static func ==(lhs: Self, rhs: Self) -> Bool {
+      lhs.metatype == rhs.metatype
+    }
+    
+    func hash(into hasher: inout Hasher) {
+      hasher.combine(ObjectIdentifier(metatype))
+    }    
+  }
+  
+  private var values: [AnyMetatypeWrapper: Any] = [:]
+  
+  public subscript<K: ComputedEnvironmentKey>(key: K.Type) -> K.Value? {
+    get {
+      return values[.init(metatype: key)] as? K.Value
+    }
+    set {
+      values[.init(metatype: key)] = newValue      
+    }
+  }
+}
+
+public enum StateGraphGlobal {
+  
+  public static let computedEnvironmentValues: AllocatedLock<ComputedEnvironmentValues> = .init(
+    uncheckedState: .init()
+  )
+  
+}
+  
+/// A node that computes its value based on other nodes in a Directed Acyclic Graph (DAG).
+///
+/// `Computed` derives its value from other nodes through a computation rule.
+/// When any of its dependencies change, the node becomes dirty and will recalculate
+/// its value on the next access. This node caches its computed value for performance.
+///
+/// - Value is lazily computed: Calculations only occur when the value is accessed
+/// - Dependencies are tracked: The node automatically tracks which nodes it depends on
+/// - Changes propagate: When this node's value changes, downstream nodes are notified
+///
+/// - Important: Descriptor computation and equality are read-only graph operations.
+///   A computation may initialize `Stored` nodes created during that invocation until
+///   their first value read or assignment-observer registration. Such initialization
+///   preserves node identity and does not publish changes or stage transaction writes.
+///   Equality does not receive this initialization permission.
+///   DEBUG builds diagnose prohibited mutations; violations remain unsupported in
+///   non-DEBUG builds. Dependency cycles, including direct self-read, are unsupported
+///   because the graph must remain a DAG.
+///
+/// `Value` itself does not need to conform to `Sendable`. `SendableMetatype` allows the
+/// node's isolated closures to use generic conformances safely.
+public final class Computed<Value: SendableMetatype>: Node, Observable, CustomDebugStringConvertible {
+    
+  public struct Context {
+    
+    @dynamicMemberLookup
+    public struct Environment {
+      
+      public subscript<T: ComputedEnvironmentKey>(
+        dynamicMember keyPath: KeyPath<ComputedEnvironmentValues, T>
+      ) -> T {
+        StateGraphGlobal.computedEnvironmentValues.withLockUnchecked {
+          $0[keyPath: keyPath]
+        }
+      }
+
+    }
+    
+    /**
+     Use this method to perform actions without tracking dependencies.
+     
+     This case does not track `isRemoved` property.
+     ```swift
+     Computed { context in 
+       node.filter { 
+         context.withoutTracking {
+           $0.isRemoved == true
+         }
+       }
+     }
+     ```
+     */
+    public func withoutTracking<R>(_ block: () throws -> R) rethrows -> R{
+      try ThreadLocal.currentNode.withValue(nil) {
+        try block()
+      }
+    }
+    
+    public let environment: Environment
+    
+  }
+    
+  public let lock: NodeLock
+
+  nonisolated(unsafe)
+    private var _cachedValue: Value?
+  
+  #if canImport(Observation)
+    @available(macOS 14.0, iOS 17.0, watchOS 10.0, tvOS 17.0, *)
+    private let observationRegistrar = ObservationRegistrar()
+
+    /// Obtained once so Observation calls do not instantiate a key path on every read.
+    @available(macOS 14.0, iOS 17.0, watchOS 10.0, tvOS 17.0, *)
+    let observationKeyPath: KeyPath<NodeObservationRoot<Computed<Value>>, Void> & Sendable =
+      NodeObservationKeyPaths.computed(Value.self)
+  #endif
+
+  /// Single-use graph work captured when this node first becomes potentially dirty.
+  private struct InvalidationWork: ~Copyable {
+    let outgoingEdges: ContiguousArray<Edge>
+    let trackingRegistrations: Set<TrackingRegistration>
+  }
+
+  public var potentiallyDirty: Bool {
+    get {
+      lock.lock()
+      defer {
+        lock.unlock()
+      }
+      return _potentiallyDirty
+    }
+    set {
+      guard newValue else {
+        lock.lock()
+        _potentiallyDirty = false
+        lock.unlock()
+        return
+      }
+
+      guard let invalidationWork = preparePotentiallyDirtyState() else { return }
+
+      // Notify observers when becoming potentially dirty, even if the computed value
+      // might not actually change. This is necessary for SwiftUI and other Observation
+      // consumers to know they should check for updates. The actual value equality
+      // is checked during recomputation to avoid unnecessary downstream propagation.
+#if canImport(Observation)
+      if #available(macOS 14.0, iOS 17.0, watchOS 10.0, tvOS 17.0, *) {
+        withMainActor { [observationRegistrar, observationKeyPath] in
+          observationRegistrar.willSet(
+            NodeObservationRoot<Computed<Value>>(),
+            keyPath: observationKeyPath
+          )
+        }
+      }
+#endif
+
+      for edge in invalidationWork.outgoingEdges {
+        edge.to?.potentiallyDirty = true
+      }
+
+      for registration in invalidationWork.trackingRegistrations {
+        registration.perform()
+      }
+            
+    }
+  }
+
+  /// Marks this node dirty and captures callbacks while holding only its node lock.
+  private func preparePotentiallyDirtyState() -> InvalidationWork? {
+    lock.lock()
+    defer { lock.unlock() }
+
+    guard !_potentiallyDirty else { return nil }
+    _potentiallyDirty = true
+
+    let work = InvalidationWork(
+      outgoingEdges: outgoingEdges,
+      trackingRegistrations: trackingRegistrations
+    )
+    trackingRegistrations.removeAll()
+    return work
+  }
+
+  nonisolated(unsafe)
+  private var _potentiallyDirty: Bool = false
+
+  public let info: NodeInfo
+
+  public var wrappedValue: Value {
+    get {
+      if ThreadLocal.graphTransaction.value != nil {
+        return transactionValue()
+      }
+
+      return GraphTransactionCoordinator.shared.withReadAccess {
+        committedValue()
+      }
+    }
+  }
+
+  /// Evaluates this node from the transaction's staged `Stored` values without
+  /// changing the committed cache or dependency graph.
+  ///
+  /// A transaction intentionally does not cache `Computed` results. Every read is
+  /// reevaluated so a later staged assignment is immediately visible, while rollback
+  /// cannot leave a transaction-only value or edge in the committed graph.
+  private func transactionValue() -> Value {
+    ThreadLocal.currentNode.withValue(nil) {
+      if ThreadLocal.graphTransaction.value?.recordsDependencies == true {
+        var context = Context(environment: .init())
+        return withGraphMutationProhibited(.computedDescriptor, allowingStoredInitialization: true) {
+          descriptor.compute(context: &context)
+        }
+      }
+
+      return ThreadLocal.registration.withValue(nil) {
+        var context = Context(environment: .init())
+        return withGraphMutationProhibited(.computedDescriptor, allowingStoredInitialization: true) {
+          descriptor.compute(context: &context)
+        }
+      }
+    }
+  }
+
+  private func committedValue() -> Value {
+#if canImport(Observation)
+    if #available(macOS 14.0, iOS 17.0, watchOS 10.0, tvOS 17.0, *) {
+      observationRegistrar.access(
+        NodeObservationRoot<Computed<Value>>(),
+        keyPath: observationKeyPath
+      )
+    }
+#endif
+
+    recomputeIfNeededWithinReadAccess()
+
+    lock.lock()
+    defer { lock.unlock() }
+    return _cachedValue!
+  }
+
+  private let descriptor: any ComputedDescriptor<Value>
+
+  nonisolated(unsafe)
+  public var incomingEdges: ContiguousArray<Edge> = []
+
+  nonisolated(unsafe)
+  public var outgoingEdges: ContiguousArray<Edge> = []
+
+  nonisolated(unsafe)
+  public var trackingRegistrations: Set<TrackingRegistration> = []
+
+  /// Initializes a computed node.
+  ///
+  /// This initializer uses a comparison function that always returns `false`.
+  /// This means updates will always occur regardless of whether the value has changed.
+  ///
+  /// - Parameters:
+  ///   - file: The file where the node is created (defaults to current file)
+  ///   - line: The line number where the node is created (defaults to current line)
+  ///   - column: The column number where the node is created (defaults to current column)
+  ///   - name: The name of the node (defaults to nil)
+  ///   - rule: The rule that computes the node's value
+  public init(
+    _ file: StaticString = #fileID,
+    _ line: UInt = #line,
+    _ column: UInt = #column,
+    name: StaticString? = nil,
+    descriptor: some ComputedDescriptor<Value>
+  ) {
+    self.info = .init(
+      name: name,
+      sourceLocation: .init(file: file, line: line, column: column)
+    )
+    self.descriptor = descriptor
+    self.lock = .init()
+
+#if DEBUG
+    NodeStore.shared.register(self)
+#endif
+  }
+  
+  /// Initializes a computed node.
+  ///
+  /// This initializer uses a comparison function that always returns `false`.
+  /// This means updates will always occur regardless of whether the value has changed.
+  ///
+  /// - Parameters:
+  ///   - file: The file where the node is created (defaults to current file)
+  ///   - line: The line number where the node is created (defaults to current line)
+  ///   - column: The column number where the node is created (defaults to current column)
+  ///   - name: The name of the node (defaults to nil)
+  ///   - rule: The rule that computes the node's value
+  public init(
+    _ file: StaticString = #fileID,
+    _ line: UInt = #line,
+    _ column: UInt = #column,
+    name: StaticString? = nil,
+    rule: @escaping @Sendable (inout Context) -> Value
+  ) {
+    self.info = .init(
+      name: name,
+      sourceLocation: .init(file: file, line: line, column: column)
+    )
+    self.descriptor = AnyComputedDescriptor(compute: rule, isEqual: { _, _ in false })      
+    self.lock = .init()
+
+#if DEBUG
+    NodeStore.shared.register(self)
+#endif
+  }
+
+  /// Initializes a computed node.
+  ///
+  /// This initializer uses a comparison function that always returns `false`.
+  /// This means updates will always occur regardless of whether the value has changed.
+  ///
+  /// - Parameters:
+  ///   - file: The file where the node is created (defaults to current file)
+  ///   - line: The line number where the node is created (defaults to current line)
+  ///   - column: The column number where the node is created (defaults to current column)
+  ///   - name: The name of the node (defaults to nil)
+  ///   - rule: The rule that computes the node's value
+  public init(
+    _ file: StaticString = #fileID,
+    _ line: UInt = #line,
+    _ column: UInt = #column,
+    name: StaticString? = nil,
+    rule: @escaping @Sendable (inout Context) -> Value
+  ) where Value: Equatable {
+    self.info = .init(
+      name: name,
+      sourceLocation: .init(file: file, line: line, column: column)
+    )
+    self.descriptor = AnyComputedDescriptor(compute: rule, isEqual: { $0 == $1 })
+    self.lock = .init()
+   
+#if DEBUG
+    NodeStore.shared.register(self)
+#endif
+  }
+  
+  deinit {
+//    Log.generic.debug("Deinit Computed: \(self.info.name.map(String.init) ?? "noname")")
+    lock.lock()
+    let incomingEdges = self.incomingEdges
+    let outgoingEdges = self.outgoingEdges
+    self.incomingEdges.removeAll()
+    self.outgoingEdges.removeAll()
+    lock.unlock()
+
+    for edge in incomingEdges {
+      edge.from?.removeOutgoingEdge(edge)
+    }
+
+    for edge in outgoingEdges {
+      edge.to?.sourceDidRelease(edge)
+    }
+  }
+
+  public func recomputeIfNeeded() {
+    guard ThreadLocal.graphTransaction.value == nil else {
+      // Transaction reads intentionally evaluate without changing committed cache
+      // state or dependency edges.
+      return
+    }
+
+    GraphTransactionCoordinator.shared.withReadAccess {
+      recomputeIfNeededWithinReadAccess()
+    }
+  }
+
+  /// Recomputes while the caller owns one committed-graph read scope.
+  private func recomputeIfNeededWithinReadAccess() {
+    lock.lock()
+    defer { lock.unlock() }
+
+    // record dependency
+    if let currentNode = ThreadLocal.currentNode.value {
+      let edge = Edge(from: self, to: currentNode)
+      // TODO: consider removing duplicated edges
+      outgoingEdges.append(edge)
+      currentNode.incomingEdges.append(edge)
+    }
+    // record tracking
+    if let registration = ThreadLocal.registration.value {
+      self.trackingRegistrations.insert(registration)
+    }
+
+    if !_potentiallyDirty && _cachedValue != nil { return }
+
+    for edge in incomingEdges {
+      edge.from?.recomputeIfNeeded()
+    }
+
+    let hasPendingIncomingEdge = incomingEdges.contains {
+      $0.isPending
+    }
+    incomingEdges.removeAll(where: { $0.from == nil })
+
+    if hasPendingIncomingEdge || _cachedValue == nil {
+
+      ThreadLocal.currentNode.withValue(self) { () -> Void in
+        let previousValue = _cachedValue
+        removeIncomingEdges()
+        var context = Context(environment: .init())
+
+        /**
+        To prevent adding tracking registration to the incoming nodes.
+        Only register the registration to the current node.
+        */
+        _cachedValue = ThreadLocal.registration.withValue(nil) {
+          withGraphMutationProhibited(.computedDescriptor, allowingStoredInitialization: true) {
+            descriptor.compute(context: &context)
+          }
+        }
+
+        // propagate changes to dependent nodes
+        do {
+
+            if let previousValue = previousValue,
+               withGraphMutationProhibited(
+                 .computedDescriptor,
+                 {
+                   descriptor.isEqual(lhs: previousValue, rhs: _cachedValue!)
+                 }
+               ) == false
+            {
+              for edge in outgoingEdges {
+                edge.isPending = true
+              }
+            }
+
+        }
+      }
+
+    }
+
+    _potentiallyDirty = false
+
+  }
+
+  private func removeIncomingEdges() {
+    let incomingEdges = self.incomingEdges
+    self.incomingEdges.removeAll()
+
+    for edge in incomingEdges {
+      edge.from?.removeOutgoingEdge(edge)
+    }
+  }
+   
+  public var debugDescription: String {
+    lock.lock()
+    let cachedValue = _cachedValue
+    lock.unlock()
+
+    return "Computed<\(Value.self)>(name=\(info.name.map(String.init) ?? "noname"), value=\(String(describing: cachedValue)))"
+  }
+  
+}
+
+extension Computed: GraphTransactionInvalidatableNode {
+
+  /// Delivers Observation's existing pre-mutation notification without making the
+  /// committed cache dirty before publication.
+  func prepareGraphTransactionObservationWillSet(
+    _ observationWillSetDelivery: GraphTransactionObservationWillSetDelivery
+  ) {
+    lock.lock()
+    guard !_potentiallyDirty else {
+      lock.unlock()
+      return
+    }
+    let outgoingEdges = self.outgoingEdges
+    lock.unlock()
+
+#if canImport(Observation)
+    if #available(macOS 14.0, iOS 17.0, watchOS 10.0, tvOS 17.0, *) {
+      observationWillSetDelivery.appendWillSetOperation { [observationRegistrar, observationKeyPath] in
+        withMainActor {
+          observationRegistrar.willSet(
+            NodeObservationRoot<Computed<Value>>(),
+            keyPath: observationKeyPath
+          )
+        }
+      }
+    }
+#endif
+
+    for edge in outgoingEdges {
+      observationWillSetDelivery.prepareWillSet(for: edge)
+    }
+  }
+
+  /// Marks the committed cache dirty while deferring graph-tracking callbacks until
+  /// after transaction publication releases its global read barrier.
+  func prepareGraphTransactionInvalidation(
+    _ callbackDelivery: GraphTransactionCallbackDelivery
+  ) {
+    guard let invalidationWork = preparePotentiallyDirtyState() else { return }
+
+    for edge in invalidationWork.outgoingEdges {
+      callbackDelivery.prepareInvalidation(for: edge)
+    }
+
+    for registration in invalidationWork.trackingRegistrations {
+      callbackDelivery.append {
+        registration.perform()
+      }
+    }
+  }
+}
+
+extension Computed {
+  
+  /**
+    Create a computed value node that depends on a stored node.
+   */
+  public convenience init(_ stored: Stored<Value>) {
+    self.init(name: "embedded", rule: { _ in 
+      stored.wrappedValue
+    })
+  }
+  
+  /**
+    Create a computed value node that depends on a computed node.    
+   */
+  public convenience init(_ computed: Computed<Value>) {
+    self.init(name: "embedded", rule: { _ in 
+      computed.wrappedValue
+    })
+  }
+  
+  /**
+    Create from a constant value.
+   */
+  public convenience init(constant: consuming sending Value) {    
+    let sendable = UnsafeSendable(constant)
+    self.init(
+      name: "constant",
+      rule: { _ in 
+        sendable._value
+      }
+    )
+  }
+  
+  /**
+   Create from a constant value.
+   */
+  public convenience init(constant: Value) where Value : Sendable {
+    self.init(
+      name: "constant",
+      rule: { _ in
+        constant
+      }
+    )
+  }
+  
+}

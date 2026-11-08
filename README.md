@@ -13,7 +13,7 @@ For managing external(escaping) state, inspired by the concepts of React, Jotai 
 import StateGraph
 
 final class Counter {
-  @GraphStored var count: Int = 0
+  @GraphStored var count = 0
   @GraphComputed var isEven: Bool
 
   init() {
@@ -28,6 +28,10 @@ let counter = Counter()
 counter.count = 5
 print(counter.isEven) // false - automatically computed
 ```
+
+`@GraphStored` can infer its type from an initial value. Keep an explicit type
+when there is no initial value or when the expression needs type context,
+such as `nil`, `.init()`, or an empty collection.
 
 ## Why Swift State Graph?
 
