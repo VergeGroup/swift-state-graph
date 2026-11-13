@@ -29,7 +29,7 @@ public final class GraphUserDefault<
 
   private let key: String
   private let defaultValue: Value
-  private let state: OSAllocatedUnfairLock<State>
+  private let state: AllocatedLock<State>
 
   /// Creates a value synchronized with a key in the supplied store.
   ///
@@ -55,7 +55,7 @@ public final class GraphUserDefault<
     }
 
     self.stored = Stored(wrappedValue: initialValue)
-    self.state = OSAllocatedUnfairLock(
+    self.state = AllocatedLock(
       initialState: State(lastValue: initialValue)
     )
 

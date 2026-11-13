@@ -1,5 +1,3 @@
-import os.lock
-
 #if canImport(Observation)
   import Observation
 #endif
@@ -104,7 +102,7 @@ public struct ComputedEnvironmentValues {
 
 public enum StateGraphGlobal {
   
-  public static let computedEnvironmentValues: OSAllocatedUnfairLock<ComputedEnvironmentValues> = .init(
+  public static let computedEnvironmentValues: AllocatedLock<ComputedEnvironmentValues> = .init(
     uncheckedState: .init()
   )
   

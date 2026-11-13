@@ -1,5 +1,3 @@
-import os
-
 /// An asynchronous sequence generated from a closure that tracks StateGraph node changes.
 ///
 /// `GraphObservation` provides an `AsyncSequence`-based API for observing one or more
@@ -22,7 +20,7 @@ import os
 /// - Emits the current value immediately on first iteration (startWith behavior)
 /// - Dynamically tracks nodes accessed during each emission
 /// - Supports task cancellation
-/// - Thread-safe using OSAllocatedUnfairLock
+/// - Thread-safe using `AllocatedLock`
 /// - Respects actor isolation context
 ///
 /// This implementation is inspired by Apple's Observations pattern.
@@ -121,7 +119,7 @@ public struct GraphObservation<Element: Sendable>: AsyncSequence,
     // Most likely, there wont be more than a handful of active iterations
     // so this only needs to be unique for those active iterations
     // that are in the process of calling next.
-    static func generation(_ state: OSAllocatedUnfairLock<State>) -> Int {
+    static func generation(_ state: AllocatedLock<State>) -> Int {
       state.withLock { state in
         defer { state.id &+= 1 }
         return state.id
@@ -131,7 +129,7 @@ public struct GraphObservation<Element: Sendable>: AsyncSequence,
     // the cancellation of awaiting on willSet only ferries in resuming early
     // it is the responsability of the caller to check if the task is actually
     // cancelled after awaiting the willSet to act accordingly.
-    static func cancel(_ state: OSAllocatedUnfairLock<State>, id: Int) {
+    static func cancel(_ state: AllocatedLock<State>, id: Int) {
       state.withLock { state in
         guard let continuation = state.continuations.removeValue(forKey: id)
         else {
@@ -147,7 +145,7 @@ public struct GraphObservation<Element: Sendable>: AsyncSequence,
 
     // fire off ALL awaiting willChange continuations such that they are no
     // longer pending.
-    static func emitWillChange(_ state: OSAllocatedUnfairLock<State>) {
+    static func emitWillChange(_ state: AllocatedLock<State>) {
       let continuations = state.withLock { state in
         // if there are no continuations present then we have to set the state as dirty
         // else if this is uncondiitonally set the state might produce duplicate events
@@ -169,7 +167,7 @@ public struct GraphObservation<Element: Sendable>: AsyncSequence,
     // this must take a locally unique id (to the active calls of next)
     static func willChange(
       isolation iterationIsolation: isolated (any Actor)? = #isolation,
-      state: OSAllocatedUnfairLock<State>,
+      state: AllocatedLock<State>,
       id: Int
     ) async {
       return await withUnsafeContinuation(isolation: iterationIsolation) {
@@ -198,14 +196,14 @@ public struct GraphObservation<Element: Sendable>: AsyncSequence,
 
   /// An iterator that emits the current projection, then waits for tracked graph mutations.
   public struct Iterator: AsyncIteratorProtocol {
-    // OSAllocatedUnfairLock<State> pattern (Apple's _ManagedCriticalState equivalent)
-    private var state: OSAllocatedUnfairLock<State>?
+    // Copies share the same allocated state, following Apple's _ManagedCriticalState pattern.
+    private var state: AllocatedLock<State>?
     private let emit: Emit
     private var started = false
 
     init(emit: Emit) {
       self.emit = emit
-      self.state = OSAllocatedUnfairLock(initialState: State())
+      self.state = AllocatedLock(initialState: State())
     }
 
     fileprivate mutating func terminate(id: Int) -> Element? {
@@ -222,7 +220,7 @@ public struct GraphObservation<Element: Sendable>: AsyncSequence,
     // it is bound to be called on the specified isolation of the construction
     fileprivate static func trackEmission(
       isolation trackingIsolation: isolated (any Actor)?,
-      state: OSAllocatedUnfairLock<State>,
+      state: AllocatedLock<State>,
       emit: Emit
     ) -> Iteration {
       let result = withStateGraphTracking {
@@ -241,7 +239,7 @@ public struct GraphObservation<Element: Sendable>: AsyncSequence,
 
     fileprivate mutating func trackEmission(
       isolation iterationIsolation: isolated (any Actor)?,
-      state: OSAllocatedUnfairLock<State>,
+      state: AllocatedLock<State>,
       id: Int
     ) async -> Element? {
       guard !Task.isCancelled else {

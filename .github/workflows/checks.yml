@@ -6,6 +6,17 @@ on:
       - "**"
 
 jobs:
+  allocated-lock-linux:
+    runs-on: ubuntu-latest
+    container: swift:6.3.3-noble
+    permissions:
+      contents: read
+
+    steps:
+      - uses: actions/checkout@v7
+      - name: Test the portable lock independently
+        run: bash .github/scripts/test-allocated-lock.sh
+
   package-test:
     runs-on: xcode-27
     permissions:

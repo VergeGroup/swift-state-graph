@@ -110,7 +110,7 @@ private final class GraphTrackingTaskState: @unchecked Sendable {
     var isCancelled = false
   }
 
-  private let state = OSAllocatedUnfairLock(uncheckedState: State())
+  private let state = AllocatedLock(uncheckedState: State())
 
   func setCancellable(_ cancellable: AnyCancellable) {
     let shouldCancelImmediately = state.withLock { state in
