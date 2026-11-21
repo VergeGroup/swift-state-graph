@@ -1,5 +1,5 @@
 import StateGraph
-import StateGraphNormalization
+@testable import StateGraphNormalization
 import Testing
 
 private struct Todo: TypedIdentifiable, Sendable {
@@ -114,6 +114,7 @@ struct EntityCollectionTests {
   @Test func overlappingLoadAndWritesApplyInOrderAndSkipCancelledWork() async throws {
     let started = AsyncStream<Void>.makeStream()
     let finish = AsyncStream<Void>.makeStream()
+    defer { finish.continuation.finish() }
     let adapter = TodoAdapter(fetch: { _ in
       started.continuation.finish()
       for await _ in finish.stream {}
@@ -128,11 +129,22 @@ struct EntityCollectionTests {
       }
     })
     let collection = EntityCollection(adapter: adapter)
+    func waitForQueuedOperations(_ count: Int) async throws {
+      let deadline = ContinuousClock.now + .seconds(5)
+      while await collection.queuedOperationCount != count && ContinuousClock.now < deadline {
+        await Task.yield()
+      }
+      let queued = await collection.queuedOperationCount
+      try #require(queued == count)
+    }
+
     let load = Task { try await collection.load(.all) }
     for await _ in started.stream {}
     let cancelled = Task { try await collection.mutate(.rename) }
     let delete = Task { try await collection.mutate(.delete) }
+    try await waitForQueuedOperations(2)
     cancelled.cancel()
+    try await waitForQueuedOperations(1)
     await #expect(throws: CancellationError.self) { try await cancelled.value }
 
     finish.continuation.finish()

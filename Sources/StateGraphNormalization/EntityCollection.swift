@@ -50,6 +50,8 @@ public actor EntityCollection<Adapter: EntityCollectionAdapter> {
   private var nextWaiterID: UInt64 = 0
   private var waiters: [Waiter] = []
 
+  internal var queuedOperationCount: Int { waiters.count }
+
   public init(
     adapter: Adapter,
     onChange: @escaping @Sendable (Snapshot) -> Void = { _ in }
