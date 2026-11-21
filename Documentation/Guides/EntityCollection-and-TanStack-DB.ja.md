@@ -1,4 +1,74 @@
-# SwiftUI から EntityCollection を使う — TanStack DB との対応
+# Swift の Query・EntityStore と TanStack DB の対応
+
+## 一覧と詳細を同じ Stack で解決する
+
+画面が「プロジェクト 42 の未完了 Todo」と「ID 7 の Todo」を必要とする場合、アプリがそれぞれの要求と戻り値を定義する。以下は Draft の設計例。ライブラリに置いた型は `Query` と `QueryStack` で、`TodoByID`、`OpenTodos`、`OpenTodoList` はアプリの型。
+
+```swift
+import StateGraphNormalization
+
+struct TodoByID: Query {
+  typealias Output = Todo?
+  let id: Todo.TypedID
+}
+
+struct OpenTodos: Query {
+  typealias Output = OpenTodoList
+  let projectID: Int
+}
+
+// 画面から呼ぶ（@MainActor）。最初のページは resolve が読む。
+let list = try await stack.resolve(OpenTodos(projectID: 42))
+let firstRows: [Todo] = list.rows
+if list.hasNextPage {
+  try await list.loadNext()
+}
+let detail: Todo? = try await stack.resolve(TodoByID(id: .init(7)))
+```
+
+`Query<Output>` が要求するのは `associatedtype Output` だけ。永続化の単位はどちらも `Todo` だが、単体の読み取りではその時点の値、一覧の読み取りではページを継ぎ足せるハンドルを返す。たとえば件数を返す用途なら、アプリに `Output = Int` の Query を追加できる。
+
+### API・ストア・resolver を組み立てる
+
+```swift
+@MainActor
+func makeStack(api: any TodoAPI) -> QueryStack<TodoData> {
+  var stack = QueryStack(dependencies: TodoData(api: api))
+  stack.register(TodoByID.self) { query, data in
+    try await data.todo(by: query.id)
+  }
+  stack.register(OpenTodos.self) { query, data in
+    let list = await OpenTodoList(projectID: query.projectID, data: data)
+    try await list.loadNext()
+    return list
+  }
+  return stack
+}
+```
+
+`register(Q.self)` は `(Q, Dependencies) async throws -> Q.Output` を受け取る。たとえば `TodoByID` の登録で `OpenTodoList` を返すとコンパイルエラーになる。どの resolver を登録したかは Stack ごとに決まり、未登録の Query を渡すと実行時に `MissingResolver` が返る。アプリの起動時、またはログイン時に組み立てた Stack を画面間で共有する。
+
+| 操作 | このアプリの resolver が決めること |
+| --- | --- |
+| `resolve(TodoByID(id:))` | `TodoData.entities[id]` を先に引く。一覧から入った行もここで見つかる。未取得なら `GET /todos/{id}` を呼び、取得した行を同じ `EntityStore<Todo>` に追加する。詳細 endpoint のないサービスなら resolver 内で一覧を読む。未取得のページに目的の ID があり得る間は「存在しない」とは判定できない。 |
+| `resolve(OpenTodos(projectID:))` | 新しいハンドルで `GET /projects/{id}/todos?status=open` の先頭ページを取得する。受信した行を共有ストアに追加し、ハンドルには表示順の ID を保持する。 |
+| `list.loadNext()` | 同じプロジェクト・条件に対してサーバーが返した cursor で続きを取得する。重複 ID の行は更新し、並びには初出の位置に一度だけ入れる。失敗した呼び出しは同じ cursor から再試行できる。 |
+
+この例ではハンドルごとに取得位置を持つ。同じ Query をもう一度 `resolve` すると先頭から始まり、両ハンドルの `rows` は同じストアからその時点の行を引く。詳細はストアにあれば通信を省く。TTL、同じ Query 間でのページ再利用、更新通知はアプリが選ぶ方針。StateGraph を使うアプリでは、共有ストアとハンドルの表示用の状態を `@GraphStored` に置けば、行の変更と一覧の伸長をそれぞれ観測できる。[Swift で実行する resolver・ハンドル・テスト](../../Tests/StateGraphNormalizationTests/QueryStackTests.swift)
+
+### TanStack DB のページングとの対応
+
+| 境界 | Swift の設計例 | TanStack DB |
+| --- | --- | --- |
+| 画面 | `list.rows`、`hasNextPage`、`loadNext()` | `useLiveInfiniteQuery` が `data`、`hasNextPage`、`fetchNextPage()` を返す。ソート済み live query の取得範囲を広げる。 |
+| API への変換 | `OpenTodoList` がプロジェクトと次の cursor を持ち、API client に渡す | on-demand Collection の `queryFn` が filter・order を API に対応付ける。`createCursorPager` は要求された offset・limit を満たすまでバックエンドの cursor をたどる。 |
+| 保持する範囲 | ハンドルは取得済み ID の並びを持ち、エンティティを Stack 内で共有 | QueryClient にページを保持できる。ページ列の key にはプロジェクト・条件・並び順を含め、取得範囲を広げても同じ列を再利用する。 |
+
+Swift 例では「続きを 1 回」につきサーバーの 1 ページを読む。空のページでも次の cursor があれば続きがある。TanStack 側のローカルクエリ、任意の window までの読み足し、キャッシュ鮮度の管理は、より広い機能に当たる。[useLiveInfiniteQuery](https://tanstack.com/db/latest/docs/framework/react/reference/functions/useLiveInfiniteQuery) · [createCursorPager と opaque cursor](https://tanstack.com/db/latest/docs/collections/query-collection#endpoints-with-opaque-cursors)
+
+## EntityCollection で読み取りと書き込みをまとめる場合
+
+以下は、取得結果がいずれも同じ型の行配列になるアプリ向けの例。ここでは `EntityCollectionAdapter` に取得と更新をまとめ、コレクションが通信を直列化して確定結果を画面に通知する。前節の `QueryStack` から使いたい場合は、共有するコレクションを Stack の依存に含められる。
 
 プロジェクト 42 の未完了 Todo を表示し、タップした Todo を完了にする。SwiftUI 側で必要な操作は次の 4 つ。
 
@@ -12,7 +82,7 @@ try await todos.collection.load(query)                    // 未完了一覧の�
 
 たとえば Todo 7 の完了に成功すると、サーバーは `{"id":7,"title":"原稿を書く","completed":true}` を返す。Swift ではこの時点で詳細画面にも完了が反映される。未完了一覧は次の GET で ID 7 が結果から外れたときに行が消える。TanStack DB の例ではボタンを押した時点でローカルの `completed` を更新するため、live query からその場で行が消える。
 
-## 操作の対応表
+### 操作の対応表
 
 | アプリがしたいこと | TanStack DB ＋ React | EntityCollection ＋ SwiftUI |
 | --- | --- | --- |

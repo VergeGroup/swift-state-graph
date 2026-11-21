@@ -63,6 +63,21 @@ clone them separately. When an entity collection is shared application state,
 keep the `EntityStore` in a `@GraphStored` property so reads participate in
 dependency tracking and successful writebacks invalidate dependents.
 
+### Resolving application queries
+
+An app can declare a separate `Query` type for each use case. Its `Output`
+can be a single entity, an optional value, or an app-defined paginated list.
+Create a `QueryStack(dependencies:)` with the API client and shared storage,
+then register a resolver for each concrete query type. For example, a resolver
+for `TodoByID` can reuse a Todo loaded by a list before requesting its detail
+endpoint. Both resolvers receive the same dependencies.
+
+```swift
+let todo: Todo? = try await stack.resolve(TodoByID(id: id))
+let list = try await stack.resolve(OpenTodos(projectID: 42))
+try await list.loadNext()
+```
+
 ### Loading a collection through an API
 
 Use an `EntityCollectionAdapter` to map a typed query or domain mutation to an
