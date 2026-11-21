@@ -63,6 +63,76 @@ clone them separately. When an entity collection is shared application state,
 keep the `EntityStore` in a `@GraphStored` property so reads participate in
 dependency tracking and successful writebacks invalidate dependents.
 
+### Loading a collection through an API
+
+Use an `EntityCollectionAdapter` to map a typed query or domain mutation to an
+existing API client. The query value identifies one complete ordered result.
+Include any project, filter, sort, or page that distinguishes that result.
+For example, given a `TodoAPI` client and a `Todo` entity:
+
+```swift
+struct TodoAdapter: EntityCollectionAdapter {
+  enum Query: Hashable {
+    case open(project: Int)
+    case assignedToMe
+  }
+
+  enum Mutation {
+    case complete(Todo.TypedID)
+    case delete(Todo.TypedID)
+  }
+
+  let api: TodoAPI
+
+  func load(_ query: Query) async throws -> [Todo] {
+    switch query {
+    case .open(let project):
+      // GET /projects/{project}/todos?status=open
+      try await api.openTodos(project: project)
+    case .assignedToMe:
+      // GET /me/todos
+      try await api.myTodos()
+    }
+  }
+
+  func mutate(_ mutation: Mutation) async throws -> [EntityChange<Todo>] {
+    switch mutation {
+    case .complete(let id):
+      // POST /todos/{id}/complete returns the updated Todo.
+      let confirmed = try await api.completeTodo(id)
+      return [.upsert(confirmed)]
+    case .delete(let id):
+      try await api.deleteTodo(id)
+      return [.delete(id)]
+    }
+  }
+}
+
+let state = Stored<EntityCollection<TodoAdapter>.Snapshot>(wrappedValue: .init())
+let todos = EntityCollection(adapter: TodoAdapter(api: api)) { snapshot in
+  state.wrappedValue = snapshot
+}
+let openTodos = Computed { _ in state.wrappedValue.results(for: .open(project: 42)) }
+
+try await todos.load(.open(project: 42))
+try await todos.load(.assignedToMe)
+if let first = openTodos.wrappedValue?.first {
+  try await todos.mutate(.complete(first.typedID))
+  try await todos.load(.open(project: 42))
+}
+```
+
+Each load replaces that query's ordered IDs. An ID shared by two queries
+resolves to the same entry in the snapshot's `EntityStore`. Entities remain
+available by ID when they leave a query. An explicit deletion removes the
+entity and its membership in every result. Reload a query when a mutation
+changes a server-side filter, sort order, or page boundary.
+
+One collection runs its adapter calls serially and publishes each successful
+result in a single snapshot. A thrown adapter error leaves the previous
+snapshot in place. Query and entity data live as long as the collection or a
+retained snapshot; scope the collection to the account or feature that owns it.
+
 ### EntityStore Operations
 
 The `EntityStore` provides a comprehensive API for entity management:
