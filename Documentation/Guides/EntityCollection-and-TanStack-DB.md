@@ -1,0 +1,378 @@
+# Swift queries and normalized entities compared with TanStack DB
+
+## Resolve a list and a detail view through the same stack
+
+A screen needs the open todos for project 42 and the todo with ID 7. The app defines a request and a return type for each use case. In this draft, the library provides `Query` and `QueryStack`. The app defines `TodoByID`, `OpenTodos`, and `OpenTodoList`.
+
+```swift
+import StateGraphNormalization
+
+struct TodoByID: Query {
+  typealias Output = Todo?
+  let id: Todo.TypedID
+}
+
+struct OpenTodos: Query {
+  typealias Output = OpenTodoList
+  let projectID: Int
+}
+
+// Call from the view on @MainActor. Resolving the list loads its first page.
+let list = try await stack.resolve(OpenTodos(projectID: 42))
+let firstRows: [Todo] = list.rows
+if list.hasNextPage {
+  try await list.loadNext()
+}
+let detail: Todo? = try await stack.resolve(TodoByID(id: .init(7)))
+```
+
+`Query<Output>` requires only an `associatedtype Output`. Both queries store `Todo` entities. The detail query returns the current value, and the list query returns a handle that can load more pages. An app that needs a count can define another query with `Output = Int`.
+
+### Register resolvers with a shared API client and store
+
+```swift
+@MainActor
+func makeStack(api: any TodoAPI) -> QueryStack<TodoData> {
+  var stack = QueryStack(dependencies: TodoData(api: api))
+  stack.register(TodoByID.self) { query, data in
+    try await data.todo(by: query.id)
+  }
+  stack.register(OpenTodos.self) { query, data in
+    let list = await OpenTodoList(projectID: query.projectID, data: data)
+    try await list.loadNext()
+    return list
+  }
+  return stack
+}
+```
+
+`register(Q.self)` takes a closure of type `(Q, Dependencies) async throws -> Q.Output`. Returning an `OpenTodoList` from the `TodoByID` resolver is a compile-time error. Each stack has its own registrations. Resolving an unregistered query throws `MissingResolver` at runtime. Build the stack at launch or sign-in and share it across screens.
+
+| Operation | How the app resolves it |
+| --- | --- |
+| `resolve(TodoByID(id:))` | Look up `TodoData.entities[id]` first. A previous list request may already have loaded the row. On a miss, call `GET /todos/{id}` and add the row to the same `EntityStore<Todo>`. A resolver for a service with only a list endpoint can search its pages. It can report a missing ID once it has exhausted every page that could contain it. |
+| `resolve(OpenTodos(projectID:))` | Create a handle and fetch the first page from `GET /projects/{id}/todos?status=open`. Add the rows to the shared store and keep their IDs in display order on the handle. |
+| `list.loadNext()` | Follow the server cursor using the same project and filters. If an ID appears again, update its row and keep its original position in the list. A failed call can retry from the same cursor. |
+
+Each handle tracks its own position. Resolving the same query again starts at the first page. Both handles read the current rows from the shared store, and detail lookups reuse any row already there. The app chooses cache expiration, page reuse across queries, and how to publish updates. With StateGraph, the app can put the shared store and the handle’s display state in `@GraphStored` properties so views can observe both row changes and growth of the list. [Swift resolvers, list handle, and tests](../../Tests/StateGraphNormalizationTests/QueryStackTests.swift)
+
+### Pagination in TanStack DB
+
+| Responsibility | Swift example | TanStack DB |
+| --- | --- | --- |
+| View | Read `list.rows` and `hasNextPage`, then call `loadNext()`. | `useLiveInfiniteQuery` exposes `data`, `hasNextPage`, and `fetchNextPage()`. Fetching the next page extends the window of an ordered live query. |
+| API requests | `OpenTodoList` keeps the project ID and next cursor and passes them to the API client. | An on-demand collection’s `queryFn` maps filters and ordering to the API. `createCursorPager` follows backend cursors until it can satisfy the requested offset and limit. |
+| Cached data | Each handle keeps its ordered list of loaded IDs. The stack shares entities across handles. | A `QueryClient` can retain pages. The page key includes the project, filters, and ordering so a larger window can reuse the same sequence. |
+
+In the Swift example, each `loadNext()` fetches one server page. Even an empty page can have a continuation cursor. TanStack DB also supports local queries, fetching enough pages to satisfy an arbitrary window, and managing cache freshness. [useLiveInfiniteQuery](https://tanstack.com/db/latest/docs/framework/react/reference/functions/useLiveInfiniteQuery) · [createCursorPager and opaque cursors](https://tanstack.com/db/latest/docs/collections/query-collection#endpoints-with-opaque-cursors)
+
+## Read and write todos with EntityCollection
+
+When every read returns an array of the same entity type, an `EntityCollectionAdapter` can handle both reads and writes. The collection runs requests serially and publishes confirmed results to the view. To use a shared collection from a `QueryStack`, include it in the stack’s dependencies.
+
+The SwiftUI screen displays open todos for project 42 and marks a todo complete when tapped.
+
+```swift
+let query = TodoAdapter.Query.open(projectID: 42)
+try await todos.collection.load(query)                    // GET from the view’s .task
+let rows = todos.state.wrappedValue.results(for: query)   // Read on each evaluation of body
+try await todos.collection.mutate(.complete(id))          // POST when the user taps the button
+try await todos.collection.load(query)                    // Refresh list membership and order
+```
+
+When the server marks todo 7 complete, it returns `{"id":7,"title":"Write the draft","completed":true}`. The Swift detail view now shows the completed todo. The open list drops the row when the next GET returns a result without ID 7. In the TanStack DB example, tapping the button sets `completed` optimistically, so the live query drops the row immediately.
+
+### How the operations compare
+
+| App operation | TanStack DB and React | EntityCollection and SwiftUI |
+| --- | --- | --- |
+| Share the data | Create a collection with `createCollection(queryCollectionOptions(…))` and share it across screens. | Share one `EntityCollection(adapter:)` and assign each snapshot to the same `Stored` node. |
+| Identify the same todo | `getKey: todo => todo.id` | Use `Todo.TypedID`. Each result holds ordered IDs, and the shared `EntityStore` holds the entities. |
+| Fetch open todos | The `where` clause in `useLiveQuery` supplies a filter to the on-demand `queryFn`, which issues the GET. | The view’s `.task` calls `load(.open(projectID:))`, and the adapter’s `load` issues the GET. |
+| Read the current rows when rendering | Read `data` from the hook. Changes to source rows update the query incrementally. | Read `state.wrappedValue.results(for:)` in `body`. `nil` means the query has yet to load. `[]` means it loaded with zero rows. |
+| Persist a completion | In `createOptimisticAction`, update the row in `onMutate`, then POST and refetch in `mutationFn`. CRUD operations can also use `onInsert`, `onUpdate`, or `onDelete`. | `mutate(.complete(id))` calls the adapter, which POSTs and returns `.upsert` with the confirmed row. The view shows the last confirmed value while the request is in flight. |
+| Update filters and ordering | Local `where` and `orderBy` clauses respond to row changes. The example also refetches the confirmed server state. | Row values are shared. Call `load` to refresh server-defined membership and order. A confirmed `.delete(id)` removes that ID from every result immediately. |
+
+## Read a snapshot without StateGraph
+
+The collection, adapter protocol, and `EntityStore` are all in `StateGraphNormalization`. A SwiftPM executable or test target can depend on that product alone and supply an adapter. `Todo` can be a plain Swift value type.
+
+```swift
+import StateGraphNormalization
+
+let todos = EntityCollection(adapter: adapter)
+let query = TodoAdapter.Query.open(projectID: 42)
+try await todos.load(query)
+let rows = await todos.snapshot.results(for: query)
+if let first = rows?.first {
+  try await todos.mutate(.complete(first.typedID))
+  if let confirmed = await todos.snapshot.entities[first.typedID] {
+    print(confirmed.completed)
+  }
+}
+```
+
+Read `snapshot` from the collection actor to get its current value. To redraw a screen on updates, pass an `onChange` closure to the collection initializer and assign each snapshot to a `Stored` node. The SwiftUI example below uses StateGraph for that connection and for the `@GraphStored` properties in the class-based model.
+
+## Integrate the collection with SwiftUI
+
+Add the `StateGraph` and `StateGraphNormalization` products to the app target. The adapter’s `load` and `mutate` methods can call an existing API client. This example uses `URLSession` to show the HTTP requests.
+
+### Map queries and mutations to the API
+
+The GET returns an array of open todos for the project. The POST returns the updated todo. If the API returns `204 No Content`, the adapter can fetch the detail endpoint after the write to get the confirmed value.
+
+```swift
+import Foundation
+import StateGraph
+import StateGraphNormalization
+import SwiftUI
+
+nonisolated struct Todo: TypedIdentifiable, Decodable, Sendable {
+  typealias TypedIdentifierRawValue = Int
+  let number: Int
+  let title: String
+  let completed: Bool
+  var typedID: TypedID { .init(number) }
+
+  enum CodingKeys: String, CodingKey {
+    case number = "id"
+    case title, completed
+  }
+}
+
+struct TodoAdapter: EntityCollectionAdapter {
+  enum Query: Hashable { case open(projectID: Int) }
+  enum Mutation { case complete(Todo.TypedID) }
+
+  let baseURL: URL
+
+  func load(_ query: Query) async throws -> [Todo] {
+    switch query {
+    case .open(let projectID):
+      let url = baseURL.appending(path: "projects/\(projectID)/todos")
+        .appending(queryItems: [URLQueryItem(name: "status", value: "open")])
+      return try await send(URLRequest(url: url))
+    }
+  }
+
+  func mutate(_ mutation: Mutation) async throws -> [EntityChange<Todo>] {
+    switch mutation {
+    case .complete(let id):
+      var request = URLRequest(url: baseURL.appending(path: "todos/\(id.raw)/complete"))
+      request.httpMethod = "POST"
+      let confirmed: Todo = try await send(request)
+      return [.upsert(confirmed)]
+    }
+  }
+
+  private func send<Value: Decodable>(_ request: URLRequest) async throws -> Value {
+    let (data, response) = try await URLSession.shared.data(for: request)
+    guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
+      throw URLError(.badServerResponse)
+    }
+    return try JSONDecoder().decode(Value.self, from: data)
+  }
+}
+```
+
+### Share a collection across screens
+
+```swift
+final class Todos: Sendable {
+  let state: Stored<EntityCollection<TodoAdapter>.Snapshot>
+  let collection: EntityCollection<TodoAdapter>
+
+  init(baseURL: URL) {
+    let state = Stored<EntityCollection<TodoAdapter>.Snapshot>(wrappedValue: .init())
+    self.state = state
+    self.collection = EntityCollection(adapter: TodoAdapter(baseURL: baseURL)) {
+      state.wrappedValue = $0
+    }
+  }
+}
+```
+
+Create `let todos = Todos(baseURL: apiBaseURL)` once at the app root or at sign-in. Pass it to `OpenTodosView(todos: todos, projectID: 42)` and pass the same `todos` with the selected ID to the detail view. Reading `todos.state.wrappedValue.entities[id]` in the detail view’s `body` displays the confirmed value of the todo from the list.
+
+### Load and display the results
+
+```swift
+struct OpenTodosView: View {
+  let todos: Todos
+  let projectID: Int
+  @State private var message: String?
+  @State private var saving = false
+
+  private var query: TodoAdapter.Query { .open(projectID: projectID) }
+
+  var body: some View {
+    VStack {
+      if let message {
+        Text(message)
+        Button("Reload list") { Task { await reload() } }
+      }
+      if let rows = todos.state.wrappedValue.results(for: query) {
+        List(rows) { todo in
+          Button(todo.title) { Task { await complete(todo.typedID) } }
+            .disabled(saving || todo.completed)
+        }
+      } else if message == nil {
+        ProgressView()
+      }
+    }
+    .task(id: query) { await reload() }
+  }
+
+  private func reload() async {
+    do {
+      try await todos.collection.load(query)
+      message = nil
+    } catch {
+      if !Task.isCancelled { message = "Could not load the list." }
+    }
+  }
+
+  private func complete(_ id: Todo.TypedID) async {
+    guard !saving else { return }
+    saving = true
+    defer { saving = false }
+    do {
+      try await todos.collection.mutate(.complete(id))
+    } catch {
+      message = "Could not confirm completion."
+      return
+    }
+    await reload()
+  }
+}
+```
+
+If the completion POST succeeds and the next GET fails, tapping “Reload list” retries only the GET. The store retains the confirmed completion.
+
+### Use a class for Todo
+
+The same adapter and list view work if you replace `struct Todo` with the class below. Keep the ID immutable and put mutable fields in `@GraphStored` properties.
+
+```swift
+nonisolated final class Todo: TypedIdentifiable, Decodable, Sendable {
+  typealias TypedIdentifierRawValue = Int
+  let typedID: TypedID
+
+  @GraphStored var title: String
+  @GraphStored var completed: Bool
+
+  private enum CodingKeys: String, CodingKey { case id, title, completed }
+
+  init(from decoder: any Decoder) throws {
+    let values = try decoder.container(keyedBy: CodingKeys.self)
+    typedID = .init(try values.decode(Int.self, forKey: .id))
+    title = try values.decode(String.self, forKey: .title)
+    completed = try values.decode(Bool.self, forKey: .completed)
+  }
+}
+```
+
+Pass the ID to the detail view and look up the current instance inside `body`.
+
+```swift
+struct TodoDetail: View {
+  let todos: Todos
+  let id: Todo.TypedID
+
+  var body: some View {
+    if let todo = todos.state.wrappedValue.entities[id] {
+      Label(todo.title, systemImage: todo.completed ? "checkmark.circle.fill" : "circle")
+    }
+  }
+}
+```
+
+Changing `title` on an instance updates views that read the property. The assignment is local. To persist an operation on the server, call `mutate` on the collection so the adapter handles the write.
+
+Decoding each GET or POST response creates a new `Todo`. Both `load` and `.upsert` replace the store entry for that ID. A detail view that holds the ID picks up the replacement on its next read. Code that holds the old instance continues to read that instance. Past snapshots also retain references to their instances. To preserve a field’s history, take a separate value copy.
+
+If callers retain a `Todo` and need its identity (`===`) to survive synchronization, apply incoming values to the existing instance for that ID. `EntityStore.updateOrCreate` and `@InitAndUpdate` support this approach. `EntityCollection` uses replacement by default.
+
+## Implement the same flow with TanStack DB
+
+Create one collection per project and pass it to the React list and detail views. Include the project ID in both the URL and the query key. The `queryFn` below translates the screen’s `completed == false` filter into `status=open`. The example assumes the API returns all todos for the project on an unfiltered request. For pagination, also translate the requested window into API parameters.
+
+```tsx
+import { QueryClient } from '@tanstack/query-core'
+import { createCollection, createOptimisticAction, eq, useLiveQuery } from '@tanstack/react-db'
+import { parseLoadSubsetOptions, queryCollectionOptions } from '@tanstack/query-db-collection'
+
+type Todo = { id: number; title: string; completed: boolean }
+
+export function projectTodos(projectID: number, queryClient: QueryClient) {
+  const todos = createCollection(queryCollectionOptions({
+    queryClient,
+    queryKey: ['projects', projectID, 'todos'],
+    getKey: (todo: Todo) => todo.id,
+    syncMode: 'on-demand',
+    queryFn: async ({ meta, signal }): Promise<Todo[]> => {
+      const { filters } = parseLoadSubsetOptions(meta?.loadSubsetOptions ?? {})
+      const open = filters.some(f =>
+        f.field.join('.') === 'completed' && f.operator === 'eq' && f.value === false
+      )
+      const path = `/projects/${projectID}/todos${open ? '?status=open' : ''}`
+      const response = await fetch(path, { signal })
+      if (!response.ok) throw new Error(`GET ${path}: ${response.status}`)
+      return response.json()
+    },
+  }))
+
+  const complete = createOptimisticAction<number>({
+    onMutate: id => {
+      todos.update(id, draft => { draft.completed = true })
+    },
+    mutationFn: async id => {
+      const response = await fetch(`/todos/${id}/complete`, { method: 'POST' })
+      if (!response.ok) throw new Error(`POST complete: ${response.status}`)
+      await todos.utils.refetch()
+    },
+  })
+  return { todos, complete }
+}
+```
+
+```tsx
+import { useState } from 'react'
+
+function OpenTodos({ model }: { model: ReturnType<typeof projectTodos> }) {
+  const [error, setError] = useState<string>()
+  const { data, isLoading, isLoadingError } = useLiveQuery(q =>
+    q.from({ todo: model.todos }).where(({ todo }) => eq(todo.completed, false))
+  )
+  if (isLoadingError) return <p>Could not load the list.</p>
+  if (isLoading) return <p>Loading…</p>
+
+  async function complete(id: number) {
+    setError(undefined)
+    try {
+      await model.complete(id).when('settled')
+    } catch {
+      setError('Could not confirm completion.')
+    }
+  }
+  return <>
+    {error && <p>{error}</p>}
+    {data.map(todo =>
+      <button key={todo.id} onClick={() => complete(todo.id)}>{todo.title}</button>
+    )}
+  </>
+}
+```
+
+Create the model with `const model = projectTodos(42, queryClient)` and render `<OpenTodos model={model} />`. TanStack Query’s `queryKey` identifies the fetch cache entry. The TanStack DB live query describes the conditions to apply to the collection’s rows. In the Swift adapter example, `TodoAdapter.Query` identifies both the fetch operation and the ordered list of IDs in its result.
+
+## Policies the Swift app controls
+
+- **When to fetch.** Each `load` call invokes the adapter. The app chooses when to fetch, for example on view appearance, on refresh, or after a write. Each collection executes its reads and writes serially.
+- **Which filters to send.** Express server-side conditions in the adapter’s query type, such as `.open(projectID:)`. Use `Computed` to filter or join data that is already loaded. The app supplies the HTTP mapping. TanStack DB also has an incremental join engine for local queries.
+- **How long to share data.** A collection retains its entities and query results in memory. When the signed-in user changes, give the new session its own `Todos` instance.
+
+The Swift examples were type-checked with Swift 6.3.3. The app model issued a GET, a POST, and a second GET against a local HTTP server. The TypeScript examples were type-checked with `@tanstack/react-db 1.0.0-rc.1.5`, `@tanstack/query-db-collection 1.5.2`, and `@tanstack/query-core 5.108.2`. A live query and mock API verified the optimistic update and the refetch after confirmation.
+
+[Swift implementation](https://github.com/VergeGroup/swift-state-graph/pull/158) · [TanStack DB Query Collection](https://tanstack.com/db/latest/docs/collections/query-collection) · [Live Queries](https://tanstack.com/db/latest/docs/guides/live-queries) · [Mutations](https://tanstack.com/db/latest/docs/guides/mutations)
