@@ -23,6 +23,27 @@ try await todos.collection.load(query)                    // 未完了一覧の�
 | Todo の完了を永続化する | `createOptimisticAction` の `onMutate` で仮更新、`mutationFn` で POST と再取得。CRUD なら `onInsert / onUpdate / onDelete` も使える | `mutate(.complete(id))` → アダプタが POST → 返った行を `.upsert`。通信中は直前の確定値を表示 |
 | 絞り込みや並びを更新する | ローカルの `where` / `orderBy` が行の変更に追従。例ではサーバーの確定状態も再取得 | 行の値は共有される。サーバーが決めるメンバーと順序は明示的に `load`。確定した `.delete(id)` は全結果から即座に除く |
 
+## StateGraph を使わずに読む
+
+コレクション本体、アダプタ、`EntityStore` は同じ `StateGraphNormalization` モジュールにある。SwiftPM の実行ターゲットがこの product だけを参照していれば、アダプタを持つ CLI やテストからも使える。ここでは `Todo` は通常の Swift の値型でよい。
+
+```swift
+import StateGraphNormalization
+
+let todos = EntityCollection(adapter: adapter)
+let query = TodoAdapter.Query.open(projectID: 42)
+try await todos.load(query)
+let rows = await todos.snapshot.results(for: query)
+if let first = rows?.first {
+  try await todos.mutate(.complete(first.typedID))
+  if let confirmed = await todos.snapshot.entities[first.typedID] {
+    print(confirmed.completed)
+  }
+}
+```
+
+`snapshot` はコレクションの actor から値を読む API。更新のたびに画面を再描画したい場合に、初期化時の `onChange` クロージャで結果を `Stored` へ渡す。次の SwiftUI 例で `StateGraph` が必要になるのはこの接続部分と、クラス版の `@GraphStored` を使うモデル。
+
 ## SwiftUI での組み込み
 
 アプリのターゲットから `StateGraph` と `StateGraphNormalization` の両 product を参照する。既存の API クライアントがあるアプリなら、アダプタの `load` と `mutate` でそのメソッドを呼べる。以下では対応する HTTP リクエストまで見えるように `URLSession` で書いた。
