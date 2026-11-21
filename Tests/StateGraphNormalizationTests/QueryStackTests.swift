@@ -1,10 +1,42 @@
+import StateGraph
 import StateGraphNormalization
 import Testing
 
-nonisolated private struct Todo: TypedIdentifiable, Sendable {
+private struct AssigneePayload: Sendable {
+  let id: Assignee.TypedID
+  let name: String
+}
+
+private struct TodoPayload: Sendable {
+  let id: Todo.TypedID
+  let title: String
+  let assignee: AssigneePayload?
+}
+
+nonisolated private final class Assignee: TypedIdentifiable, Sendable {
   typealias TypedIdentifierRawValue = Int
   let typedID: TypedID
-  let title: String
+  @GraphStored var name: String
+
+  @InitAndUpdate
+  init(payload: AssigneePayload) {
+    #onInit { self.typedID = payload.id }
+    self.name = payload.name
+  }
+}
+
+nonisolated private final class Todo: TypedIdentifiable, Sendable {
+  typealias TypedIdentifierRawValue = Int
+  let typedID: TypedID
+  @GraphStored var title: String
+  @GraphStored var assignee: Assignee?
+
+  @InitAndUpdate
+  init(payload: TodoPayload, assignee: Assignee?) {
+    #onInit { self.typedID = payload.id }
+    self.title = payload.title
+    self.assignee = assignee
+  }
 }
 
 private struct TodoByID: Query {
@@ -18,19 +50,20 @@ private struct OpenTodos: Query {
 }
 
 private struct TodoPage: Sendable {
-  let rows: [Todo]
+  let rows: [TodoPayload]
   let nextCursor: String?
 }
 
 private protocol TodoAPI: Sendable {
-  func todo(id: Todo.TypedID) async throws -> Todo?
+  func todo(id: Todo.TypedID) async throws -> TodoPayload?
   func openTodos(projectID: Int, after cursor: String?) async throws -> TodoPage
 }
 
 @MainActor
 private final class TodoData {
   let api: any TodoAPI
-  var entities = EntityStore<Todo>()
+  private(set) var entities = EntityStore<Todo>()
+  private var assignees = EntityStore<Assignee>()
 
   init(api: any TodoAPI) {
     self.api = api
@@ -41,8 +74,23 @@ private final class TodoData {
     try Task.checkCancellation()
     let row = try await api.todo(id: id)
     try Task.checkCancellation()
-    if let row { entities.add(row) }
-    return entities[id]
+    guard let row else { return entities[id] }
+    return withGraphTransaction { merge(row) }
+  }
+
+  func merge(_ row: TodoPayload) -> Todo {
+    let assignee = row.assignee.map { payload in
+      assignees.updateOrCreate(
+        id: payload.id,
+        update: { $0.update(payload: payload) },
+        create: { Assignee(payload: payload) }
+      )
+    }
+    return entities.updateOrCreate(
+      id: row.id,
+      update: { $0.update(payload: row, assignee: assignee) },
+      create: { Todo(payload: row, assignee: assignee) }
+    )
   }
 }
 
@@ -54,9 +102,9 @@ private final class OpenTodoList {
   private let projectID: Int
   private var cursor: String?
   private var seen: Set<Todo.TypedID> = []
-  private var ids: [Todo.TypedID] = []
-  private(set) var isLoading = false
-  private(set) var hasNextPage = true
+  @GraphStored private var ids: [Todo.TypedID] = []
+  @GraphStored private(set) var isLoading = false
+  @GraphStored private(set) var hasNextPage = true
 
   var rows: [Todo] { ids.compactMap { data.entities[$0] } }
 
@@ -74,12 +122,16 @@ private final class OpenTodoList {
     try Task.checkCancellation()
     let page = try await data.api.openTodos(projectID: projectID, after: cursor)
     try Task.checkCancellation()
-    data.entities.add(page.rows)
-    for row in page.rows where seen.insert(row.typedID).inserted {
-      ids.append(row.typedID)
+    withGraphTransaction {
+      var added: [Todo.TypedID] = []
+      for row in page.rows {
+        let todo = data.merge(row)
+        if seen.insert(todo.typedID).inserted { added.append(todo.typedID) }
+      }
+      if !added.isEmpty { ids.append(contentsOf: added) }
+      cursor = page.nextCursor
+      hasNextPage = cursor != nil
     }
-    cursor = page.nextCursor
-    hasNextPage = cursor != nil
   }
 }
 
@@ -111,9 +163,9 @@ private actor TestAPI: TodoAPI {
 
   func failNextPage() { failNext = true }
 
-  func todo(id: Todo.TypedID) -> Todo? {
+  func todo(id: Todo.TypedID) -> TodoPayload? {
     lookups.append(id)
-    return id.raw == 1 ? Todo(typedID: id, title: "detail") : nil
+    return id.raw == 1 ? TodoPayload(id: id, title: "detail", assignee: nil) : nil
   }
 
   func openTodos(projectID: Int, after cursor: String?) async throws -> TodoPage {
@@ -126,13 +178,13 @@ private actor TestAPI: TodoAPI {
     }
     switch cursor {
     case nil:
-      return TodoPage(rows: [Todo(typedID: .init(1), title: "first")], nextCursor: "a")
+      return TodoPage(rows: [TodoPayload(id: .init(1), title: "first", assignee: nil)], nextCursor: "a")
     case "a":
       return TodoPage(rows: [], nextCursor: "b")
     case "b":
       return TodoPage(rows: [
-        Todo(typedID: .init(2), title: "second"),
-        Todo(typedID: .init(1), title: "updated"),
+        TodoPayload(id: .init(2), title: "second", assignee: .init(id: .init(9), name: "Ada")),
+        TodoPayload(id: .init(1), title: "updated", assignee: .init(id: .init(9), name: "Ada")),
       ], nextCursor: nil)
     default:
       Issue.record("Unexpected cursor")
@@ -163,6 +215,10 @@ struct QueryStackTests {
     try await list.loadNext()
     #expect(!list.hasNextPage)
     #expect(list.rows.map(\.title) == ["updated", "second"])
+    #expect(detail === list.rows.first)
+    #expect(detail?.title == "updated")
+    let assignee = try #require(detail?.assignee)
+    #expect(list.rows.last?.assignee === assignee)
     #expect(try await stack.resolve(query)?.title == "updated")
     try await list.loadNext()
     #expect(await api.cursors == [nil, "a", "a", "b"])
@@ -170,6 +226,34 @@ struct QueryStackTests {
     #expect(try await stack.resolve(TodoByID(id: .init(2)))?.title == "second")
     #expect(try await stack.resolve(TodoByID(id: .init(3))) == nil)
     #expect(await api.lookups == [.init(1), .init(3)])
+  }
+
+  @Test func observedRelationshipFollowsRenamesReassignmentAndRemoval() {
+    let data = TodoData(api: TestAPI())
+    let ada = AssigneePayload(id: .init(9), name: "Ada")
+    let first = data.merge(TodoPayload(id: .init(1), title: "First", assignee: ada))
+    let second = data.merge(TodoPayload(id: .init(2), title: "Second", assignee: ada))
+    let firstName = Computed { _ in first.assignee?.name }
+    let secondName = Computed { _ in second.assignee?.name }
+    #expect(first.assignee === second.assignee)
+    #expect(firstName.wrappedValue == "Ada")
+    #expect(secondName.wrappedValue == "Ada")
+
+    // Only the second todo is in this response. The first follows its shared assignee.
+    let renamed = AssigneePayload(id: ada.id, name: "Ada Lovelace")
+    _ = data.merge(TodoPayload(id: second.typedID, title: "Second", assignee: renamed))
+    #expect(firstName.wrappedValue == "Ada Lovelace")
+    #expect(secondName.wrappedValue == "Ada Lovelace")
+
+    let grace = AssigneePayload(id: .init(10), name: "Grace")
+    let reassigned = data.merge(TodoPayload(id: first.typedID, title: "First", assignee: grace))
+    #expect(reassigned === first)
+    #expect(firstName.wrappedValue == "Grace")
+    #expect(secondName.wrappedValue == "Ada Lovelace")
+
+    _ = data.merge(TodoPayload(id: first.typedID, title: "First", assignee: nil))
+    #expect(firstName.wrappedValue == nil)
+    #expect(secondName.wrappedValue == "Ada Lovelace")
   }
 
   @Test func overlappingAndCancelledReadsKeepTheCurrentPage() async throws {

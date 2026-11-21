@@ -78,6 +78,15 @@ let list = try await stack.resolve(OpenTodos(projectID: 42))
 try await list.loadNext()
 ```
 
+For a relationship such as `todo.assignee`, use shared class instances in the
+application model. Give `Todo` an immutable ID and a stored relationship
+(`@GraphStored var assignee: Assignee?`). Track the target's name with
+`@GraphStored var name: String` on `Assignee`.
+When merging a response, use `updateOrCreate` on the assignee store first,
+then assign the returned instance to the todo as part of its own in-place
+update. A view holding the todo can read `todo.assignee?.name` and observe a
+rename delivered through another todo, a reassignment, or removal of the link.
+
 ### Loading a collection through an API
 
 Use an `EntityCollectionAdapter` to map a typed query or domain mutation to an
