@@ -37,7 +37,7 @@ import StateGraph
 import StateGraphNormalization
 import SwiftUI
 
-struct Todo: TypedIdentifiable, Decodable, Sendable {
+nonisolated struct Todo: TypedIdentifiable, Decodable, Sendable {
   typealias TypedIdentifierRawValue = Int
   let number: Int
   let title: String
