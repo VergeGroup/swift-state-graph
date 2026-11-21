@@ -17,10 +17,13 @@ let package = Package(
   products: [
     // StateGraph owns process-wide runtime state, so separate framework consumers
     // must resolve one shared binary instead of embedding independent copies.
-    // Distribute the async store module in that same binary so its dependency
-    // on the StateGraph target doesn't embed a second copy of the runtime.
     .library(
       name: "StateGraph",
+      type: .dynamic,
+      targets: ["StateGraph"]
+    ),
+    .library(
+      name: "StateGraphAsyncDataStore",
       type: .dynamic,
       targets: ["StateGraph", "StateGraphAsyncDataStore"]
     ),
