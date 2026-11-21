@@ -159,6 +159,50 @@ struct OpenTodosView: View {
 
 完了 POST が成功してから一覧の GET が失敗した場合、ボタン「一覧を再取得」は GET だけを再試行する。完了した Todo の確定値はストアに残る。
 
+### Todo をクラスにする場合
+
+上の `struct Todo` をこの定義に差し替えても、同じアダプタ・一覧画面を使える。ID は固定し、変化する値を `@GraphStored` に置く。
+
+```swift
+nonisolated final class Todo: TypedIdentifiable, Decodable, Sendable {
+  typealias TypedIdentifierRawValue = Int
+  let typedID: TypedID
+
+  @GraphStored var title: String
+  @GraphStored var completed: Bool
+
+  private enum CodingKeys: String, CodingKey { case id, title, completed }
+
+  init(from decoder: any Decoder) throws {
+    let values = try decoder.container(keyedBy: CodingKeys.self)
+    typedID = .init(try values.decode(Int.self, forKey: .id))
+    title = try values.decode(String.self, forKey: .title)
+    completed = try values.decode(Bool.self, forKey: .completed)
+  }
+}
+```
+
+詳細画面には ID を渡し、`body` の中で現在のインスタンスを解決する。
+
+```swift
+struct TodoDetail: View {
+  let todos: Todos
+  let id: Todo.TypedID
+
+  var body: some View {
+    if let todo = todos.state.wrappedValue.entities[id] {
+      Label(todo.title, systemImage: todo.completed ? "checkmark.circle.fill" : "circle")
+    }
+  }
+}
+```
+
+同じインスタンスの `title` を更新すると、そのプロパティを読んだ画面に反映される。この代入はローカルな変更なので、サーバーにも反映する操作はアダプタの `mutate` を通す。
+
+この例では GET と POST のレスポンスをデコードするたびに新しい `Todo` ができる。`load` や `.upsert` はストアの同じ ID のエントリを差し替える。詳細が ID を持っていれば新しい `Todo` を読み直せる。以前の `Todo` を直接保持しているコードは、引き続き以前のインスタンスを読む。また、クラスを含む過去の snapshot は各インスタンスへの参照を持つため、フィールドの履歴を保存する用途には別の値コピーが必要になる。
+
+オブジェクト自体を長く保持し、同期後も `===` を保つ設計では、ID ごとの既存インスタンスに受信値を適用する処理が必要になる。パッケージには `EntityStore.updateOrCreate` と `@InitAndUpdate` がある。現在の `EntityCollection` はこのインプレース更新を自動では行わない。
+
 ## 同じ操作を TanStack DB で書く
 
 React 側はプロジェクトごとの Collection をアプリで一度作り、一覧と詳細に渡す。プロジェクト ID は URL と Query key に含める。下の `queryFn` はこの画面が使う `completed == false` を `status=open` に変換する。条件のない取得に対しては全件を返せる API を想定している。ページングを追加するときは取得範囲も API に対応付ける。
