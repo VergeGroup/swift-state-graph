@@ -68,14 +68,28 @@ let project = Project(
     ),
   ],
   targets: [
-    developmentTarget
+    developmentTarget,
+    .target(
+      name: "DevelopmentTests",
+      destinations: .iOS,
+      product: .unitTests,
+      bundleId: "app.muukii.dev-swift-state-graph.tests",
+      deploymentTargets: .iOS("17.0"),
+      infoPlist: .default,
+      sources: ["DevelopmentTests/**"],
+      dependencies: [
+        .target(name: "Development"),
+        .package(product: "StateGraphNormalization", type: .runtime),
+      ],
+      settings: .settings(base: ["SWIFT_VERSION": "6.0"])
+    ),
   ],
   schemes: [
     .scheme(
       name: "Development",
       shared: true,
       buildAction: .buildAction(targets: ["Development"]),
-      testAction: .targets([]),
+      testAction: .targets(["DevelopmentTests"]),
       runAction: .runAction(
         configuration: .debug,
         executable: .executable("Development")

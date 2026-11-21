@@ -292,7 +292,7 @@ For detailed guides, see the [Documentation](Sources/StateGraph/Documentation.do
 - [UIKit Integration](Sources/StateGraph/Documentation.docc/UIKit-Integration.md) - withGraphTracking patterns
 - [UserDefaults](Sources/StateGraph/Documentation.docc/UserDefaults.md) - Persistent values composed with Stored nodes
 - [Data Normalization](Sources/StateGraph/Documentation.docc/Data-Normalization.md) - EntityStore for relational data
-- [QueryStack, EntityCollection and TanStack DB](Documentation/Guides/EntityCollection-and-TanStack-DB.md) - Resolving Todo details and paginated lists, with a comparison of REST-backed reads and writes in SwiftUI and React
+- [QueryStack, EntityCollection and TanStack DB](Documentation/Guides/EntityCollection-and-TanStack-DB.md) - A partially loaded social feed with shared posts, Todo details and pagination, and REST-backed reads and writes in SwiftUI and React
 - [Migration from Observable](Sources/StateGraph/Documentation.docc/Migration-from-Observable.md) - Step-by-step guide
 
 ## Advanced Topics

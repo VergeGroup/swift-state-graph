@@ -134,6 +134,29 @@ Each handle tracks its own position. Resolving the same query again starts at th
 
 In the Swift example, each `loadNext()` fetches one server page. Even an empty page can have a continuation cursor. TanStack DB also supports local queries, fetching enough pages to satisfy an arbitrary window, and managing cache freshness. [useLiveInfiniteQuery](https://tanstack.com/db/latest/docs/framework/react/reference/functions/useLiveInfiniteQuery) · [createCursorPager and opaque cursors](https://tanstack.com/db/latest/docs/collections/query-collection#endpoints-with-opaque-cursors)
 
+## A partially loaded social feed
+
+Open **Ranked feed** in the Development app. Home and Marina’s profile both show the ferry post. Load more on the profile, then switch to Home and pull to refresh. Home receives a new first page and an updated like count. Switch back to the profile to see the new count on the same post, with the previously loaded profile rows still in place.
+
+```swift
+let home = try await stack.resolve(FeedQuery(scope: .home))
+let firstPost = home.entries.first?.post
+try await home.loadNext()
+try await home.refresh()
+```
+
+| Owner | Data it holds |
+| --- | --- |
+| Feed service | Membership, ranking, placement IDs, and the meaning of each cursor. The demo uses an in-process service that returns one page per call. |
+| Each `FeedTimeline` | The ordered placements loaded for one scope, including display reasons such as “Suggested for you”, and the private cursor for the next request. A missing cursor on a successful page means this sequence has ended. |
+| Shared `FeedSession` | One `FeedPost` and one `FeedAuthor` per encountered ID. Both screens can read `post.author.name`. A later response updates those objects in place. |
+
+A feed can include the same post in two different placements. When appending a page, the timeline merges its entities and appends each new placement ID once. Absence from a page gives the client no evidence that a post was deleted. A retained detail view can still use `firstPost` after it leaves Home. This demo retains encountered entities in memory for the lifetime of the feed screen’s session. A long-lived app can choose a shorter retention policy for entities no screen uses.
+
+Pulling to refresh requests the first page with no cursor. On success the timeline replaces its placements and cursor together. On failure it keeps both so the user can continue from the previous position. To exercise overlapping reads, tap **Load more** on Home and immediately pull to refresh. The timeline checks the request generation before writing either placements or shared entities. For responses from independent timelines, the demo service supplies a snapshot revision. Each post and author accepts newer fields, even when an older snapshot arrives last.
+
+[Timeline and entity merge](../../Development/FeedTimeline.swift) · [Demo service and SwiftUI screens](../../Development/FeedDemoView.swift) · [Feed tests](../../DevelopmentTests/FeedTimelineTests.swift)
+
 ## Read and write todos with EntityCollection
 
 The following flat REST example uses immutable `TodoRow` values for collection snapshots. An `EntityCollectionAdapter` handles both reads and writes. The collection runs requests serially and replaces rows by ID on confirmation. For screens that retain object relationships, use the shared class models and in-place merge above. A snapshot that contains a class reference points to its current fields. Keeping historical field values requires a value copy.
