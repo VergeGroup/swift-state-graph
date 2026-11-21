@@ -1,4 +1,5 @@
 import StateGraph
+import StateGraphAsyncDataStore
 import Testing
 
 @MainActor
@@ -117,7 +118,9 @@ struct AsyncDataStoreTests {
       initial: [Int]()
     )
     store.setReduce { $0 = $0.map { $0 * 10 } }
+    let itemCount = Computed { _ in store.value.count }
     #expect(store.value.isEmpty)
+    #expect(itemCount.wrappedValue == 0)
 
     Task {
       await store.sendAndWait(action: .first)
@@ -126,11 +129,13 @@ struct AsyncDataStoreTests {
     try await #require(publishedFirstPage.wait(for: .seconds(5)))
     #expect(store.sourceValue == [1])
     #expect(store.value == [10])
+    #expect(itemCount.wrappedValue == 1)
 
     fetchNextPage.signal()
     try await #require(actionReturned.wait(for: .seconds(5)))
     #expect(store.sourceValue == [1, 2])
     #expect(store.value == [10, 20])
+    #expect(itemCount.wrappedValue == 2)
 
     let context = try #require(savedContext)
     #expect(!context.update { $0.removeAll() })

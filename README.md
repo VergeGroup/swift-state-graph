@@ -126,6 +126,18 @@ dependencies: [
 )
 ```
 
+### AsyncDataStore
+
+The `StateGraph` product includes the `StateGraphAsyncDataStore` module. Import
+it where you use the async store:
+
+```swift
+import StateGraphAsyncDataStore
+```
+
+Open the `AsyncDataStore` SwiftUI preview in the Development project to try
+offset pagination and reload.
+
 ### Dynamic Linking
 
 `StateGraph` and `StateGraphNormalization` are distributed as dynamic library
