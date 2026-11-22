@@ -37,7 +37,7 @@ let developmentTarget: Target = .target(
   buildableFolders: ["Development"],
   dependencies: [
     // The app is the single owner that embeds each dynamic package runtime.
-    .package(product: "StateGraph", type: .runtimeEmbedded),
+    .package(product: "StateGraphAsyncDataStore", type: .runtimeEmbedded),
     .package(product: "StateGraphNormalization", type: .runtimeEmbedded),
     .package(product: "StorybookKit"),
   ],

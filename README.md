@@ -126,13 +126,29 @@ dependencies: [
 )
 ```
 
+### AsyncDataStore
+
+Select the `StateGraphAsyncDataStore` library product to use the async store.
+It provides both the `StateGraph` and `StateGraphAsyncDataStore` modules.
+
+```swift
+.product(name: "StateGraphAsyncDataStore", package: "swift-state-graph")
+```
+
+```swift
+import StateGraphAsyncDataStore
+```
+
+Open the `AsyncDataStore` SwiftUI preview in the Development project to try
+offset pagination and reload.
+
 ### Dynamic Linking
 
-`StateGraph` and `StateGraphNormalization` are distributed as dynamic library
-products. StateGraph owns process-wide tracking and transaction context, so one
-process must load one shared StateGraph runtime. Dynamic products ensure that
-multiple frameworks link to shared binaries instead of embedding independent
-static copies.
+`StateGraph`, `StateGraphAsyncDataStore`, and `StateGraphNormalization` are
+dynamic library products. StateGraph owns process-wide tracking and
+transaction context. Choose one product that provides the graph runtime for the
+entire app, including its feature frameworks. Use `StateGraph` for the core
+module alone or `StateGraphAsyncDataStore` for both modules.
 
 The application target should embed the produced frameworks. Dependent dynamic
 frameworks should link them without embedding additional copies.
@@ -150,9 +166,12 @@ final application target:
 .package(product: "StateGraphNormalization", type: .runtimeEmbedded)
 ```
 
+For an app that uses the async store, use `StateGraphAsyncDataStore` in place
+of `StateGraph` in both dependency declarations above.
+
 `StateGraphNormalization` does not re-export `StateGraph`. Targets using graph
-nodes together with normalization must depend on and import both products
-explicitly:
+nodes together with normalization must link their chosen graph product and
+`StateGraphNormalization`, and import both modules explicitly:
 
 ```swift
 import StateGraph

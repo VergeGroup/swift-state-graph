@@ -24,6 +24,10 @@ struct ContentView: View {
           FeedDemoView()
         }
 
+        NavigationLink("AsyncDataStore") {
+          AsyncDataStoreDemoView()
+        }
+
         NavigationLink {
           Observe_specific(model: .init(name: "A", count: 1))
         } label: { 
