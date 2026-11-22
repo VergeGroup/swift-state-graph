@@ -70,10 +70,10 @@ struct FeedTimelineTests {
   @Test func refreshSupersedesAppendAndPreservesTheProfile() async throws {
     let server = Server()
     let stack = FeedSession { try await server.page($0, after: $1) }.makeStack()
-    let home = try await stack.resolve(FeedQuery(scope: .home))
+    let home = try await stack.query(FeedQuery(scope: .home))
     #expect(home.entries.map(\.id) == ["a", "b"])
     #expect(home.hasNextPage)
-    let profile = try await stack.resolve(FeedQuery(scope: .profile))
+    let profile = try await stack.query(FeedQuery(scope: .profile))
     let retained = try #require(home.entries.last?.post)
     let first = try #require(profile.entries.first?.post)
     #expect(profile.entries.last?.post === retained)
@@ -112,7 +112,7 @@ struct FeedTimelineTests {
   @Test func failedRefreshRetainsThePreviousEntriesAndContinuation() async throws {
     let server = Server()
     let home = try await FeedSession { try await server.page($0, after: $1) }
-      .makeStack().resolve(FeedQuery(scope: .home))
+      .makeStack().query(FeedQuery(scope: .home))
     await server.failRefresh()
     await #expect(throws: Server.Failure.offline) { try await home.refresh() }
     #expect(home.entries.map(\.id) == ["a", "b"])
@@ -125,7 +125,7 @@ struct FeedTimelineTests {
   @Test func cancellingTheWaiterDiscardsItsLateResponse() async throws {
     let server = Server()
     let home = try await FeedSession { try await server.page($0, after: $1) }
-      .makeStack().resolve(FeedQuery(scope: .home))
+      .makeStack().query(FeedQuery(scope: .home))
     let post = try #require(home.entries.last?.post)
     let append = Task { try await home.loadNext() }
     for await _ in server.appendStarted.stream {}

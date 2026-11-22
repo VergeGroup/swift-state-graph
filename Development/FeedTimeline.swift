@@ -1,6 +1,7 @@
 import StateGraph
 import StateGraphAsyncDataStore
 import StateGraphNormalization
+import StateGraphSync
 import os
 
 enum FeedScope: Sendable {
@@ -9,8 +10,15 @@ enum FeedScope: Sendable {
 }
 
 struct FeedQuery: Query {
-  typealias Output = FeedTimeline
   let scope: FeedScope
+  @DBDependency private var session: FeedSession?
+
+  func perform() async throws -> FeedTimeline {
+    let session = try $session.require()
+    let timeline = await FeedTimeline(scope: scope, session: session)
+    try await timeline.refresh()
+    return timeline
+  }
 }
 
 /// A ranked page from the service. A placement and the post it presents have separate IDs.
@@ -94,14 +102,8 @@ final class FeedSession {
     )
   }
 
-  func makeStack() -> QueryStack<FeedSession> {
-    var stack = QueryStack(dependencies: self)
-    stack.register(FeedQuery.self) { query, session in
-      let timeline = await FeedTimeline(scope: query.scope, session: session)
-      try await timeline.refresh()
-      return timeline
-    }
-    return stack
+  func makeStack() -> DBStack {
+    DBStack(adapter: self)
   }
 }
 

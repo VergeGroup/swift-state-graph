@@ -38,7 +38,7 @@ let developmentTarget: Target = .target(
   dependencies: [
     // The app is the single owner that embeds each dynamic package runtime.
     .package(product: "StateGraphAsyncDataStore", type: .runtimeEmbedded),
-    .package(product: "StateGraphNormalization", type: .runtimeEmbedded),
+    .package(product: "StateGraphSync", type: .runtimeEmbedded),
     .package(product: "StorybookKit"),
   ],
   settings: .settings(
@@ -79,7 +79,7 @@ let project = Project(
       sources: ["DevelopmentTests/**"],
       dependencies: [
         .target(name: "Development"),
-        .package(product: "StateGraphNormalization", type: .runtime),
+        .package(product: "StateGraphSync", type: .runtime),
       ],
       settings: .settings(base: ["SWIFT_VERSION": "6.0"])
     ),

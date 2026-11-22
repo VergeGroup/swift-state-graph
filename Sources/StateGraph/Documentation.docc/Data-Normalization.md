@@ -65,16 +65,19 @@ dependency tracking and successful writebacks invalidate dependents.
 
 ### Resolving application queries
 
-An app can declare a separate `Query` type for each use case. Its `Output`
-can be a single entity, an optional value, or an app-defined paginated list.
-Create a `QueryStack(dependencies:)` with the API client and shared storage,
-then register a resolver for each concrete query type. For example, a resolver
-for `TodoByID` can reuse a Todo loaded by a list before requesting its detail
-endpoint. Both resolvers receive the same dependencies.
+Use the `StateGraphSync` product for application queries and mutations. Declare
+a `Query` for a read operation and a `Mutation` for a write operation. Each can
+use `@DBDependency` to read the adapter passed to `DBStack(adapter:)`.
+A query's `perform()` method can return a single entity, an optional value, or
+an app-defined paginated list.
+For example, `TodoByID` can reuse a Todo loaded by a list before requesting its
+detail endpoint.
 
 ```swift
-let todo: Todo? = try await stack.resolve(TodoByID(id: id))
-let list = try await stack.resolve(OpenTodos(projectID: 42))
+import StateGraphSync
+
+let todo: Todo? = try await stack.query(TodoByID(id: id))
+let list = try await stack.query(OpenTodos(projectID: 42))
 try await list.loadNext()
 ```
 
@@ -86,76 +89,6 @@ When merging a response, use `updateOrCreate` on the assignee store first,
 then assign the returned instance to the todo as part of its own in-place
 update. A view holding the todo can read `todo.assignee?.name` and observe a
 rename delivered through another todo, a reassignment, or removal of the link.
-
-### Loading a collection through an API
-
-Use an `EntityCollectionAdapter` to map a typed query or domain mutation to an
-existing API client. The query value identifies one complete ordered result.
-Include any project, filter, sort, or page that distinguishes that result.
-For example, given a `TodoAPI` client and a `Todo` entity:
-
-```swift
-struct TodoAdapter: EntityCollectionAdapter {
-  enum Query: Hashable {
-    case open(project: Int)
-    case assignedToMe
-  }
-
-  enum Mutation {
-    case complete(Todo.TypedID)
-    case delete(Todo.TypedID)
-  }
-
-  let api: TodoAPI
-
-  func load(_ query: Query) async throws -> [Todo] {
-    switch query {
-    case .open(let project):
-      // GET /projects/{project}/todos?status=open
-      try await api.openTodos(project: project)
-    case .assignedToMe:
-      // GET /me/todos
-      try await api.myTodos()
-    }
-  }
-
-  func mutate(_ mutation: Mutation) async throws -> [EntityChange<Todo>] {
-    switch mutation {
-    case .complete(let id):
-      // POST /todos/{id}/complete returns the updated Todo.
-      let confirmed = try await api.completeTodo(id)
-      return [.upsert(confirmed)]
-    case .delete(let id):
-      try await api.deleteTodo(id)
-      return [.delete(id)]
-    }
-  }
-}
-
-let state = Stored<EntityCollection<TodoAdapter>.Snapshot>(wrappedValue: .init())
-let todos = EntityCollection(adapter: TodoAdapter(api: api)) { snapshot in
-  state.wrappedValue = snapshot
-}
-let openTodos = Computed { _ in state.wrappedValue.results(for: .open(project: 42)) }
-
-try await todos.load(.open(project: 42))
-try await todos.load(.assignedToMe)
-if let first = openTodos.wrappedValue?.first {
-  try await todos.mutate(.complete(first.typedID))
-  try await todos.load(.open(project: 42))
-}
-```
-
-Each load replaces that query's ordered IDs. An ID shared by two queries
-resolves to the same entry in the snapshot's `EntityStore`. Entities remain
-available by ID when they leave a query. An explicit deletion removes the
-entity and its membership in every result. Reload a query when a mutation
-changes a server-side filter, sort order, or page boundary.
-
-One collection runs its adapter calls serially and publishes each successful
-result in a single snapshot. A thrown adapter error leaves the previous
-snapshot in place. Query and entity data live as long as the collection or a
-retained snapshot; scope the collection to the account or feature that owns it.
 
 ### EntityStore Operations
 

@@ -1,4 +1,4 @@
-import StateGraphNormalization
+import StateGraphSync
 import SwiftUI
 
 /// The fixture represents the remote service. Clients receive only the requested page.
@@ -51,7 +51,7 @@ private actor FeedDemoServer {
 }
 
 struct FeedDemoView: View {
-  @State private var stack: QueryStack<FeedSession>
+  @State private var stack: DBStack
   @State private var scope = FeedScope.home
   @State private var timelines: [FeedScope: FeedTimeline] = [:]
   @State private var errors: [FeedScope: String] = [:]
@@ -102,7 +102,7 @@ struct FeedDemoView: View {
           ProgressView("Loading feed")
             .task(id: scope) { [scope] in
               await perform(in: scope) {
-                let timeline = try await stack.resolve(FeedQuery(scope: scope))
+                let timeline = try await stack.query(FeedQuery(scope: scope))
                 try Task.checkCancellation()
                 timelines[scope] = timeline
               }

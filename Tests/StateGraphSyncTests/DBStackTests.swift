@@ -1,5 +1,6 @@
 import StateGraph
 import StateGraphNormalization
+import StateGraphSync
 import Testing
 
 private struct AssigneePayload: Sendable {
@@ -40,13 +41,35 @@ nonisolated private final class Todo: TypedIdentifiable, Sendable {
 }
 
 private struct TodoByID: Query {
-  typealias Output = Todo?
   let id: Todo.TypedID
+  @DBDependency private var data: TodoData?
+
+  func perform() async throws -> Todo? {
+    let data = try $data.require()
+    return try await data.todo(by: id)
+  }
 }
 
 private struct OpenTodos: Query {
-  typealias Output = OpenTodoList
   let projectID: Int
+  @DBDependency private var data: TodoData?
+
+  func perform() async throws -> OpenTodoList {
+    let data = try $data.require()
+    let list = await OpenTodoList(projectID: projectID, data: data)
+    try await list.loadNext()
+    return list
+  }
+}
+
+private struct ReadDependency: Query, Mutation {
+  @DBDependency private var value: String?
+  var beforeRead: @Sendable () async -> Void = {}
+
+  func perform() async throws -> String {
+    await beforeRead()
+    return try $value.require()
+  }
 }
 
 private struct TodoPage: Sendable {
@@ -136,17 +159,8 @@ private final class OpenTodoList {
 }
 
 @MainActor
-private func makeStack(api: any TodoAPI) -> QueryStack<TodoData> {
-  var stack = QueryStack(dependencies: TodoData(api: api))
-  stack.register(TodoByID.self) { query, data in
-    try await data.todo(by: query.id)
-  }
-  stack.register(OpenTodos.self) { query, data in
-    let list = await OpenTodoList(projectID: query.projectID, data: data)
-    try await list.loadNext()
-    return list
-  }
-  return stack
+private func makeStack(api: any TodoAPI) -> DBStack {
+  DBStack(adapter: TodoData(api: api))
 }
 
 private actor TestAPI: TodoAPI {
@@ -194,18 +208,18 @@ private actor TestAPI: TodoAPI {
 }
 
 @MainActor
-struct QueryStackTests {
+struct DBStackTests {
 
   @Test func detailAndPaginatedListResolveThroughOneStore() async throws {
     let api = TestAPI()
     let stack = makeStack(api: api)
     let query = TodoByID(id: .init(1))
-    let detail: Todo? = try await stack.resolve(query)
+    let detail: Todo? = try await stack.query(query)
     #expect(detail?.title == "detail")
 
-    let list: OpenTodoList = try await stack.resolve(OpenTodos(projectID: 42))
+    let list: OpenTodoList = try await stack.query(OpenTodos(projectID: 42))
     #expect(list.rows.map(\.title) == ["first"])
-    #expect(try await stack.resolve(query)?.title == "first")
+    #expect(try await stack.query(query)?.title == "first")
 
     await api.failNextPage()
     await #expect(throws: TestAPI.Failure.self) { try await list.loadNext() }
@@ -219,12 +233,12 @@ struct QueryStackTests {
     #expect(detail?.title == "updated")
     let assignee = try #require(detail?.assignee)
     #expect(list.rows.last?.assignee === assignee)
-    #expect(try await stack.resolve(query)?.title == "updated")
+    #expect(try await stack.query(query)?.title == "updated")
     try await list.loadNext()
     #expect(await api.cursors == [nil, "a", "a", "b"])
     #expect(await api.projects == [42, 42, 42, 42])
-    #expect(try await stack.resolve(TodoByID(id: .init(2)))?.title == "second")
-    #expect(try await stack.resolve(TodoByID(id: .init(3))) == nil)
+    #expect(try await stack.query(TodoByID(id: .init(2)))?.title == "second")
+    #expect(try await stack.query(TodoByID(id: .init(3))) == nil)
     #expect(await api.lookups == [.init(1), .init(3)])
   }
 
@@ -266,7 +280,7 @@ struct QueryStackTests {
       }
     }
     let stack = makeStack(api: api)
-    let list = try await stack.resolve(OpenTodos(projectID: 42))
+    let list = try await stack.query(OpenTodos(projectID: 42))
     let read = Task { try await list.loadNext() }
     for await _ in started.stream {}
     await #expect(throws: OpenTodoList.LoadError.alreadyLoading) { try await list.loadNext() }
@@ -279,21 +293,98 @@ struct QueryStackTests {
     #expect(await api.cursors == [nil, "a", "a"])
   }
 
-  @Test func dispatchUsesQueryTypeEvenWhenOutputsMatch() async throws {
-    struct First: Query { typealias Output = String }
-    struct Second: Query { typealias Output = String }
-    var stack = QueryStack(dependencies: "fixture")
-    stack.register(First.self) { _, prefix in prefix + " one" }
-    let firstOnly = stack
-    stack.register(Second.self) { _, prefix in prefix + " two" }
-    #expect(try await stack.resolve(First()) == "fixture one")
-    #expect(try await stack.resolve(Second()) == "fixture two")
-    do {
-      _ = try await firstOnly.resolve(Second())
-      Issue.record("Resolved an unregistered query")
-    } catch let error as QueryStack<String>.MissingResolver {
-      #expect(ObjectIdentifier(error.queryType) == ObjectIdentifier(Second.self))
+  @Test func mutationUpdatesTheAdapterUsedByQueries() async throws {
+    actor Adapter {
+      private(set) var title = "draft"
+
+      func rename(to title: String) {
+        self.title = title
+      }
     }
+
+    struct ReadTitle: Query {
+      @DBDependency private var adapter: Adapter?
+
+      func perform() async throws -> String {
+        let adapter = try $adapter.require()
+        return await adapter.title
+      }
+    }
+
+    struct Rename: Mutation {
+      let title: String
+      @DBDependency private var adapter: Adapter?
+
+      func perform() async throws {
+        let adapter = try $adapter.require()
+        await adapter.rename(to: title)
+      }
+    }
+
+    let stack = DBStack(adapter: Adapter())
+    #expect(try await stack.query(ReadTitle()) == "draft")
+    try await stack.mutate(Rename(title: "published"))
+    #expect(try await stack.query(ReadTitle()) == "published")
+  }
+
+  @Test func missingDependencyReportsItsType() async throws {
+    do {
+      _ = try await DBStack(adapter: 0).query(ReadDependency())
+      Issue.record("Read a dependency of a different type from the adapter")
+    } catch let error as DBStack.MissingDependency {
+      #expect(ObjectIdentifier(error.dependencyType) == ObjectIdentifier(String.self))
+    }
+  }
+
+  @Test func aNilAdapterCountsAsADependencyOfItsType() async throws {
+    struct ReadOptionalValue: Query {
+      @DBDependency private var value: Int??
+
+      func perform() throws -> Int? {
+        try $value.require()
+      }
+    }
+
+    let query = ReadOptionalValue()
+    let wrongStack = DBStack(adapter: Optional<String>.none)
+    await #expect(throws: DBStack.MissingDependency.self) { try await wrongStack.query(query) }
+    let stack = DBStack(adapter: Optional<Int>.none)
+    #expect(try await stack.query(query) == nil)
+  }
+
+  @Test func overlappingQueryAndMutationUseTheirOwnAdapterAfterSuspension() async throws {
+    let firstStack = DBStack(adapter: "first")
+    let secondStack = DBStack(adapter: "second")
+
+    let firstStarted = AsyncStream<Void>.makeStream()
+    let secondStarted = AsyncStream<Void>.makeStream()
+    let resumeFirst = AsyncStream<Void>.makeStream()
+    let resumeSecond = AsyncStream<Void>.makeStream()
+    defer {
+      resumeFirst.continuation.finish()
+      resumeSecond.continuation.finish()
+    }
+
+    let first = Task {
+      try await firstStack.query(ReadDependency {
+        firstStarted.continuation.finish()
+        for await _ in resumeFirst.stream {}
+      })
+    }
+    for await _ in firstStarted.stream {}
+
+    let second = Task {
+      try await secondStack.mutate(ReadDependency {
+        secondStarted.continuation.finish()
+        for await _ in resumeSecond.stream {}
+      })
+    }
+    for await _ in secondStarted.stream {}
+
+    resumeFirst.continuation.finish()
+    #expect(try await first.value == "first")
+    resumeSecond.continuation.finish()
+    #expect(try await second.value == "second")
   }
 
 }

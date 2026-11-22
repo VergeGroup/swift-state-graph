@@ -142,13 +142,30 @@ import StateGraphAsyncDataStore
 Open the `AsyncDataStore` SwiftUI preview in the Development project to try
 offset pagination and reload.
 
+### Database stack
+
+Select the `StateGraphSync` library product for `DBStack`.
+This product also provides the `StateGraphNormalization` module for typed IDs
+and local entity storage.
+
+```swift
+.product(name: "StateGraphSync", package: "swift-state-graph")
+```
+
+```swift
+import StateGraphSync
+```
+
 ### Dynamic Linking
 
-`StateGraph`, `StateGraphAsyncDataStore`, and `StateGraphNormalization` are
-dynamic library products. StateGraph owns process-wide tracking and
+`StateGraph`, `StateGraphAsyncDataStore`, `StateGraphNormalization`, and
+`StateGraphSync` are dynamic library products. StateGraph owns process-wide tracking and
 transaction context. Choose one product that provides the graph runtime for the
 entire app, including its feature frameworks. Use `StateGraph` for the core
 module alone or `StateGraphAsyncDataStore` for both modules.
+
+Choose `StateGraphNormalization` for normalization alone or `StateGraphSync`
+to use `DBStack` with the normalization module across the app.
 
 The application target should embed the produced frameworks. Dependent dynamic
 frameworks should link them without embedding additional copies.
@@ -311,7 +328,7 @@ For detailed guides, see the [Documentation](Sources/StateGraph/Documentation.do
 - [UIKit Integration](Sources/StateGraph/Documentation.docc/UIKit-Integration.md) - withGraphTracking patterns
 - [UserDefaults](Sources/StateGraph/Documentation.docc/UserDefaults.md) - Persistent values composed with Stored nodes
 - [Data Normalization](Sources/StateGraph/Documentation.docc/Data-Normalization.md) - EntityStore for relational data
-- [QueryStack, EntityCollection and TanStack DB](Documentation/Guides/EntityCollection-and-TanStack-DB.md) - A partially loaded social feed with shared posts, Todo details and pagination, and REST-backed reads and writes in SwiftUI and React
+- [DBStack and TanStack DB](Documentation/Guides/DBStack-and-TanStack-DB.md) - A partially loaded social feed with shared posts, Todo details and pagination, and optimistic writes with TanStack DB
 - [Migration from Observable](Sources/StateGraph/Documentation.docc/Migration-from-Observable.md) - Step-by-step guide
 
 ## Advanced Topics

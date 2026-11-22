@@ -12,19 +12,19 @@ import TypedIdentifier
 /// Like other Swift value types, copying an entity store creates an independent
 /// logical collection. The underlying dictionary uses copy-on-write storage.
 /// Copying a store does not clone reference-type entities contained in it.
-public struct EntityStore<T: TypedIdentifiable & Sendable>: Sendable {
+public struct EntityStore<Entity: TypedIdentifiable & Sendable>: Sendable {
 
-  private var entities: [T.TypedID: T]
+  private var entities: [Entity.TypedID: Entity]
 
   /// Creates an entity store.
   ///
   /// - Parameter entities: The initial entities, keyed by typed identifier.
-  public init(entities: consuming [T.TypedID: T] = [:]) {
+  public init(entities: consuming [Entity.TypedID: Entity] = [:]) {
     self.entities = entities
   }
 
   /// Returns the entity associated with `id`.
-  public func get(by id: T.TypedID) -> T? {
+  public func get(by id: Entity.TypedID) -> Entity? {
     entities[id]
   }
 
@@ -32,17 +32,17 @@ public struct EntityStore<T: TypedIdentifiable & Sendable>: Sendable {
   ///
   /// The returned array has independent collection storage. Reference-type
   /// entities in that array are not cloned.
-  public func getAll() -> [T] {
+  public func getAll() -> [Entity] {
     Array(entities.values)
   }
 
   /// Inserts an entity, replacing an existing entity with the same identifier.
-  public mutating func add(_ entity: T) {
+  public mutating func add(_ entity: Entity) {
     entities[entity.id] = entity
   }
 
   /// Inserts entities, replacing existing entities with matching identifiers.
-  public mutating func add(_ newEntities: some Sequence<T>) {
+  public mutating func add(_ newEntities: some Sequence<Entity>) {
     for entity in newEntities {
       entities[entity.id] = entity
     }
@@ -52,24 +52,24 @@ public struct EntityStore<T: TypedIdentifiable & Sendable>: Sendable {
   ///
   /// For a reference-type entity, this operation does not clone the referenced
   /// object before passing it to `block`.
-  public mutating func modify(_ id: T.TypedID, _ block: (inout T) -> Void) {
+  public mutating func modify(_ id: Entity.TypedID, _ block: (inout Entity) -> Void) {
     guard var entity = entities[id] else { return }
     block(&entity)
     entities[id] = entity
   }
 
   /// Returns the entities that satisfy `predicate`.
-  public func filter(_ predicate: (T) -> Bool) -> [T] {
+  public func filter(_ predicate: (Entity) -> Bool) -> [Entity] {
     entities.values.filter(predicate)
   }
 
   /// Replaces the entity with the same identifier.
-  public mutating func update(_ entity: T) {
+  public mutating func update(_ entity: Entity) {
     entities[entity.id] = entity
   }
 
   /// Removes the entity associated with `id`.
-  public mutating func delete(_ id: T.TypedID) {
+  public mutating func delete(_ id: Entity.TypedID) {
     entities.removeValue(forKey: id)
   }
 
@@ -84,12 +84,12 @@ public struct EntityStore<T: TypedIdentifiable & Sendable>: Sendable {
   }
 
   /// Returns whether the store contains an entity associated with `id`.
-  public func contains(_ id: T.TypedID) -> Bool {
+  public func contains(_ id: Entity.TypedID) -> Bool {
     entities[id] != nil
   }
 
   /// Accesses the entity associated with `id`.
-  public subscript(_ id: T.TypedID) -> T? {
+  public subscript(_ id: Entity.TypedID) -> Entity? {
     get {
       entities[id]
     }
@@ -115,10 +115,10 @@ public struct EntityStore<T: TypedIdentifiable & Sendable>: Sendable {
   /// - Returns: The updated or newly inserted entity.
   @discardableResult
   public mutating func updateOrCreate<ResultError: Error>(
-    id: T.TypedID,
-    update: (inout T) throws(ResultError) -> Void,
-    create: () throws(ResultError) -> T
-  ) throws(ResultError) -> T {
+    id: Entity.TypedID,
+    update: (inout Entity) throws(ResultError) -> Void,
+    create: () throws(ResultError) -> Entity
+  ) throws(ResultError) -> Entity {
     if var entity = entities[id] {
       try update(&entity)
       entities[id] = entity
