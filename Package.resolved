@@ -1,5 +1,5 @@
 {
-  "originHash" : "50b8ce2e2738c33b1f09c74f11c9ca979d53d69bd6a6ce525eb0edb555d45c3f",
+  "originHash" : "9f53674d525f02f6edee75b6d73f47c97bb84310ef58ff6f296cefeba545c033",
   "pins" : [
     {
       "identity" : "swift-custom-dump",
@@ -26,6 +26,15 @@
       "state" : {
         "revision" : "59a99c458de4d2dee580529b61b4f78dca7b7fa6",
         "version" : "1.19.4"
+      }
+    },
+    {
+      "identity" : "swift-storybook",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/eure/swift-storybook",
+      "state" : {
+        "revision" : "edf96f09d2fde10ec049875718caa7afde787363",
+        "version" : "3.3.0"
       }
     },
     {

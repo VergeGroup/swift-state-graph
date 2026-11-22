@@ -38,7 +38,7 @@ let developmentTarget: Target = .target(
   dependencies: [
     // The app is the single owner that embeds each dynamic package runtime.
     .package(product: "StateGraphAsyncDataStore", type: .runtimeEmbedded),
-    .package(product: "StateGraphNormalization", type: .runtimeEmbedded),
+    .package(product: "StateGraphSync", type: .runtimeEmbedded),
     .package(product: "StorybookKit"),
   ],
   settings: .settings(
@@ -68,14 +68,28 @@ let project = Project(
     ),
   ],
   targets: [
-    developmentTarget
+    developmentTarget,
+    .target(
+      name: "DevelopmentTests",
+      destinations: .iOS,
+      product: .unitTests,
+      bundleId: "app.muukii.dev-swift-state-graph.tests",
+      deploymentTargets: .iOS("17.0"),
+      infoPlist: .default,
+      sources: ["DevelopmentTests/**"],
+      dependencies: [
+        .target(name: "Development"),
+        .package(product: "StateGraphSync", type: .runtime),
+      ],
+      settings: .settings(base: ["SWIFT_VERSION": "6.0"])
+    ),
   ],
   schemes: [
     .scheme(
       name: "Development",
       shared: true,
       buildAction: .buildAction(targets: ["Development"]),
-      testAction: .targets([]),
+      testAction: .targets(["DevelopmentTests"]),
       runAction: .runAction(
         configuration: .debug,
         executable: .executable("Development")

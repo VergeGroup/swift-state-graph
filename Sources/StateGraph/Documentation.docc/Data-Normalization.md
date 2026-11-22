@@ -63,6 +63,33 @@ clone them separately. When an entity collection is shared application state,
 keep the `EntityStore` in a `@GraphStored` property so reads participate in
 dependency tracking and successful writebacks invalidate dependents.
 
+### Resolving application queries
+
+Use the `StateGraphSync` product for application queries and mutations. Declare
+a `Query` for a read operation and a `Mutation` for a write operation. Each can
+use `@DBDependency` to read the adapter passed to `DBStack(adapter:)`.
+A query's `perform()` method can return a single entity, an optional value, or
+an app-defined paginated list.
+For example, `TodoByID` can reuse a Todo loaded by a list before requesting its
+detail endpoint.
+
+```swift
+import StateGraphSync
+
+let todo: Todo? = try await stack.query(TodoByID(id: id))
+let list = try await stack.query(OpenTodos(projectID: 42))
+try await list.loadNext()
+```
+
+For a relationship such as `todo.assignee`, use shared class instances in the
+application model. Give `Todo` an immutable ID and a stored relationship
+(`@GraphStored var assignee: Assignee?`). Track the target's name with
+`@GraphStored var name: String` on `Assignee`.
+When merging a response, use `updateOrCreate` on the assignee store first,
+then assign the returned instance to the todo as part of its own in-place
+update. A view holding the todo can read `todo.assignee?.name` and observe a
+rename delivered through another todo, a reassignment, or removal of the link.
+
 ### EntityStore Operations
 
 The `EntityStore` provides a comprehensive API for entity management:

@@ -33,6 +33,11 @@ let package = Package(
       name: "StateGraphNormalization",
       type: .dynamic,
       targets: ["StateGraphNormalization"]
+    ),
+    .library(
+      name: "StateGraphSync",
+      type: .dynamic,
+      targets: ["StateGraphNormalization", "StateGraphSync"]
     )
   ],
   dependencies: [
@@ -72,6 +77,9 @@ let package = Package(
         .product(name: "TypedIdentifier", package: "swift-typed-identifier")
       ]
     ),
+    .target(
+      name: "StateGraphSync"
+    ),
     .testTarget(
       name: "StateGraphMacroTests",
       dependencies: [
@@ -97,6 +105,14 @@ let package = Package(
       dependencies: [
         "StateGraph",
         "StateGraphNormalization"
+      ]
+    ),
+    .testTarget(
+      name: "StateGraphSyncTests",
+      dependencies: [
+        "StateGraph",
+        "StateGraphNormalization",
+        "StateGraphSync"
       ]
     ),
   ],

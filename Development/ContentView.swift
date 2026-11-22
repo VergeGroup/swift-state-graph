@@ -20,6 +20,10 @@ struct ContentView: View {
           Text("Graph transaction")
         }
 
+        NavigationLink("Ranked feed") {
+          FeedDemoView()
+        }
+
         NavigationLink("AsyncDataStore") {
           AsyncDataStoreDemoView()
         }
