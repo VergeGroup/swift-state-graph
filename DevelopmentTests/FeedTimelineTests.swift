@@ -4,11 +4,20 @@ import Testing
 private actor Server {
   enum Failure: Error { case offline, unexpectedCursor }
   let appendStarted = AsyncStream<Void>.makeStream()
-  let releaseAppend = AsyncStream<Void>.makeStream()
+  let appendCancelled = AsyncStream<Void>.makeStream()
+  private var appendWaiter: CheckedContinuation<Void, Never>?
+  private var holdAppend = true
+  var appendReads = 0
   var homeReads = 0
   var failNextRefresh = false
 
   func failRefresh() { failNextRefresh = true }
+
+  func releaseAppend() {
+    holdAppend = false
+    appendWaiter?.resume()
+    appendWaiter = nil
+  }
 
   func page(_ scope: FeedScope, after cursor: String?) async throws -> FeedPage {
     switch (scope, cursor) {
@@ -23,8 +32,16 @@ private actor Server {
       }
       return FeedPage(rows: [row("c", 3), row("b", 2, revision: 2)], nextCursor: "new")
     case (.home, "old"):
+      appendReads += 1
       appendStarted.continuation.finish()
-      for await _ in releaseAppend.stream {}
+      // Return the payload even if the transport receives cancellation.
+      if holdAppend {
+        await withTaskCancellationHandler {
+          await withCheckedContinuation { appendWaiter = $0 }
+        } onCancel: {
+          self.appendCancelled.continuation.finish()
+        }
+      }
       // The discarded response would overwrite B even with revision-based merging.
       return FeedPage(rows: [row("obsolete", 2, revision: 99)], nextCursor: nil)
     case (.home, "new"):
@@ -65,10 +82,16 @@ struct FeedTimelineTests {
 
     let append = Task { try await home.loadNext() }
     for await _ in server.appendStarted.stream {}
-    defer { server.releaseAppend.continuation.finish() }
-    try await home.refresh()
-    server.releaseAppend.continuation.finish()
+    try await home.loadNext()
+    #expect(await server.appendReads == 1)
+
+    let refresh = Task { try await home.refresh() }
+    for await _ in server.appendCancelled.stream {}
+    #expect(home.isLoading)
+    #expect(await server.homeReads == 1)
+    await server.releaseAppend()
     try await append.value
+    try await refresh.value
     #expect(home.entries.map(\.id) == ["c", "b"])
     #expect(retained.likes == 2)
     #expect(first.author.name == "Marina Chen")
@@ -94,8 +117,25 @@ struct FeedTimelineTests {
     await #expect(throws: Server.Failure.offline) { try await home.refresh() }
     #expect(home.entries.map(\.id) == ["a", "b"])
     #expect(!home.isLoading)
-    server.releaseAppend.continuation.finish()
+    await server.releaseAppend()
     try await home.loadNext()
     #expect(home.entries.map(\.id) == ["a", "b", "obsolete"])
+  }
+
+  @Test func cancellingTheWaiterDiscardsItsLateResponse() async throws {
+    let server = Server()
+    let home = try await FeedSession { try await server.page($0, after: $1) }
+      .makeStack().resolve(FeedQuery(scope: .home))
+    let post = try #require(home.entries.last?.post)
+    let append = Task { try await home.loadNext() }
+    for await _ in server.appendStarted.stream {}
+    append.cancel()
+    for await _ in server.appendCancelled.stream {}
+    await server.releaseAppend()
+    await #expect(throws: CancellationError.self) { try await append.value }
+    #expect(home.entries.map(\.id) == ["a", "b"])
+    #expect(post.likes == 1)
+    #expect(home.hasNextPage)
+    #expect(!home.isLoading)
   }
 }
