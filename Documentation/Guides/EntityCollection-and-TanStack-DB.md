@@ -157,6 +157,57 @@ Pulling to refresh requests the first page with no cursor. On success the timeli
 
 [Timeline and entity merge](../../Development/FeedTimeline.swift) · [Demo service and SwiftUI screens](../../Development/FeedDemoView.swift) · [Feed tests](../../DevelopmentTests/FeedTimelineTests.swift)
 
+### The same Home and profile feeds in TanStack DB
+
+For the Development demo, use a session-wide collection for posts, another for accounts, and one placement collection per timeline. Each placement has its own ID, references a post by ID, and records the position and reason supplied by the feed service. Two placements of the same post can appear in the same timeline. A live query joins the loaded rows and orders them by placement position. The React view can subscribe with `useLiveQuery(session.home.feed)`. [TanStack DB live queries](https://tanstack.com/db/latest/docs/guides/live-queries)
+
+```ts
+import {
+  BasicIndex, createCollection, createLiveQueryCollection, eq, localOnlyCollectionOptions,
+} from '@tanstack/react-db'
+
+type Post = { id: string; authorId: string; caption: string; likes: number; revision: number }
+type Account = { id: string; name: string; revision: number }
+type Placement = { id: string; postId: string; position: number; reason: string | null }
+
+function table<T extends { id: string }>() {
+  return createCollection(localOnlyCollectionOptions({ getKey: (row: T) => row.id }))
+}
+
+export function createFeedSession() {
+  const posts = table<Post>()
+  const accounts = table<Account>()
+  posts.createIndex(p => p.authorId, { indexType: BasicIndex })
+
+  function timeline() {
+    const placements = table<Placement>()
+    placements.createIndex(p => p.postId, { indexType: BasicIndex })
+    const feed = createLiveQueryCollection(q => q
+      .from({ slot: placements })
+      .innerJoin({ post: posts }, ({ slot, post }) => eq(slot.postId, post.id))
+      .innerJoin({ author: accounts }, ({ post, author }) => eq(post.authorId, author.id))
+      .orderBy(({ slot }) => slot.position, 'asc')
+      .select(({ slot, post, author }) => ({
+        id: slot.id, reason: slot.reason, caption: post.caption,
+        likes: post.likes, author: author.name,
+      })))
+    return { placements, feed }
+  }
+
+  return { posts, accounts, home: timeline(), profile: timeline() }
+}
+```
+
+The collections above hold the rows the app has received. The following page-loading policy reproduces the Swift demo. The app implements it for each timeline.
+
+1. **Load more.** The Home loader calls its Home endpoint with Home’s last successful cursor. The profile loader calls the profile endpoint with its own cursor. Capture the timeline’s generation before sending each request. When a page returns for the current generation, merge accounts and posts by ID and revision, append previously unseen placement IDs with positions in server order, and save the returned cursor. A successful page with `nextCursor: null` ends that sequence.
+2. **Pull to refresh.** Advance Home’s request generation and fetch its first page without a cursor. Keep the displayed rows and cursor while the request runs. Check the generation before writing *any* collection, including shared posts and accounts. On success, apply the newer entity fields, replace Home’s placements, and install its new cursor. A failure leaves the previous page and continuation available for retry.
+3. **Return to the profile.** Updating the ferry post from 29 to 30 likes updates both joined results. Removing the tide-pool placement from Home leaves its post and profile placement intact. The profile still shows ferry, tide pools, and trail in that order.
+
+**Where the built-in pager fits.** TanStack DB also documents a window-based approach. `useLiveInfiniteQuery` requests more rows of an ordered live query. An on-demand Query Collection’s `queryFn` can configure a pager with `createCursorPager({ queryClient, queryKey, fetchPage })` and call `pager.read({ offset, limit }, signal)` to fulfill that window from an opaque-cursor endpoint. Give Home and each profile a distinct page-cache key including the viewer, feed scope and ordering. The pager keeps the server pages and their cursors in TanStack Query’s `QueryClient`. A window can require several HTTP pages, including a lookahead row for `hasNextPage`. [Infinite query hook](https://tanstack.com/db/latest/docs/framework/react/reference/functions/useLiveInfiniteQuery) · [Opaque-cursor adapter and key design](https://tanstack.com/db/latest/docs/collections/query-collection#endpoints-with-opaque-cursors)
+
+The refresh behavior differs. A stale pager read rebuilds the previously loaded pages starting at page one. `pager.reset()` discards the cached sequence for that key, and a row-query refetch can still reuse fresh cursor pages. For the demo’s rule “replace Home with just the first page on success, keep its old cursor on failure,” the explicit per-timeline loader above controls when the new sequence becomes visible. Normalizing a nested REST payload and choosing the Home or profile endpoint are also application decisions. [Refreshing or cancelling a cursor sequence](https://tanstack.com/db/latest/docs/collections/query-collection#refresh-or-cancel-the-sequence)
+
 ## Read and write todos with EntityCollection
 
 The following flat REST example uses immutable `TodoRow` values for collection snapshots. An `EntityCollectionAdapter` handles both reads and writes. The collection runs requests serially and replaces rows by ID on confirmation. For screens that retain object relationships, use the shared class models and in-place merge above. A snapshot that contains a class reference points to its current fields. Keeping historical field values requires a value copy.
