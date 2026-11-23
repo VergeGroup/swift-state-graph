@@ -38,16 +38,13 @@ public actor AsyncDataStore<Header: AsyncDataStoreHeader> {
   /// Gives a handler access to the store's source value and permission to update it
   /// while its action is current and uncancelled.
   public struct Context: Sendable {
-    private weak var owner: AsyncDataStore?
     private let requestID: UInt64
     private let source: Stored<Header.Value>
 
     fileprivate init(
-      owner: AsyncDataStore,
       requestID: UInt64,
       source: Stored<Header.Value>
     ) {
-      self.owner = owner
       self.requestID = requestID
       self.source = source
     }
@@ -64,7 +61,7 @@ public actor AsyncDataStore<Header: AsyncDataStoreHeader> {
       on store: isolated AsyncDataStore,
       _ mutation: (inout Header.Value) -> Void
     ) -> Bool {
-      guard owner === store else { return false }
+      guard source === store.source else { return false }
       return store.update(requestID: requestID, mutation)
     }
   }
@@ -210,7 +207,7 @@ public actor AsyncDataStore<Header: AsyncDataStoreHeader> {
     actionPhase.wrappedValue = .running(action)
     guard !Task.isCancelled else { return }
 
-    let context = Context(owner: self, requestID: requestID, source: source)
+    let context = Context(requestID: requestID, source: source)
     await Header.receive(action: action, header: header, context: context, on: self)
   }
 

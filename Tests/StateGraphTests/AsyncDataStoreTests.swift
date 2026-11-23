@@ -154,6 +154,32 @@ struct AsyncDataStoreTests {
   }
 
   @Test
+  func contextCannotUpdateAnotherStoreWithTheSameRequestID() async throws {
+    let savedContext = AllocatedLock<Store.Context?>(initialState: nil)
+    let first = Store(
+      header: Header { _, context, _ in
+        savedContext.withLock { $0 = context }
+      },
+      initial: [Int]()
+    )
+    await first.sendAndWait(action: .first)
+    let firstContext = try #require(savedContext.withLock { $0 })
+
+    let second = Store(
+      header: Header { _, context, store in
+        #expect(!firstContext.update(on: store) { _ in
+          Issue.record("A context from another store must not run the mutation closure")
+        })
+        #expect(context.update(on: store) { $0.append(2) })
+      },
+      initial: [Int]()
+    )
+    await second.sendAndWait(action: .first)
+    #expect(first.sourceValue.isEmpty)
+    #expect(second.sourceValue == [2])
+  }
+
+  @Test
   func synchronousSendsAndSendAndWaitShareFIFOAdmission() async throws {
     let started = TestSignal()
     let wasCancelled = AllocatedLock(initialState: false)
