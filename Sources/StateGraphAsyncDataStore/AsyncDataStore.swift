@@ -25,6 +25,9 @@ public protocol AsyncDataStoreHeader: SendableMetatype {
 }
 
 /// Runs one action at a time, including across suspension points in the handler.
+///
+/// Handlers and synchronous readers can share references contained in the state.
+/// Keep shared objects immutable or synchronize access to their mutable state.
 public actor AsyncDataStore<Header: AsyncDataStoreHeader> {
 
   public enum Phase: Sendable {
