@@ -3,7 +3,6 @@
 A graph-based reactive state management library for Swift.
 For managing external(escaping) state, inspired by the concepts of React, Jotai and Recoil.
 
-[![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/vergegroup/swift-state-graph)
 ![Swift 6.0+](https://img.shields.io/badge/Swift-6.0+-orange.svg)
 ![iOS 17+](https://img.shields.io/badge/iOS-17+-blue.svg)
 
