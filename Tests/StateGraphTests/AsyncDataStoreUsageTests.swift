@@ -16,14 +16,19 @@ struct AsyncDataStoreUsageTests {
     let pageSize: Int
     let fetchPage: @MainActor (_ offset: Int, _ limit: Int) async -> [Int]
 
-    static func receive(action: Action, header: Self, context: AsyncDataStore<Self>.Context) async {
+    static func receive(
+      action: Action,
+      header: Self,
+      context: AsyncDataStore<Self>.Context,
+      on store: isolated AsyncDataStore<Self>
+    ) async {
       switch action {
       case .loadNextPage:
         guard let offset = context.value.nextOffset else { return }
         let items = await header.fetchPage(offset, header.pageSize)
 
         // This endpoint signals the last page with a response shorter than the limit.
-        context.update { state in
+        context.update(on: store) { state in
           state.items.append(contentsOf: items)
           state.nextOffset = items.count < header.pageSize ? nil : offset + items.count
         }
@@ -78,7 +83,12 @@ struct AsyncDataStoreUsageTests {
 
     let fetchPage: @MainActor (_ cursor: String?) async -> Page
 
-    static func receive(action: Action, header: Self, context: AsyncDataStore<Self>.Context) async {
+    static func receive(
+      action: Action,
+      header: Self,
+      context: AsyncDataStore<Self>.Context,
+      on store: isolated AsyncDataStore<Self>
+    ) async {
       switch action {
       case .loadToEnd:
         while !Task.isCancelled {
@@ -92,7 +102,7 @@ struct AsyncDataStoreUsageTests {
           let page = await header.fetchPage(cursor)
 
           // Publish each page and its resume position together.
-          let didPublish = context.update { state in
+          let didPublish = context.update(on: store) { state in
             state.items.append(contentsOf: page.items)
             state.position = page.nextCursor.map(Position.next) ?? .end
           }
@@ -145,7 +155,12 @@ struct AsyncDataStoreUsageTests {
     // bound to an exclusive upper bound, expressed in Unix seconds.
     let fetchRange: @MainActor (Range<Int>) async -> [Int]
 
-    static func receive(action: Action, header: Self, context: AsyncDataStore<Self>.Context) async {
+    static func receive(
+      action: Action,
+      header: Self,
+      context: AsyncDataStore<Self>.Context,
+      on store: isolated AsyncDataStore<Self>
+    ) async {
       let loaded = context.value.loadedRange
       let range: Range<Int>
       switch action {
@@ -160,7 +175,7 @@ struct AsyncDataStoreUsageTests {
 
       let timestamps = await header.fetchRange(range)
 
-      context.update { state in
+      context.update(on: store) { state in
         switch action {
         case .loadOlder:
           state.timestamps.insert(contentsOf: timestamps, at: 0)
@@ -207,11 +222,16 @@ struct AsyncDataStoreUsageTests {
 
     let fetchImage: @MainActor () async -> CGImage?
 
-    static func receive(action: Action, header: Self, context: AsyncDataStore<Self>.Context) async {
+    static func receive(
+      action: Action,
+      header: Self,
+      context: AsyncDataStore<Self>.Context,
+      on store: isolated AsyncDataStore<Self>
+    ) async {
       switch action {
       case .load:
         guard context.value == nil, let image = await header.fetchImage() else { return }
-        context.update { $0 = image }
+        context.update(on: store) { $0 = image }
       }
     }
   }

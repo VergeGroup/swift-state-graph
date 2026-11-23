@@ -63,9 +63,14 @@ struct AsyncDataStoreDemoView: View {
       "Lakeside Track",
     ]
 
-    static func receive(action: Action, header: Self, context: AsyncDataStore<Self>.Context) async {
+    static func receive(
+      action: Action,
+      header: Self,
+      context: AsyncDataStore<Self>.Context,
+      on store: isolated AsyncDataStore<Self>
+    ) async {
       if case .reload = action {
-        context.update { $0 = Value() }
+        context.update(on: store) { $0 = Value() }
       }
 
       guard let offset = context.value.nextOffset else { return }
@@ -76,7 +81,7 @@ struct AsyncDataStoreDemoView: View {
 
       let page = header.trails.dropFirst(offset).prefix(3)
       let end = offset + page.count
-      context.update { feed in
+      context.update(on: store) { feed in
         feed.titles.append(contentsOf: page)
         feed.nextOffset = end < header.trails.count ? end : nil
       }

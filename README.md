@@ -155,6 +155,19 @@ import StateGraphAsyncDataStore
 Open the `AsyncDataStore` SwiftUI preview in the Development project to try
 offset pagination and reload.
 
+Each store runs its action handler on its own actor. Implement
+`receive(action:header:context:on:)` with an `isolated AsyncDataStore<Self>`
+parameter and pass that store to `context.update(on:_:)`. The initializer
+transfers the header to the store actor, where `header` can be accessed.
+The value follows the same `SendableMetatype` constraint as `Stored`.
+To publish changes to multiple graph nodes together, open a synchronous
+`withGraphTransaction` on the store actor after awaiting any work that
+produces the changes.
+
+`send` enqueues synchronously and `sendAndWait` uses the same queue. A
+`.dropCurrent` submission cancels the running action when the actor processes
+it. `value` and `phase` are synchronous, tracked reads.
+
 ### Dynamic Linking
 
 `StateGraph`, `StateGraphAsyncDataStore`, and `StateGraphNormalization` are
