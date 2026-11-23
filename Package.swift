@@ -22,6 +22,11 @@ let package = Package(
       type: .dynamic,
       targets: ["StateGraph"]
     ),
+    .library(
+      name: "StateGraphAsyncDataStore",
+      type: .dynamic,
+      targets: ["StateGraph", "StateGraphAsyncDataStore"]
+    ),
     // Normalization is an independent module. Keeping it dynamic preserves its
     // public Swift type identity when several frameworks consume it.
     .library(
@@ -57,6 +62,10 @@ let package = Package(
       ]
     ),
     .target(
+      name: "StateGraphAsyncDataStore",
+      dependencies: ["StateGraph"]
+    ),
+    .target(
       name: "StateGraphNormalization",
       dependencies: [
         "StateGraphNormalizationMacro",
@@ -81,7 +90,7 @@ let package = Package(
     ),
     .testTarget(
       name: "StateGraphTests",
-      dependencies: ["StateGraph"]
+      dependencies: ["StateGraph", "StateGraphAsyncDataStore"]
     ),
     .testTarget(
       name: "StateGraphNormalizationTests",

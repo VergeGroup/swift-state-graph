@@ -20,6 +20,10 @@ struct ContentView: View {
           Text("Graph transaction")
         }
 
+        NavigationLink("AsyncDataStore") {
+          AsyncDataStoreDemoView()
+        }
+
         NavigationLink {
           Observe_specific(model: .init(name: "A", count: 1))
         } label: { 
