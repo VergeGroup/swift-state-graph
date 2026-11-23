@@ -63,7 +63,12 @@ struct AsyncDataStoreDemoView: View {
       "Lakeside Track",
     ]
 
-    static func receive(action: Action, header: Self, context: AsyncDataStore<Self>.Context) async {
+    static func receive(
+      action: Action,
+      header: Self,
+      context: AsyncDataStore<Self>.Context,
+      on store: isolated AsyncDataStore<Self>
+    ) async {
       if case .reload = action {
         context.update { $0 = Value() }
       }

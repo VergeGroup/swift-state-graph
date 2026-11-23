@@ -16,7 +16,12 @@ struct AsyncDataStoreUsageTests {
     let pageSize: Int
     let fetchPage: @MainActor (_ offset: Int, _ limit: Int) async -> [Int]
 
-    static func receive(action: Action, header: Self, context: AsyncDataStore<Self>.Context) async {
+    static func receive(
+      action: Action,
+      header: Self,
+      context: AsyncDataStore<Self>.Context,
+      on store: isolated AsyncDataStore<Self>
+    ) async {
       switch action {
       case .loadNextPage:
         guard let offset = context.value.nextOffset else { return }
@@ -78,7 +83,12 @@ struct AsyncDataStoreUsageTests {
 
     let fetchPage: @MainActor (_ cursor: String?) async -> Page
 
-    static func receive(action: Action, header: Self, context: AsyncDataStore<Self>.Context) async {
+    static func receive(
+      action: Action,
+      header: Self,
+      context: AsyncDataStore<Self>.Context,
+      on store: isolated AsyncDataStore<Self>
+    ) async {
       switch action {
       case .loadToEnd:
         while !Task.isCancelled {
@@ -145,7 +155,12 @@ struct AsyncDataStoreUsageTests {
     // bound to an exclusive upper bound, expressed in Unix seconds.
     let fetchRange: @MainActor (Range<Int>) async -> [Int]
 
-    static func receive(action: Action, header: Self, context: AsyncDataStore<Self>.Context) async {
+    static func receive(
+      action: Action,
+      header: Self,
+      context: AsyncDataStore<Self>.Context,
+      on store: isolated AsyncDataStore<Self>
+    ) async {
       let loaded = context.value.loadedRange
       let range: Range<Int>
       switch action {
@@ -207,7 +222,12 @@ struct AsyncDataStoreUsageTests {
 
     let fetchImage: @MainActor () async -> CGImage?
 
-    static func receive(action: Action, header: Self, context: AsyncDataStore<Self>.Context) async {
+    static func receive(
+      action: Action,
+      header: Self,
+      context: AsyncDataStore<Self>.Context,
+      on store: isolated AsyncDataStore<Self>
+    ) async {
       switch action {
       case .load:
         guard context.value == nil, let image = await header.fetchImage() else { return }

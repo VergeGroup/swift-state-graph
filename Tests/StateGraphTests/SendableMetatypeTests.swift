@@ -1,3 +1,4 @@
+import StateGraphAsyncDataStore
 import Testing
 
 @testable import StateGraph
@@ -31,6 +32,29 @@ private func makeEquatableComputed<Value: Equatable & SendableMetatype>(
 @Suite
 struct SendableMetatypeTests {
 
+  private final class ReferenceValueHeader: AsyncDataStoreHeader {
+    typealias Value = NonSendableEquatableValue
+    typealias Store = AsyncDataStore<ReferenceValueHeader>
+
+    enum Action {
+      case increment
+    }
+
+    private var increment = 1
+
+    static func receive(
+      action: Action,
+      header: ReferenceValueHeader,
+      context: Store.Context,
+      on store: isolated Store
+    ) async {
+      #expect(store.header === header)
+      let next = context.value.rawValue + header.increment
+      header.increment += 1
+      context.update { $0 = NonSendableEquatableValue(rawValue: next) }
+    }
+  }
+
   @Test
   func equatableNodesAcceptNonSendableValues() {
     let stored = makeEquatableStored(NonSendableEquatableValue(rawValue: 1))
@@ -39,5 +63,24 @@ struct SendableMetatypeTests {
     }
 
     #expect(computed.wrappedValue.rawValue == 2)
+  }
+
+  @Test
+  @MainActor
+  func asyncDataStoreAcceptsNonSendableHeaderAndValue() async {
+    let store = AsyncDataStore(
+      header: ReferenceValueHeader(),
+      initial: NonSendableEquatableValue(rawValue: 1)
+    )
+    store.setReduce { $0 = NonSendableEquatableValue(rawValue: $0.rawValue * 10) }
+
+    #expect(store.value.rawValue == 10)
+    await store.sendAndWait(action: .increment)
+    #expect(store.sourceValue.rawValue == 2)
+    #expect(store.value.rawValue == 20)
+
+    await store.sendAndWait(action: .increment)
+    #expect(store.sourceValue.rawValue == 4)
+    #expect(store.value.rawValue == 40)
   }
 }
