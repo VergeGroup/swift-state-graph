@@ -54,11 +54,13 @@ public actor AsyncDataStore<Header: AsyncDataStoreHeader> {
     /// Publishes one state change on the issuing store's actor.
     /// Returns false if the context belongs to a different store or its action is no longer current and uncancelled.
     ///
+    /// Inside `receive`, the store is inferred from the caller's isolation.
+    ///
     /// For reference-backed state, assign an independent value to publish a tracked
     /// change rather than mutating an object already held by the store.
     @discardableResult
     public func update(
-      on store: isolated AsyncDataStore,
+      on store: isolated AsyncDataStore = #isolation,
       _ mutation: (inout Header.Value) -> Void
     ) -> Bool {
       guard source === store.source else { return false }

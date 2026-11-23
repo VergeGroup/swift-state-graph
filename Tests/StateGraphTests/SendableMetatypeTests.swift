@@ -51,7 +51,7 @@ struct SendableMetatypeTests {
       #expect(store.header === header)
       let next = context.value.rawValue + header.increment
       header.increment += 1
-      context.update(on: store) { $0 = NonSendableEquatableValue(rawValue: next) }
+      context.update { $0 = NonSendableEquatableValue(rawValue: next) }
     }
   }
 

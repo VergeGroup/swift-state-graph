@@ -28,7 +28,7 @@ struct AsyncDataStoreUsageTests {
         let items = await header.fetchPage(offset, header.pageSize)
 
         // This endpoint signals the last page with a response shorter than the limit.
-        context.update(on: store) { state in
+        context.update { state in
           state.items.append(contentsOf: items)
           state.nextOffset = items.count < header.pageSize ? nil : offset + items.count
         }
@@ -102,7 +102,7 @@ struct AsyncDataStoreUsageTests {
           let page = await header.fetchPage(cursor)
 
           // Publish each page and its resume position together.
-          let didPublish = context.update(on: store) { state in
+          let didPublish = context.update { state in
             state.items.append(contentsOf: page.items)
             state.position = page.nextCursor.map(Position.next) ?? .end
           }
@@ -175,7 +175,7 @@ struct AsyncDataStoreUsageTests {
 
       let timestamps = await header.fetchRange(range)
 
-      context.update(on: store) { state in
+      context.update { state in
         switch action {
         case .loadOlder:
           state.timestamps.insert(contentsOf: timestamps, at: 0)
@@ -231,7 +231,7 @@ struct AsyncDataStoreUsageTests {
       switch action {
       case .load:
         guard context.value == nil, let image = await header.fetchImage() else { return }
-        context.update(on: store) { $0 = image }
+        context.update { $0 = image }
       }
     }
   }
